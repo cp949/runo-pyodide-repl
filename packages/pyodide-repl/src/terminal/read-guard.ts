@@ -1,0 +1,51 @@
+/**
+ * REPL 읽기(`readLine` 요청)와 stdin 읽기(`readInput` 알림)는 같은 `Readline`을 쓴다. `readline.read()`는 이미 열린 읽기를
+ * 교체하고 옛 읽기의 promise를 끝내지 않는다. 프롬프트를 기다리는 동안 worker에서 도는 배경 콜백이 `input()`을 부르면
+ * stdin 읽기가 REPL 읽기를 교체해, 사용자가 친 REPL 줄이 stdin으로 가고 `readLine` 응답이 오지 않아 이후 입력이 멈춘다
+ * (04-stdin-input.md 3.2). 그래서 stdin 읽기는 활성 REPL 읽기의 결과가 정해진 뒤에 시작한다.
+ *
+ * - 교착 없음: worker는 stdin 읽기 동안 동기 대기하고 REPL 응답은 포트에 큐잉된다(01-protocols.md 1.3). REPL 줄이 끝난 뒤
+ *   stdin 읽기가 끝나 콜백이 돌아가면 worker가 그 응답을 처리한다.
+ * - REPL 읽기는 기다리지 않고 바로 부른다(시작 타이밍 불변). stdin 읽기끼리는 직렬화하지 않는다: worker가 동기 대기라 두 stdin
+ *   읽기가 겹치지 않는다.
+ * - REPL 읽기가 줄·취소·실패 어느 쪽으로 끝나도 stdin 읽기는 진행한다. 실패는 원본 promise 그대로 REPL 호출자에게 간다.
+ * - 겹침 거절(`createRepl`의 `reading`)은 가드 바깥에서 검사한다. 거절된 요청을 가드가 추적하면 실제 활성 REPL 읽기를 잃어
+ *   stdin 읽기가 앞당겨진다.
+ */
+const ignore = () => {};
+
+export interface ReadGuardDeps<L, I> {
+  /** REPL 읽기(`repl-reader`). 즉시 부른다. */
+  readLine(prompt: string): Promise<L>;
+  /** stdin 읽기(`stdin-reader`). 활성 REPL 읽기가 끝난 뒤 부른다. */
+  readInput(): Promise<I>;
+}
+
+export interface ReadGuard<L, I> {
+  readLine(prompt: string): Promise<L>;
+  readInput(): Promise<I>;
+}
+
+/**
+ * 돌려준 `readLine`은 반환 promise를 "활성 REPL 읽기"로 추적하고, `readInput`은 그 읽기가 끝난 뒤 원본을 부른다.
+ * 목록 재그리기 등으로 읽기가 새로 시작돼도 `readLine`이 돌려주는 promise는 바뀌지 않으므로 그 promise가 최종 종료 시점이다.
+ * 제네릭은 RD-008이 REPL 읽기 결과를 `string | null`로 넓힐 때 시그니처를 바꾸지 않으려는 것이다.
+ */
+export function createReadGuard<L, I>(
+  deps: ReadGuardDeps<L, I>,
+): ReadGuard<L, I> {
+  // 활성 REPL 읽기가 끝나면(줄·취소·실패 어느 쪽이든) 이행된다. 읽기가 없거나 끝났으면 이미 이행된 promise다.
+  let replRead: Promise<void> = Promise.resolve();
+  return {
+    readLine(prompt) {
+      const read = deps.readLine(prompt);
+      // 가드 내부 체인만 실패를 삼킨다. 호출자가 받는 `read`는 그대로다.
+      replRead = read.then(ignore, ignore);
+      return read;
+    },
+    async readInput() {
+      await replRead;
+      return deps.readInput();
+    },
+  };
+}

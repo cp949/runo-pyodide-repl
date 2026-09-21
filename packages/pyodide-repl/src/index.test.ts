@@ -6,7 +6,11 @@
  * worker는 가짜(`postMessage`·`terminate`만 기록)이고, worker 역할의 rpc는 시험이 프레임의 포트에 직접 만든다.
  * RD-005: 줄 읽기는 worker가 RPC `readLine`을 요청하는 경로가 유일하다. RD-003의 줄 편집 시험은 worker 역할 rpc가
  * `readLine`을 요청하는 형태로 옮겼고, `sessionTerminated` 알림 → `onStatus('terminated')`를 더했다.
+ * RD-006: worker의 `readInput` 알림 → stdin 읽기(꼬리 프롬프트) → 메일박스 `deliver`·`fail`, REPL 읽기와의 순서(read-guard).
+ * worker가 없어 메일박스를 아무도 가져가지 않으므로 main이 쓴 값이 그대로 남는다. 실제 `Atomics.wait` 왕복은
+ * `protocol/thread-scenario.test.ts`가 본다.
  */
+import { Readline } from "@cp949/runo-xterm-readline";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createRepl,
@@ -19,6 +23,7 @@ import { parseInitFrame, type InitFrame } from "./protocol/init-frame";
 import { createRpc, type Rpc } from "./protocol/rpc";
 import {
   createFakeTerminal,
+  type FakeTerminal,
   type FakeTerminalOptions,
 } from "./test/fake-terminal";
 
@@ -155,6 +160,50 @@ async function startRead(
   fake.flush();
   return { line };
 }
+
+/** `term.write("", cb)`를 요청한 횟수. 읽기가 시작되는 중이라는 신호다(`startRead` 설명 참고). */
+const flushRequestCount = (fake: FakeTerminal) =>
+  fake.written.filter((text) => text === "").length;
+
+/** 읽기 요청이 도착해 write 콜백을 배출하면 읽기가 시작된다. `before`는 요청 전의 `flushRequestCount`다. */
+async function drainReadStart(fake: FakeTerminal, before: number) {
+  await waitFor(() => flushRequestCount(fake) > before);
+  fake.flush();
+  await tick();
+  fake.flush();
+}
+
+/** worker 역할 rpc로 `readInput`을 알리고 stdin 읽기가 시작될 때까지 기다린다. 응답 통로는 메일박스뿐이라 반환값이 없다. */
+async function startInputRead(
+  session: Pick<ReturnType<typeof startSession>, "fake" | "workerRpc">,
+) {
+  const before = flushRequestCount(session.fake);
+  session.workerRpc.notify("readInput", true);
+  await drainReadStart(session.fake, before);
+}
+
+// 메일박스 값(01-protocols.md 2.1): ctrl = [STATE, BYTE_LENGTH, FLAGS, 예약], STATE 0=IDLE·1=READY·3=ERROR, FLAGS 비트 0=마지막 청크.
+const MAILBOX = { IDLE: 0, READY: 1, ERROR: 3 } as const;
+const FLAG_LAST = 1;
+
+/** 초기화 프레임의 메일박스를 읽는다. main의 `createMailboxWriter`가 쓰는 것과 같은 SharedArrayBuffer다. */
+function readMailbox(
+  session: Pick<ReturnType<typeof startSession>, "fakeWorker">,
+) {
+  const { stdinCtrl, stdinData } = session.fakeWorker.frame();
+  const length = Atomics.load(stdinCtrl, 1);
+  return {
+    state: Atomics.load(stdinCtrl, 0),
+    length,
+    text: new TextDecoder().decode(stdinData.slice(0, length)),
+    last: (Atomics.load(stdinCtrl, 2) & FLAG_LAST) !== 0,
+  };
+}
+
+/** 메일박스가 READY(전달됨)가 될 때까지 기다린다. `deliver`는 비동기라 Enter 직후에는 아직일 수 있다. */
+const waitDelivered = (
+  session: Pick<ReturnType<typeof startSession>, "fakeWorker">,
+) => waitFor(() => readMailbox(session).state === MAILBOX.READY);
 
 beforeEach(() => {
   localStorage.clear();
@@ -507,6 +556,172 @@ describe("격리 페이지의 세션 시작", () => {
 
     expect(first.bytes()).toBe("t1");
     expect(second.bytes()).toBe("t2");
+  });
+});
+
+describe.each([
+  { mode: "동기", asyncWrite: false },
+  { mode: "비동기", asyncWrite: true },
+])("input() 읽기(write 콜백이 $mode 모드일 때)", ({ asyncWrite }) => {
+  /** 실제 `Readline.read`를 그대로 부르면서 받은 프롬프트를 기록한다(프로토타입 메서드라 addon 인스턴스에도 적용된다). */
+  function spyPrompts() {
+    const read = vi.spyOn(Readline.prototype, "read");
+    return () => read.mock.calls.map(([prompt]) => prompt);
+  }
+
+  test("readInput 알림에 직전 출력의 꼬리를 프롬프트로 한 줄을 읽어 메일박스에 전달한다", async () => {
+    const session = startSession({}, { asyncWrite });
+    const prompts = spyPrompts();
+    session.workerRpc.notify("write", "x: ");
+    await startInputRead(session);
+
+    session.fake.type("abc\r");
+    await waitDelivered(session);
+
+    expect(prompts()).toEqual(["x: "]);
+    expect(readMailbox(session)).toMatchObject({ text: "abc", last: true });
+    // 프롬프트와 입력이 Enter 때 한 조각으로 다시 그려진다 — 화면에는 `x: abc` 한 줄이 남는다.
+    expect(session.fake.written).toContain("x: abc");
+  });
+
+  test("꼬리가 없으면 프롬프트 없이 읽는다", async () => {
+    const session = startSession({}, { asyncWrite });
+    const prompts = spyPrompts();
+    await startInputRead(session);
+
+    session.fake.type("abc\r");
+    await waitDelivered(session);
+
+    expect(prompts()).toEqual([""]);
+    expect(readMailbox(session)).toMatchObject({ text: "abc", last: true });
+  });
+
+  test("빈 줄 Enter는 빈 문자열을 전달한다(길이 0, 마지막 청크)", async () => {
+    const session = startSession({}, { asyncWrite });
+    await startInputRead(session);
+
+    session.fake.type("\r");
+    await waitDelivered(session);
+
+    expect(readMailbox(session)).toMatchObject({
+      length: 0,
+      text: "",
+      last: true,
+    });
+  });
+
+  test("REPL 읽기가 열려 있는 동안 도착한 readInput은 그 줄을 Enter한 뒤에 시작하고 REPL 줄은 REPL 응답이 된다", async () => {
+    const session = startSession({}, { asyncWrite });
+    const { fake, workerRpc } = session;
+    const prompts = spyPrompts();
+    const { line } = await startRead(session);
+    const outcome = observe(line);
+
+    // 프롬프트를 기다리는 사이 배경 콜백의 `input("bg> ")`가 프롬프트를 쓰고 stdin 읽기를 요청한다.
+    workerRpc.notify("write", "bg> ");
+    workerRpc.notify("readInput", true);
+    await settle();
+    expect(prompts()).toEqual([">>> "]);
+    expect(readMailbox(session).state).toBe(MAILBOX.IDLE);
+    expect(outcome().state).toBe("pending");
+
+    // 사용자가 REPL 줄을 친다. 이 줄은 REPL 응답이 되고 stdin 읽기는 그 뒤에 배경 프롬프트(`bg> `)로 시작한다.
+    const before = flushRequestCount(fake);
+    fake.type("x = 41\r");
+    await drainReadStart(fake, before);
+    await waitFor(() => outcome().state === "resolved");
+    expect(outcome()).toEqual({ state: "resolved", value: "x = 41" });
+    expect(prompts()).toEqual([">>> ", "bg> "]);
+    expect(readMailbox(session).state).toBe(MAILBOX.IDLE);
+
+    fake.type("hello\r");
+    await waitDelivered(session);
+    expect(readMailbox(session)).toMatchObject({ text: "hello", last: true });
+  });
+
+  test("겹치는 readLine 요청의 거절이 read-guard의 활성 REPL 읽기 추적을 깨지 않는다", async () => {
+    const session = startSession({}, { asyncWrite });
+    const { fake, workerRpc } = session;
+    const prompts = spyPrompts();
+    const { line: first } = await startRead(session);
+    const second = observe(workerRpc.call("readLine", ">>> ", undefined, true));
+    await waitFor(() => second().state === "rejected");
+
+    // 거절된 요청을 가드가 활성 읽기로 추적하면 진짜 활성 REPL 읽기를 잃어 stdin 읽기가 앞당겨진다.
+    workerRpc.notify("readInput", true);
+    await settle();
+    expect(prompts()).toEqual([">>> "]);
+
+    const before = flushRequestCount(fake);
+    fake.type("ok\r");
+    await drainReadStart(fake, before);
+    await expect(first).resolves.toBe("ok");
+    expect(prompts()).toEqual([">>> ", ""]);
+    fake.type("hello\r");
+    await waitDelivered(session);
+    expect(readMailbox(session)).toMatchObject({ text: "hello", last: true });
+  });
+
+  test("dispose하면 대기 중인 stdin 읽기가 끝나도 메일박스를 쓰지 않고 오류도 내지 않는다", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const session = startSession({}, { asyncWrite });
+    session.workerRpc.notify("write", "x: ");
+    await startInputRead(session);
+
+    // `readline.dispose()`가 대기 중인 읽기를 reject한다. dispose된 세션의 worker는 이미 terminate됐으므로 `fail`하지 않는다.
+    session.handle.dispose();
+    session.fake.flush();
+    await settle();
+
+    expect(readMailbox(session).state).toBe(MAILBOX.IDLE);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  test("폭을 넘는 꼬리를 정리하려고 flush를 기다리는 중에 dispose해도 stdin 읽기의 뒤늦은 콜백이 해제된 buffer를 읽지 않는다", async () => {
+    const { handle, fake, workerRpc } = startSession({}, { asyncWrite });
+    // 100자 꼬리는 짧지 않아 `rewindTail`이 flush를 기다린다(비동기 모드에서는 그 콜백이 dispose 뒤에 온다).
+    workerRpc.notify("write", "x".repeat(100));
+    workerRpc.notify("readInput", true);
+    await waitFor(() => fake.written.includes(""));
+
+    handle.dispose();
+    expect(() => fake.term.dispose()).not.toThrow();
+    fake.flush();
+    await tick();
+    fake.flush();
+
+    expect(fake.disposedBufferReads).toBe(0);
+  });
+
+  test("읽기가 dispose 밖의 이유로 실패하면 fail로 worker를 깨워 사유를 알린다", async () => {
+    const session = startSession({}, { asyncWrite });
+    vi.spyOn(Readline.prototype, "read").mockRejectedValueOnce(
+      new Error("읽기 실패"),
+    );
+
+    session.workerRpc.notify("readInput", true);
+    await waitFor(() => readMailbox(session).state === MAILBOX.ERROR);
+
+    expect(readMailbox(session).text).toContain("읽기 실패");
+  });
+
+  test("stdin 읽기 중 Ctrl+C는 `^C`를 찍고 같은 프롬프트를 다시 그리며 메일박스는 IDLE이다(RD-006 중간 상태, RD-008이 취소로 바꾼다)", async () => {
+    const session = startSession({}, { asyncWrite });
+    const { fake } = session;
+    session.workerRpc.notify("write", "x: ");
+    await startInputRead(session);
+
+    fake.type("ab\x03");
+    fake.flush();
+    await settle();
+    expect(session.bytes()).toContain("^C");
+    expect(readMailbox(session).state).toBe(MAILBOX.IDLE);
+
+    fake.type("cd\r");
+    await waitDelivered(session);
+    expect(readMailbox(session)).toMatchObject({ text: "cd", last: true });
   });
 });
 

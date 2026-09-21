@@ -3,11 +3,16 @@ import type { Terminal } from "@xterm/xterm";
 import { postInitFrame, type InitFrame } from "./protocol/init-frame";
 import { createInterruptBuffer } from "./protocol/interrupt-protocol";
 import { createRpc, type Rpc } from "./protocol/rpc";
-import { createStdinMailbox } from "./protocol/stdin-mailbox";
+import {
+  createMailboxWriter,
+  createStdinMailbox,
+} from "./protocol/stdin-mailbox";
 import { writeNotice } from "./terminal/notice";
+import { createReadGuard } from "./terminal/read-guard";
 import { createReplReader } from "./terminal/repl-reader";
 import type { RewindTerminal } from "./terminal/rewind-tail";
 import { createTerminalSinks } from "./terminal/sinks";
+import { createInputReader } from "./terminal/stdin-reader";
 
 /** 기본 pyodide CDN 위치. 끝 `/`를 포함한다(`00-architecture.md` 4.1). */
 export const DEFAULT_PYODIDE_INDEX_URL =
@@ -93,12 +98,21 @@ export function createRepl(options: ReplOptions): ReplHandle {
             }),
         ),
     };
-    const reader = createReplReader(readline, liveTerminal, sinks);
+    const replReader = createReplReader(readline, liveTerminal, sinks);
+    // stdin 리더도 같은 뷰를 받는다: `rewindTail`의 flush 콜백이 해제된 터미널의 buffer를 읽지 않게(TRP-004).
+    const inputReader = createInputReader(readline, liveTerminal, sinks);
+    // 프롬프트를 기다리는 동안 worker의 배경 콜백이 `input()`을 부르면 stdin 읽기가 REPL 읽기를 교체해 REPL 읽기가
+    // 고아가 된다. stdin 읽기를 활성 REPL 읽기가 끝난 뒤로 미룬다(04-stdin-input.md 3.2).
+    const guard = createReadGuard({
+      readLine: (prompt: string) => replReader.read(prompt),
+      readInput: () => inputReader.read(),
+    });
     // 벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다. worker 루프는 응답을 받은 뒤에만 다시
     // 요청하므로 겹치는 요청은 오류로 거절한다.
     let reading = false;
     const channel = new MessageChannel();
     const mailbox = createStdinMailbox();
+    const mailboxWriter = createMailboxWriter(mailbox);
     const frame: InitFrame = {
       kind: "init",
       rpcPort: channel.port2,
@@ -120,11 +134,27 @@ export function createRepl(options: ReplOptions): ReplHandle {
       // 꼬리 + 프롬프트를 그리고 Enter까지 한 줄을 읽어 응답한다. 요청의 나머지 인자(pending, cancelable)는 후속
       // RD(RD-013·014·015, RD-008)가 쓴다. 지금은 받지 않고 버린다.
       readLine: (prompt: string): Promise<string | null> => {
+        // 거절은 가드 바깥에서 한다. 거절된 promise를 가드가 활성 읽기로 추적하면 진짜 활성 REPL 읽기를 잃는다.
         if (reading) return Promise.reject(new Error("이미 읽는 중"));
         reading = true;
-        return reader.read(prompt).finally(() => {
+        return guard.readLine(prompt).finally(() => {
           reading = false;
         });
+      },
+      // stdin 콜백 진입(worker는 이 알림 직후 메일박스에 정지한다). 응답 통로가 메일박스뿐이라 반환값이 없다.
+      // `cancelable` 인자는 받지 않는다(RD-008이 취소를 넣을 때 쓴다).
+      readInput: () => {
+        void guard
+          .readInput()
+          .then(
+            (line) => mailboxWriter.deliver(line),
+            // dispose된 세션의 worker는 이미 terminate됐다. `fail()`의 `untilIdle`이 영영 안 풀릴 수 있어 쓰지 않는다.
+            (error: unknown) =>
+              disposed ? undefined : mailboxWriter.fail(String(error)),
+          )
+          .catch((error: unknown) =>
+            console.error("[repl] stdin 응답 실패", error),
+          );
       },
       // 종료는 터미널에 쓰지 않는다(3.14도 종료 메시지가 없다). worker는 살려 두고 복구는 RD-010 `reset()`이다.
       sessionTerminated: () => onStatus("terminated"),
