@@ -2,7 +2,7 @@
 
 브라우저에서 pyodide(Python 3.14)를 Web Worker로 실행하고 xterm.js 터미널로 CPython 3.14 기본 REPL과 같은 조작감을 제공하는 라이브러리(`@cp949/runo-pyodide-repl`)와 데모 앱.
 
-상태: **설계 단계**. 코드는 스켈레톤이고 구현은 `ROADMAP.md` 순서로 진행한다.
+상태: 구현 초기. `ROADMAP.md` 순서로 진행하며 RD-001(워크스페이스 정비, xterm-readline 벤더링)까지 끝났다. 터미널 마운트와 pyodide 로드는 아직 없다. 데모는 worker 생성과 `crossOriginIsolated` 표시만 한다.
 
 ## 문서
 
@@ -14,6 +14,7 @@
 | `docs/design/02~08` | 기능별 규칙(콘솔, Ctrl+C, stdin, 출력, 편집, Tab, 세션) |
 | `docs/design/09~12` | 테스트 전략, 3.14 편차·범위 밖, 알려진 함정, 이전 구현 인벤토리 |
 | `docs/adr/` | 결정 기록(동기 브리지 미채택, 메일박스, readline 벤더링, cross-origin isolation, input 동기 유지) |
+| `docs/traps/` | 이 저장소에서 새로 발견한 함정(색인 `INDEX.md`). 이전 구현의 함정은 `docs/design/11-known-traps.md` |
 | `ROADMAP.md` | 구현 순서와 완료 기준 |
 | `CONTEXT-MAP.md` | 용어 사전 위치 |
 | `docs/agents/` | 에이전트 작업 절차(rubber-workflow, issue tracker, domain docs) |
@@ -23,7 +24,7 @@
 ```text
 apps/demo                Vite + React 19 데모
 packages/pyodide-repl    @cp949/runo-pyodide-repl — 코어(main 쪽 + worker 쪽 + 프로토콜 + Python 스크립트)
-packages/xterm-readline  @cp949/runo-xterm-readline — strtok/xterm-readline 1.2.2 벤더링(MIT), RD-001에서 생성
+packages/xterm-readline  @cp949/runo-xterm-readline — strtok/xterm-readline 1.2.2 벤더링(MIT), 변경 목록은 패키지 README
 packages/eslint-config, packages/typescript-config
 ```
 
@@ -31,12 +32,15 @@ packages/eslint-config, packages/typescript-config
 
 ```bash
 pnpm install
-pnpm dev          # turbo: 패키지 watch + apps/demo dev 서버
-pnpm build
+pnpm dev          # apps/demo의 vite dev 서버만 띄운다. 패키지는 소스 TS를 직접 해석한다(빌드 불필요)
+pnpm build        # 패키지 tsdown 빌드 뒤 데모 vite build
+pnpm preview      # 빌드(필요하면 자동 실행) 뒤 apps/demo의 vite preview. 빌드 산출물 확인용
 pnpm test
 pnpm lint
-pnpm check-types
+pnpm check-types  # 의존 패키지 빌드(d.ts) 뒤 실행된다
 ```
+
+패키지 `dist`를 개별로 watch 빌드하려면 `pnpm --filter <패키지> dev`(`tsdown --watch`).
 
 ## 호스팅 요구
 
@@ -47,7 +51,7 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-dev·preview·정적 배포 모두 필요하다. 격리되지 않은 페이지에서는 Ctrl+C와 `input()`이 동작하지 않는다. pyodide는 jsdelivr CDN에서 로드한다(CORP 헤더 제공).
+dev·preview·정적 배포 모두 필요하다. `apps/demo/vite.config.ts`가 `server.headers`와 `preview.headers` 둘 다에 설정하고, `apps/demo/src/vite-config.test.ts`가 두 곳과 `worker.format: 'es'`를 시험한다. 정적 배포는 HTML과 worker 스크립트를 포함한 모든 응답에 헤더를 붙인다(preview에서 HTML·worker 에셋 둘 다 확인). 격리되지 않은 페이지에서는 Ctrl+C와 `input()`이 동작하지 않는다. pyodide는 jsdelivr CDN에서 로드한다(CORP 헤더 제공).
 
 ## 이전 구현
 

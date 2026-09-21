@@ -116,7 +116,7 @@ interface ReplHandle {
 export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
 ```
 
-앱의 worker 파일은 두 줄이다: `import { runReplWorker } from '@cp949/runo-pyodide-repl/worker'; runReplWorker()`. 앱은 `new Worker(new URL('./repl.worker.ts', import.meta.url), { type: 'module' })`로 만든다. worker 안에 top-level `await`가 있으므로 Vite `worker.format`은 `'es'`여야 한다(기본 `iife`는 프로덕션 빌드에서 실패한다, 이전 구현 실측).
+앱의 worker 파일은 두 줄이다: `import { runReplWorker } from '@cp949/runo-pyodide-repl/worker'; runReplWorker()`. 앱은 `new Worker(new URL('./repl.worker.ts', import.meta.url), { type: 'module' })`로 만든다. worker 파일에 top-level `await`가 들어갈 수 있으므로 Vite `worker.format`은 `'es'`여야 한다. RD-001에서 확인했다: `es`는 빌드가 성공하고 번들 끝에 `await`가 남는다. 기본 `iife`는 `[UNSUPPORTED_FEATURE] Top-level await is currently not supported with the 'iife' output format`으로 실패한다. 앱의 얇은 worker 파일이 패키지 서브패스를 import하는 이 방식은 dev(소스 해석)와 build·preview(`dist` 해석) 양쪽에서 동작한다(4.4).
 
 ### 4.2 코어 모듈 지도
 
@@ -164,6 +164,15 @@ packages/pyodide-repl/src/
 
 React 19 + Vite 8. `ReplView` 컴포넌트가 `createRepl`을 마운트 시 1회 호출하고, 상태(`crossOriginIsolated` Chip, `ready` Chip, 세션 리셋 버튼, top-level await 스위치, 종료·크래시 Alert)만 React state로 둔다. StrictMode 이중 마운트에서 `dispose()`가 두 번 불려도 안전해야 한다(`08-session.md` 8.2). UI 라이브러리는 정하지 않았다(이전 구현은 MUI v9였고, 이 데모에는 필수가 아니다).
 
+### 4.4 워크스페이스 빌드 규칙
+
+RD-001에서 클린 체크아웃(`dist` 없음)으로 재현한 결과다.
+
+- 패키지 `exports`의 조건 순서는 `development`(`./src/*.ts`) → `types`(`./dist/*.d.mts`) → `default`(`./dist/*.mjs`)다. Vite는 dev에서 `development`를, build·preview에서 `default`를 고른다(`dist` 없이 `vite build`만 돌리면 실패해서 확인). 새 패키지나 서브패스를 추가하면 `development` 항목도 함께 둔다. 빠지면 `pnpm dev`에서 vite가 `dist`보다 먼저 떠서 `Failed to resolve import ...`(500)를 내고, 실패한 해석을 캐시해 `dist`가 생겨도 vite를 재시작하기 전까지 복구되지 않는다. worker 오류는 브라우저 콘솔에만 남는다.
+- 루트 `pnpm dev`는 `apps/demo`만 띄운다(`turbo run dev --filter=demo`). 패키지의 `dev`(`tsdown --watch`)는 `dist`를 지우고 다시 써서 `build`와 경합하므로 필요할 때 `pnpm --filter <패키지> dev`로 따로 실행한다.
+- `check-types`는 `^build`에 의존한다. 앱이 패키지 타입을 `dist/*.d.mts`에서 읽으므로 d.ts가 먼저 있어야 한다. 이전 값(`^check-types`)은 클린 상태에서 `TS2307: Cannot find module '@cp949/runo-pyodide-repl/worker'`로 실패했다. `customConditions`로 소스를 읽게 하면 앱의 컴파일러 옵션(`noUncheckedIndexedAccess`)이 벤더링한 xterm-readline 소스를 검사하므로 쓰지 않는다.
+- `pnpm preview`는 `build`에 의존한다.
+
 ## 5. 이전 구현 대비 무엇이 사라지고 무엇이 남는가
 
 사라지는 것: coincident 의존과 포크, reflected-ffi 옵션, 응답 프레임 변환 함정(TRP-010), 초기 handshake와 공존하기 위한 "최초 `await` 이전 등록·`instanceof` 구분" 규칙, 출력 조각마다 worker가 멈추는 동기 왕복, worker가 main에 설정을 되묻는 호출(`getTopLevelAwait`는 초기화 프레임으로 대체), `reportSync`(`crossOriginIsolated`는 main이 직접 안다).
@@ -172,5 +181,5 @@ React 19 + Vite 8. `ReplView` 컴포넌트가 `createRepl`을 마운트 시 1회
 
 ## 6. 호스팅 요구
 
-- dev·preview·정적 배포 모두 `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`를 응답 헤더로 보내야 한다. 이전 구현은 dev 서버에만 걸어 두어 `vite preview`와 빌드 산출물에서 `crossOriginIsolated === false`였다. 새 구현은 `apps/demo/vite.config.ts`의 `server.headers`와 `preview.headers` 둘 다에 넣고, README에 배포 시 요구를 적는다.
+- dev·preview·정적 배포 모두 `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`를 응답 헤더로 보내야 한다. 이전 구현은 dev 서버에만 걸어 두어 `vite preview`와 빌드 산출물에서 `crossOriginIsolated === false`였다. 새 구현은 `apps/demo/vite.config.ts`의 `server.headers`와 `preview.headers` 둘 다에 넣고, README에 배포 시 요구를 적는다. `apps/demo/src/vite-config.test.ts`가 두 곳과 `worker.format`을 시험한다. RD-001에서 dev와 preview 모두 HTML과 worker 스크립트 응답에 두 헤더가 붙고, 페이지와 worker의 `crossOriginIsolated`가 참인 것을 Chromium(Playwright 1.60, 리비전 1223)으로 확인했다. 같은 빌드 산출물을 헤더 없는 서버로 서빙하면 둘 다 거짓이다.
 - pyodide는 CDN(`cdn.jsdelivr.net`)에서 로드한다. COEP `require-corp` 아래에서는 CDN 응답에 `Cross-Origin-Resource-Policy: cross-origin`이 있어야 한다(jsdelivr는 제공한다). 자체 호스팅 pyodide로 바꾸면 같은 헤더를 붙인다.

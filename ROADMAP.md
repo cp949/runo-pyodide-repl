@@ -29,7 +29,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 
 ### RD-001 — 워크스페이스 정비와 xterm-readline 벤더링
 
-상태: 대기 · 이전: RD-001, RD-004(일부) · 설계: `00-architecture.md` 4·6절, `06-editing.md` 6.1, ADR-0003, ADR-0004
+상태: 완료 · 이전: RD-001, RD-004(일부) · 설계: `00-architecture.md` 4·6절, `06-editing.md` 6.1, ADR-0003, ADR-0004
 
 `/work/thrd/xterm-readline`(strtok/xterm-readline 1.2.2, MIT)의 `src/*.ts`를 `packages/xterm-readline`(`@cp949/runo-xterm-readline`, private)으로 복사한다. `LICENSE-MIT`·저작권 고지 유지, 빌드는 tsdown(ESM + d.ts), 테스트는 jest → vitest 이식(`history·keymap·line·readline·render·state·tty·vterm` 8개 파일, `vterm.ts`는 시험 전용 헬퍼). `InputType`·`History`·`State`·`Tty`를 export하고, `History`에 `persist: false` 옵션을 추가한다. `packages/pyodide-repl`에 `@xterm/xterm@6`·`@cp949/runo-xterm-readline`(workspace) 의존과 `pyodide@314.0.7` devDependency를 추가한다. `apps/demo`에 COOP/COEP 헤더를 `server.headers`와 `preview.headers` 둘 다에, `worker.format: 'es'`를 넣고, 얇은 `src/repl.worker.ts`와 `new Worker(new URL(...), { type: 'module' })` 생성 경로를 확인한다.
 
@@ -40,6 +40,8 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - dev·preview 양쪽에서 `crossOriginIsolated`가 참이다(브라우저 콘솔 확인 또는 Playwright 1회).
 - 프로덕션 빌드에서 worker가 ES 모듈로 번들되고 top-level `await`가 든 worker 파일이 빌드에 실패하지 않는다.
 - 루트 `pnpm build`·`lint`·`check-types`·`test` 통과.
+
+인계: `packages/pyodide-repl/src/worker.ts`의 `runReplWorker()`는 초기화 프레임 에코 뼈대다(RD-002의 `init-frame.ts`가 `kind` 인라인 검사를 대체하고, RD-004가 본문을 채운다). `apps/demo/src/App.tsx`의 인라인 부분 프레임은 RD-003의 `createRepl`이 대체한다. 워크스페이스 빌드 규칙(`exports`의 `development` 조건, `check-types`의 `^build`)은 `00-architecture.md` 4.4.
 
 ### RD-002 — 프로토콜 코어 (RPC·stdin 메일박스·interrupt buffer·초기화 프레임)
 
