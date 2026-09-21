@@ -11,7 +11,10 @@ import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import type { InitFrame } from "../protocol/init-frame";
 import { createInterruptBuffer } from "../protocol/interrupt-protocol";
 import { createRpc } from "../protocol/rpc";
-import { createStdinMailbox } from "../protocol/stdin-mailbox";
+import {
+  createMailboxWriter,
+  createStdinMailbox,
+} from "../protocol/stdin-mailbox";
 import { bootReplWorker } from "./boot";
 
 let pyodide: PyodideInterface;
@@ -35,17 +38,22 @@ const NOTIFICATIONS = [
   "ready",
   "loadFailed",
   "sessionTerminated",
+  "readInput",
 ];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * worker 역할이 받을 초기화 프레임과, main 역할이 받은 알림·요청 기록(`[이름, ...인자]`, 도착 순서).
- * `script`는 `readLine` 요청에 차례로 답할 값이다. 각본이 끝난 뒤의 요청은 오류로 답한다(기록은 남는다).
+ * `script`는 `readLine` 요청에 차례로 답할 값이다. 항목이 함수면 그 요청이 도착한 때 호출해 반환값으로 답한다
+ * (`writer.deliver`를 미리 걸어 두는 부작용을 그 시점에 넣는 용도). 각본이 끝난 뒤의 요청은 오류로 답한다(기록은 남는다).
+ * `writer`는 main 쪽 메일박스 쓰기다. worker가 `Atomics.wait`로 정지하기 전에 `deliver`해 두면(선전달) 시험 스레드가
+ * worker와 같은 스레드여도 멈추지 않는다 — STATE가 이미 READY면 `Atomics.wait`가 즉시 돌아온다.
  */
 function createMainSide(script: unknown[] = []) {
   const channel = new MessageChannel();
   const mailbox = createStdinMailbox();
+  const writer = createMailboxWriter(mailbox);
   const frame: InitFrame = {
     kind: "init",
     rpcPort: channel.port1,
@@ -70,7 +78,8 @@ function createMainSide(script: unknown[] = []) {
         (...args: unknown[]) => {
           events.push(["readLine", ...args]);
           if (script.length === 0) throw new Error("각본 밖 readLine 요청");
-          return script.shift();
+          const next = script.shift();
+          return typeof next === "function" ? (next as () => unknown)() : next;
         },
       ],
     ]),
@@ -88,7 +97,7 @@ function createMainSide(script: unknown[] = []) {
     }
     throw new Error("기다리던 알림이 오지 않았다");
   }
-  return { frame, events, waitFor };
+  return { frame, events, waitFor, writer };
 }
 
 const PROMPT_REQUEST = ["readLine", ">>> ", undefined, true];
@@ -223,5 +232,66 @@ describe("bootReplWorker", () => {
     await sleep(100);
 
     expect(events).toEqual([["loadFailed", "Error: no console"]]);
+  });
+
+  test('input("x: ")과 sys.stdin.readline()은 출력 → readInput 알림 → 메일박스 값 순서로 읽고 값이 REPL 변수에 들어간다', async () => {
+    const { frame, events, waitFor, writer } = createMainSide([
+      // 선전달: 각 줄이 `input()`을 부르기 전에 값을 메일박스에 넣어 둔다(두 번째는 첫 값이 소비된 뒤라 IDLE이다).
+      () => {
+        void writer.deliver("abc");
+        return 'x = input("x: ")';
+      },
+      "x",
+      () => {
+        void writer.deliver("def");
+        return "import sys; y = sys.stdin.readline()";
+      },
+      "y",
+      "exit()",
+    ]);
+    let setStdinSpy: ReturnType<typeof vi.spyOn<PyodideInterface, "setStdin">>;
+
+    await bootReplWorker(frame, {
+      loadPyodide: async () => {
+        const instance = await loadPyodide();
+        // 배선이 빠진 회귀에서 `input()`이 node의 실제 stdin을 동기로 읽으면 스레드가 막혀 `waitFor`·시험 timeout도
+        // 돌지 못하고 스위트 전체가 멈춘다. 기본 stdin을 즉시 오류로 바꿔 두면 `OSError`로 실패한다(부팅이 덮어쓴다).
+        instance.setStdin({ error: true });
+        setStdinSpy = vi.spyOn(instance, "setStdin");
+        return instance;
+      },
+    });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    // 각 읽기가 자기 값을 읽는다: `input()`은 `'abc'`, `readline()`은 tty처럼 개행이 붙은 `'def\n'`(repr).
+    expect(events.slice(2)).toEqual([
+      PROMPT_REQUEST,
+      ["write", "x: "],
+      ["readInput", true],
+      PROMPT_REQUEST,
+      ["writeOutput", "'abc'"],
+      PROMPT_REQUEST,
+      ["readInput", true],
+      PROMPT_REQUEST,
+      ["writeOutput", "'def\\n'"],
+      PROMPT_REQUEST,
+      ["sessionTerminated"],
+    ]);
+    // 옵션은 `stdin`뿐이다(기본 `isatty: false`·`autoEOF: true`를 그대로 쓴다, DELTA-01 시험의 전제).
+    expect(setStdinSpy!).toHaveBeenCalledTimes(1);
+    expect(Object.keys(setStdinSpy!.mock.calls[0]![0]!)).toEqual(["stdin"]);
+  }, 30_000);
+
+  test("setStdin이 던지면 loadFailed만 오고 ready·배너·readLine 요청은 오지 않는다(setStdin은 ready 전에 건다)", async () => {
+    const { frame, events, waitFor } = createMainSide(["1 + 1"]);
+    vi.spyOn(pyodide, "setStdin").mockImplementation(() => {
+      throw new Error("bad stdin");
+    });
+
+    await bootReplWorker(frame, { loadPyodide: async () => pyodide });
+    await waitFor(() => events.length >= 1);
+    await sleep(100);
+
+    expect(events).toEqual([["loadFailed", "Error: bad stdin"]]);
   });
 });

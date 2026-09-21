@@ -1,13 +1,15 @@
 /**
- * worker 부팅 시퀀스(01-protocols.md 5절 S1의 RD-004 부분, 00-architecture.md 3.1). 초기화 프레임을 받은 뒤
- * pyodide 로드 → 콘솔 생성 → `ready` → 배너 → REPL 루프 순서로 진행한다. 로더는 주입해 node에서 npm `loadPyodide`로
- * 시험하고 브라우저에서는 CDN 로더(`loadPyodideFromCdn`)를 쓴다.
+ * worker 부팅 시퀀스(01-protocols.md 5절 S1의 RD-004~RD-006 부분, 00-architecture.md 3.1). 초기화 프레임을 받은 뒤
+ * pyodide 로드 → 콘솔 생성 → stdin 배선 → `ready` → 배너 → REPL 루프 순서로 진행한다. 로더는 주입해 node에서 npm
+ * `loadPyodide`로 시험하고 브라우저에서는 CDN 로더(`loadPyodideFromCdn`)를 쓴다.
  */
 import type { PyodideInterface } from "pyodide";
 import type { InitFrame } from "../protocol/init-frame";
 import { createRpc } from "../protocol/rpc";
+import { createMailboxReader } from "../protocol/stdin-mailbox";
 import { createConsole, type ConsoleSinks, type ReplConsole } from "./console";
 import { runReplLoop } from "./repl-loop";
+import { createStdinCallback } from "./stdin-callback";
 import { createSubmissionRunner } from "./submission-runner";
 
 export interface BootDeps {
@@ -15,8 +17,8 @@ export interface BootDeps {
 }
 
 /**
- * 순서: RPC 생성 → loadPyodide → createConsole → ntf ready → ntf writeOutput(BANNER) → REPL 루프 실행.
- * 로드·콘솔 생성 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아 있다).
+ * 순서: RPC 생성 → loadPyodide → createConsole → setStdin → ntf ready → ntf writeOutput(BANNER) → REPL 루프 실행.
+ * 로드·콘솔 생성·stdin 배선 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아 있다).
  */
 export async function bootReplWorker(
   frame: InitFrame,
@@ -33,6 +35,18 @@ export async function bootReplWorker(
     pyodide = await deps.loadPyodide(frame.pyodide.indexURL);
     repl = createConsole(pyodide, sinks, {
       topLevelAwait: frame.topLevelAwait,
+    });
+    const mailbox = createMailboxReader({
+      ctrl: frame.stdinCtrl,
+      data: frame.stdinData,
+    });
+    // input()·sys.stdin 읽기. 알림을 먼저 올리고 Atomics.wait로 멈춘다(01-protocols.md 1.3). 콘솔에는 stdin_callback을
+    // 넘기지 않으므로(02-console-core.md) 이 전역 설정이 그대로 쓰인다.
+    pyodide.setStdin({
+      stdin: createStdinCallback({
+        requestInput: (cancelable) => rpc.notify("readInput", cancelable),
+        wait: () => mailbox.wait(),
+      }),
     });
     rpc.notify("ready", { pyodideVersion: pyodide.version });
   } catch (error) {

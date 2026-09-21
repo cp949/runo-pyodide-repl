@@ -24,8 +24,18 @@ interface Received {
   seq: number;
 }
 
+interface ScenarioOptions {
+  /**
+   * `readLine` 응답 전이 아니라 `readInput` 알림을 받은 뒤(worker가 `wait()`에서 정지한 동안)에 `complete`를 보낸다.
+   * 그 요청은 worker 이벤트 루프가 풀릴 때까지 포트에 큐잉된다.
+   */
+  completeAfterReadInput?: boolean;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** 시나리오를 끝까지 돌리고 main이 관찰한 것을 돌려준다. */
-async function runScenario() {
+async function runScenario(options: ScenarioOptions = {}) {
   const channel = new MessageChannel();
   const mailbox = createStdinMailbox();
   const frame: InitFrame = {
@@ -40,24 +50,52 @@ async function runScenario() {
   const writer = createMailboxWriter(mailbox);
   const log: string[] = [];
   let completeResult: unknown;
+  // `deliver` 전에 `complete` 응답이 왔는가(`completeAfterReadInput`일 때만 정해진다).
+  let completeAnsweredBeforeDeliver: boolean | undefined;
   let resolveReceived: (received: Received) => void = () => {};
   const receivedPromise = new Promise<Received>(
     (resolve) => (resolveReceived = resolve),
+  );
+  let resolveInputHandled: () => void = () => {};
+  const inputHandled = new Promise<void>(
+    (resolve) => (resolveInputHandled = resolve),
   );
 
   const rpc = createRpc(channel.port2, {
     readLine: async (prompt: string) => {
       log.push(`readLine:${prompt}`);
-      // worker는 이 응답을 기다리는 동안 이벤트 루프가 살아 있어 main의 요청에 답한다.
-      completeResult = await rpc.call("complete", "os.pa", undefined);
+      if (!options.completeAfterReadInput) {
+        // worker는 이 응답을 기다리는 동안 이벤트 루프가 살아 있어 main의 요청에 답한다.
+        completeResult = await rpc.call("complete", "os.pa", undefined);
+      }
       return 'x = input("x: ")';
     },
     write: (text: string) => void log.push(`write:${text}`),
     readInput: async () => {
       log.push("readInput");
-      // 이 시점 worker는 wait()에서 정지해 있다. SIGINT를 먼저 쓰고 값을 깨운다.
-      signalInterrupt(frame.interruptBuffer);
-      await writer.deliver("abc");
+      try {
+        // 이 시점 worker는 wait()에서 정지해 있다.
+        const pendingComplete = options.completeAfterReadInput
+          ? rpc.call("complete", "os.pa", undefined)
+          : undefined;
+        if (pendingComplete) {
+          // 정지한 worker는 요청을 처리하지 못한다. 응답이 오지 않는 것을 100ms 동안 지켜본다.
+          let answered = false;
+          void pendingComplete.then(
+            () => (answered = true),
+            () => (answered = true),
+          );
+          await sleep(100);
+          completeAnsweredBeforeDeliver = answered;
+        }
+        // SIGINT를 먼저 쓰고 값을 깨운다.
+        signalInterrupt(frame.interruptBuffer);
+        await writer.deliver("abc");
+        // 깨어난 worker가 이벤트 루프로 돌아오면 큐에 있던 요청을 처리한다.
+        if (pendingComplete) completeResult = await pendingComplete;
+      } finally {
+        resolveInputHandled();
+      }
     },
     received: (received: Received) => resolveReceived(received),
   });
@@ -69,9 +107,11 @@ async function runScenario() {
     frame,
   );
   const received = await receivedPromise;
+  await inputHandled;
   return {
     log,
     completeResult,
+    completeAnsweredBeforeDeliver,
     received,
     interruptBuffer: frame.interruptBuffer,
   };
@@ -108,5 +148,16 @@ describe("초기화 프레임 → readLine → complete → readInput → wait/d
     expect(Atomics.load(interruptBuffer, ACK)).toBe(1);
     expect(Atomics.load(interruptBuffer, SIGNAL)).toBe(0);
     expect(Atomics.load(interruptBuffer, SEQ)).toBe(1);
+  });
+
+  // 01-protocols.md 1.3: worker가 메일박스 대기 중이면 포트에 도착한 요청은 깨어난 뒤 처리된다. 정지한 worker에 보낸 요청은
+  // 유실되지 않고 큐에 남았다가 `deliver` 뒤에 응답한다(main이 `input()` 읽기 중 요청을 보내도 교착·유실이 없다).
+  it("worker가 wait()에서 정지한 동안 보낸 complete 요청은 deliver 전에는 응답이 없고 deliver 뒤 유실 없이 응답한다", async () => {
+    const { completeAnsweredBeforeDeliver, completeResult, received } =
+      await runScenario({ completeAfterReadInput: true });
+
+    expect(completeAnsweredBeforeDeliver).toBe(false);
+    expect(received.text).toBe("abc");
+    expect(completeResult).toEqual({ completions: ["path"], start: 3 });
   });
 });
