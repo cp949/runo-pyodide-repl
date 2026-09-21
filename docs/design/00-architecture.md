@@ -1,0 +1,176 @@
+# 아키텍처
+
+## 1. 목표와 제약
+
+- 브라우저에서 pyodide(`314.0.7`, Python 3.14.2)를 Web Worker에서 실행하고, 메인 스레드의 xterm.js 터미널로 **CPython 3.14 기본 대화형 REPL(`python`)과 같은 조작감**을 제공한다. 동등성 판정은 주관이 아니라 3.14.4 pty 실측과의 화면 행 비교다(`09-testing.md`, `10-parity-deviations.md`).
+- 프롬프트 대기 중 worker 이벤트 루프는 살아 있다(asyncio 콜백이 돈다). 이 점은 `python`이 아니라 `python -m asyncio` 쪽에 정렬한 의도적 선택이다([ADR-0005](../adr/0005-input-stays-blocking-prompt-stays-async.md)).
+- `input()`·`sys.stdin` 읽기만 worker를 멈추는 동기 대기다. pyodide `setStdin` 콜백이 문자열 동기 반환을 요구하고, CPython 의미(대기 중 다른 콜백이 돌지 않음)를 지키기 위해서다.
+- 실행 환경은 **cross-origin isolated** 페이지다(`SharedArrayBuffer` 필요, [ADR-0004](../adr/0004-cross-origin-isolation-required.md)). 격리되지 않은 페이지에서는 Ctrl+C와 `input()`이 동작하지 않으므로 시작 시 감지해 터미널에 경고를 낸다. Service Worker 우회는 범위 밖이다.
+- 이전 구현(`/work/cp949/pyodide-samples/apps/repl`)이 쓰던 coincident 동기 브리지는 쓰지 않는다([ADR-0001](../adr/0001-no-sync-bridge-library.md)). 그 위의 기능 규칙은 그대로 계승한다(`02`~`08`).
+
+## 2. 프로세스 모델과 채널
+
+```text
+┌──────────── main (브라우저 메인 스레드) ────────────┐   ┌──────────── worker ────────────┐
+│ xterm.js Terminal                                    │   │ pyodide (CDN loadPyodide)       │
+│ @cp949/runo-xterm-readline (벤더링)                  │   │ pyodide.console.PyodideConsole  │
+│ 코어 main 쪽: sink·꼬리·읽기 브리지·자동 들여쓰기·  │   │ 코어 worker 쪽: REPL 루프·      │
+│   블록 히스토리·Tab 리더·인터럽트 송신기            │   │   submission-runner·SIGINT 핸들러│
+│ apps/demo: React 셸(버튼·Chip·스위치)                │   │   ·stdin 콜백·완성 후처리        │
+└──────┬───────────────┬────────────────────┬─────────┘   └────┬──────────────┬─────────────┘
+       │ ① RPC         │ ② stdin 메일박스   │ ③ interrupt buffer │              │
+       │ MessagePort   │ SAB(제어 4칸+데이터)│ SAB Int32Array(4)  │              │
+       └───────────────┴────────────────────┴────────────────────┘──────────────┘
+```
+
+| 채널 | 매체 | 방향 | 동기성 | 나르는 것 |
+| --- | --- | --- | --- | --- |
+| ① RPC | 전용 `MessageChannel` 포트 | 양방향 | 비동기(요청/응답, 알림) | `readLine` 요청(worker→main), `complete` 요청(main→worker), 출력 알림 4종, `ready`/`loadFailed`/`sessionTerminated`, `readInput` 알림 |
+| ② stdin 메일박스 | `SharedArrayBuffer` | main→worker(응답만) | worker `Atomics.wait` 블로킹 | `input()` 한 줄(UTF-8 청크) 또는 취소·오류 표식 |
+| ③ interrupt buffer | `SharedArrayBuffer` `Int32Array(4)` | main→worker(신호), worker→main(ack) | pyodide 폴링(비동기) | SIGINT(2)·ack·요청 번호 |
+
+원칙:
+
+- **기본은 비동기다.** 동기 대기는 ②의 `input()` 하나뿐이다. 출력 알림은 worker를 멈추지 않는다.
+- **순서는 포트 하나로 보장한다.** 출력 알림과 `readInput` 알림, `readLine` 요청이 같은 포트를 타므로 main은 항상 "출력 → 읽기 요청" 순서로 받는다. `input("x: ")`의 `x: ` 꼬리가 읽기 시작 전에 도착한다는 규칙(`04-stdin-input.md` 3.3)은 여기에 의존한다.
+- **worker가 ② 대기 중이면 ①에 답하지 못한다.** 그 구간에 main→worker 요청(`complete`)을 배치하지 않는다. main이 보내는 유일한 신호는 ③이다.
+- ③은 postMessage로 대체할 수 없다. Python이 동기 실행 중이면 worker 이벤트 루프가 돌지 않아 메시지를 받지 못하고, pyodide는 `setInterruptBuffer`로 넘긴 버퍼를 실행 중간에 폴링한다.
+
+프로토콜 세부(메시지 형식, 슬롯 배치, 상태 전이)는 `01-protocols.md`에 있다.
+
+## 3. 생명주기
+
+### 3.1 시작
+
+1. main이 `Terminal`·`Readline`을 만든다(세션과 무관하게 마운트당 1회).
+2. main이 `MessageChannel`, interrupt buffer, stdin 메일박스를 만들고 worker를 생성한다(`createWorker()` 팩토리).
+3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `topLevelAwait`, pyodide `indexURL`. worker 스크립트는 첫 `await` 이전에 `message` 리스너를 걸어 이 프레임을 받는다. 프레임은 하나뿐이라 구분자(`instanceof`)가 필요 없다.
+4. worker가 pyodide를 로드하고 콘솔을 만든 뒤 `ready` 알림(또는 `loadFailed`)을 보낸다. 로드 실패는 worker를 죽이지 않는다.
+5. worker가 SIGINT 핸들러 설치 → interrupt buffer 연결 → `setStdin` → 감시 타이머 시작 → 배너 출력 → REPL 루프 진입(`03-ctrl-c.md` 2.6 순서).
+
+### 3.2 REPL 루프(worker)
+
+```text
+loop:
+  atPrompt = true
+  line = await rpc.call('readLine', prompt, pending, cancelable=true)   # 비동기, 이벤트 루프 살아 있음
+  atPrompt = false
+  discardPendingInterrupt(buffer)                                       # 대상 코드 없는 SIGINT 폐기
+  result = await runner.run(line)                                        # null이면 취소 처리
+  if result.exit: notify('sessionTerminated'); break
+  prompt, pending = result.prompt, result.pending
+```
+
+프롬프트 대기 중 main→worker `complete` 요청에 답한다. 실행 중 도착한 요청은 빈 후보로 답한다.
+
+### 3.3 `input()`(worker, 동기)
+
+```text
+stdin 콜백(cancelable=true):
+  rpc.notify('readInput', cancelable)      # 포트에 먼저 올린다(앞선 출력 뒤에 FIFO로 도착)
+  text = mailbox.wait()                    # Atomics.wait — 이 사이 worker는 완전히 멈춘다
+  null이면 signalInterrupt(buffer) → pyodide.checkInterrupt() → EINTR → KeyboardInterrupt
+```
+
+main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미룸)를 거쳐 readline으로 한 줄을 읽고 `mailbox.deliver(text)`, Ctrl+C면 `mailbox.cancel()`.
+
+### 3.4 세션 리셋·크래시·종료
+
+- 리셋은 worker 교체다. 화면은 유지된다. 순서: 자동 들여쓰기 단위 초기화 → 인터럽트 송신기 취소 → interrupt buffer `SIGNAL=0` → 이전 worker `terminate()` → 새 worker + 새 초기화 프레임. interrupt buffer는 세션 간 **재사용**(ack·요청 번호가 이어진다), 메일박스는 worker마다 **새로** 만든다. sink 세트도 worker마다 새로 만든다(`08-session.md`).
+- worker `error` 이벤트 → `onCrash(message)` → 앱이 리셋 UI를 띄운다.
+- `exit()`/`quit()`/`SystemExit` → `sessionTerminated` 알림 → 앱이 안내를 띄우고, 복구 경로는 리셋뿐이다.
+
+## 4. 패키지 구조와 공개 인터페이스
+
+```text
+packages/
+  xterm-readline/        @cp949/runo-xterm-readline — strtok/xterm-readline 1.2.2 벤더링(TS 소스), ADR-0003
+  pyodide-repl/          @cp949/runo-pyodide-repl — 프레임워크 무관 코어(main 쪽 + worker 쪽 + 프로토콜 + Python 스크립트)
+apps/
+  demo/                  Vite + React 19 데모 셸. 코어를 소비하는 유일한 앱. UI 상태(Chip·버튼·스위치)만 가진다.
+```
+
+### 4.1 `@cp949/runo-pyodide-repl` export
+
+```ts
+// main 쪽 진입점
+export function createRepl(options: ReplOptions): ReplHandle
+
+interface ReplOptions {
+  terminal: Terminal                       // @xterm/xterm
+  readline?: Readline                      // 생략하면 코어가 만든다(@cp949/runo-xterm-readline)
+  createWorker: () => Worker               // 리셋마다 다시 호출된다
+  pyodide?: { indexURL?: string }          // 기본 CDN https://cdn.jsdelivr.net/pyodide/v314.0.7/full/
+  topLevelAwait?: boolean                  // 기본 false. 바꾸려면 reset()
+  onStatus?: (s: ReplStatus) => void       // 'loading' | 'ready' | 'load-failed' | 'terminated' | 'crashed'
+  onCrash?: (message: string) => void
+}
+
+interface ReplHandle {
+  reset(options?: { topLevelAwait?: boolean }): void   // worker 교체. 화면 유지
+  dispose(): void                                       // worker 종료·리스너 해제. Terminal은 호출자가 소유
+  readonly crossOriginIsolated: boolean
+}
+
+// worker 쪽 진입점(앱의 얇은 worker 파일이 부른다)
+export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
+```
+
+앱의 worker 파일은 두 줄이다: `import { runReplWorker } from '@cp949/runo-pyodide-repl/worker'; runReplWorker()`. 앱은 `new Worker(new URL('./repl.worker.ts', import.meta.url), { type: 'module' })`로 만든다. worker 안에 top-level `await`가 있으므로 Vite `worker.format`은 `'es'`여야 한다(기본 `iife`는 프로덕션 빌드에서 실패한다, 이전 구현 실측).
+
+### 4.2 코어 모듈 지도
+
+깊은 모듈(작은 인터페이스, 큰 구현)을 seam으로 삼고 통신은 주입한다. 이전 구현에서 순수 함수·콜백 주입으로 격리돼 있던 모듈은 이름을 유지해 이식 비용을 줄인다(`12-previous-implementation.md` 4절).
+
+```text
+packages/pyodide-repl/src/
+  index.ts                 createRepl (main 쪽 조립)
+  worker.ts                runReplWorker (worker 쪽 조립, REPL 루프)
+  protocol/
+    rpc.ts                 MessagePort 위 요청/응답/알림          ← 01-protocols.md 1절
+    stdin-mailbox.ts       SAB 메일박스 (main: deliver/cancel/fail, worker: wait)   ← 01 2절
+    interrupt-protocol.ts  interrupt buffer 슬롯·원자 연산         ← 01 3절, 03-ctrl-c.md
+    init-frame.ts          초기화 프레임 타입·검증                  ← 01 4절
+  terminal/                main 쪽. Terminal·Readline에만 의존
+    sinks.ts               sink 4종 + 꼬리 추적                      ← 05-output.md
+    output-tail.ts
+    repl-reader.ts         꼬리 + '>>> ' 합성 읽기                   ← 04 3.3
+    stdin-reader.ts        input() 읽기(꼬리 그대로), rewindTail
+    read-guard.ts          stdin 읽기를 활성 REPL 읽기 뒤로           ← 04 3.2
+    auto-indent.ts         순수 계산                                  ← 06 6.3
+    auto-indent-reader.ts  read()/readKey 래핑(벤더링 export만 사용)
+    block-history.ts       블록 → history 항목 하나                   ← 06 6.4
+    history-filter.ts
+    tab-completion.ts      순수 로직                                  ← 07
+    tab-reader.ts          Tab 가로채기·큐·목록 재그리기
+    selection-copy.ts      Ctrl+Shift+C                              ← 06 6.6
+    interrupt-sender.ts    송신·점검·재전송 상태기계                   ← 03 2.3
+  worker/                  worker 쪽. pyodide 프록시에만 의존
+    submission-runner.ts   제출 실행 규칙                             ← 02
+    multiline.py           split_paste
+    top-level-await.ts
+    interrupt-buffer.ts    connectInterrupts(핸들러 → 연결)            ← 03 2.6
+    sigint-handler.py      SIGINT 핸들러·깨우기·sleep 조각            ← 03 2.4
+    interrupt-watch.ts     감시 타이머                                ← 03 2.5
+    stdin-callback.ts      null → KeyboardInterrupt                   ← 04 3.1
+    sink-writer.ts         전역 stdout/stderr Writer                   ← 05 4.2
+    complete-source.ts/.py 완성 후처리·ZipStdlibModuleCompleter        ← 07 7.5
+    webloop-reraise.ts/.py                                             ← 03 2.8
+```
+
+`terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
+
+### 4.3 apps/demo
+
+React 19 + Vite 8. `ReplView` 컴포넌트가 `createRepl`을 마운트 시 1회 호출하고, 상태(`crossOriginIsolated` Chip, `ready` Chip, 세션 리셋 버튼, top-level await 스위치, 종료·크래시 Alert)만 React state로 둔다. StrictMode 이중 마운트에서 `dispose()`가 두 번 불려도 안전해야 한다(`08-session.md` 8.2). UI 라이브러리는 정하지 않았다(이전 구현은 MUI v9였고, 이 데모에는 필수가 아니다).
+
+## 5. 이전 구현 대비 무엇이 사라지고 무엇이 남는가
+
+사라지는 것: coincident 의존과 포크, reflected-ffi 옵션, 응답 프레임 변환 함정(TRP-010), 초기 handshake와 공존하기 위한 "최초 `await` 이전 등록·`instanceof` 구분" 규칙, 출력 조각마다 worker가 멈추는 동기 왕복, worker가 main에 설정을 되묻는 호출(`getTopLevelAwait`는 초기화 프레임으로 대체), `reportSync`(`crossOriginIsolated`는 main이 직접 안다).
+
+남는 것: cross-origin isolation 요구(interrupt buffer 때문에 어차피 필요), `input()` 대기 중 worker 정지(의도된 의미), read-guard, SIGINT 프로토콜 전체(pyodide 폴링의 비원자성은 통신 방식과 무관), xterm-readline 계열 함정(벤더링으로 소스에서 처리).
+
+## 6. 호스팅 요구
+
+- dev·preview·정적 배포 모두 `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`를 응답 헤더로 보내야 한다. 이전 구현은 dev 서버에만 걸어 두어 `vite preview`와 빌드 산출물에서 `crossOriginIsolated === false`였다. 새 구현은 `apps/demo/vite.config.ts`의 `server.headers`와 `preview.headers` 둘 다에 넣고, README에 배포 시 요구를 적는다.
+- pyodide는 CDN(`cdn.jsdelivr.net`)에서 로드한다. COEP `require-corp` 아래에서는 CDN 응답에 `Cross-Origin-Resource-Policy: cross-origin`이 있어야 한다(jsdelivr는 제공한다). 자체 호스팅 pyodide로 바꾸면 같은 헤더를 붙인다.

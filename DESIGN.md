@@ -1,0 +1,51 @@
+# runo-pyodide-repl 설계
+
+브라우저 Python REPL(pyodide + xterm.js)을 `/work/cp949/pyodide-samples/apps/repl`(이전 구현)에서 coincident 동기 브리지 없이 재개발하는 기술 설계다. `ROADMAP.md`의 모든 항목은 이 문서와 `docs/design/`을 전제로 쓰였다.
+
+이 문서는 색인이다. 내용은 `docs/design/NN-*.md`에 있다.
+
+## 읽기 순서
+
+처음 오는 에이전트는 1→2→3 순서로 읽는다. 특정 RD를 맡았으면 3의 해당 절만 읽어도 된다.
+
+1. **무엇을, 왜**: `docs/design/00-architecture.md`(목표·채널·생명주기·패키지·공개 인터페이스), `docs/adr/`(결정 5건)
+2. **통신 계약**: `docs/design/01-protocols.md`(RPC 메시지, stdin 메일박스, interrupt buffer, 초기화 프레임, 시퀀스)
+3. **기능 규칙**(이전 구현이 3.14 pty 실측으로 확정한 것을 계승):
+   - `02-console-core.md` PyodideConsole·제출 실행·top-level await·종료
+   - `03-ctrl-c.md` SIGINT 프로토콜(요청 번호·ack·재전송, Python 핸들러, 감시 타이머, sleep 조각)
+   - `04-stdin-input.md` `input()` 읽기·취소·read-guard·프롬프트 꼬리
+   - `05-output.md` sink 4종·전역 스트림·배너
+   - `06-editing.md` 벤더링 xterm-readline·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사
+   - `07-tab-completion.md` Tab 완성
+   - `08-session.md` 리셋·이중 마운트·종료 후 상태
+4. **검증과 한계**: `09-testing.md`, `10-parity-deviations.md`(3.14 편차 31건·범위 밖), `11-known-traps.md`(함정 33건)
+5. **이전 구현 참조**: `12-previous-implementation.md`(이전 RD 인벤토리·모듈 지도)
+
+## 결정된 스택
+
+| 항목 | 결정 |
+| --- | --- |
+| 워크스페이스 | pnpm 11 + turbo, `apps/*`·`packages/*`. Node 24+, TypeScript 6 |
+| 코어 | `packages/pyodide-repl` = `@cp949/runo-pyodide-repl`. tsdown ESM + d.ts. 프레임워크 무관. React·MUI 의존 없음 |
+| 줄 편집 | `packages/xterm-readline` = `@cp949/runo-xterm-readline`. strtok/xterm-readline 1.2.2 소스 벤더링(MIT). 원본 `/work/thrd/xterm-readline` |
+| 터미널 | `@xterm/xterm` 6 |
+| 데모 | `apps/demo`: Vite 8 + React 19. UI 라이브러리 미정(필수 아님) |
+| Python | pyodide `314.0.7`(Python 3.14.2), CDN `loadPyodide`. `pyodide` npm 패키지는 타입·node 시험용 devDependency |
+| 동등성 기준 | CPython 3.14.4 `_pyrepl`, pty 24×80 `TERM=xterm` 실측 |
+| 통신 | 네이티브 Worker + MessageChannel RPC + `input()` 전용 SAB 메일박스 + interrupt buffer. coincident 없음 |
+| 테스트 | vitest 5. node 환경에서 실제 pyodide 로드, jsdom + 가짜 터미널, 브라우저는 Playwright 수동 하니스 |
+| 호스팅 | cross-origin isolated 필수(COOP/COEP). dev·preview·배포 모두 |
+
+## 문서 규칙
+
+- `docs/design/` 번호는 읽기 순서이지 의존 순서가 아니다. 새 절은 끝 번호 다음에 붙인다.
+- 각 기능 문서의 "참고:" 경로는 이전 구현의 근거 위치다. 이전 구현은 읽기 전용 참고이며 코드를 그대로 복사할 때는 통신 계층(coincident proxy)과 결합된 부분을 걸러낸다(`12-previous-implementation.md` 4절의 "통신과 격리된 것 / 결합된 것").
+- 규칙·상수를 바꾸면 해당 절과 `10-parity-deviations.md`를 같은 DELTA에서 갱신한다. 새 함정은 `docs/traps/`(rubber-workflow)이고 `11-known-traps.md`는 이관본이라 수정하지 않는다.
+- 용어는 `CONTEXT-MAP.md`가 가리키는 `CONTEXT.md`를 따른다.
+
+## 미확정 사항(구현 시점에 확인)
+
+- Vite에서 패키지 서브패스 worker 번들 방식: 기본은 앱의 얇은 `repl.worker.ts`(`00-architecture.md` 4.1). RD-001에서 실측 확정.
+- `Atomics.waitAsync` 미지원 브라우저의 폴링 폴백 간격(기본 1ms). RD-002.
+- 벤더링 readline에 `History` 삭제/복원 API를 추가할지(RD-014에서 결정).
+- Firefox·Safari 동작. 이전 구현은 Chromium만 확인했다. 브라우저별 차이는 `10-parity-deviations.md`에 적는다.

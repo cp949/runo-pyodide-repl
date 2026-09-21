@@ -1,0 +1,58 @@
+# stdin: input() 읽기·취소·read-guard·프롬프트 꼬리
+
+> 이 문서의 규칙·상수는 이전 구현(`/work/cp949/pyodide-samples/apps/repl`, 읽기 전용 참고)이 CPython 3.14.4 pty 실측과 브라우저 회귀로 확정한 것이다. 새 구현은 통신 계층만 바꾸고(`docs/design/00-architecture.md`, `01-protocols.md`) 이 규칙은 그대로 지킨다. 절 끝의 "참고:" 경로는 이전 구현의 근거 위치다.
+
+새 구현에서 `readInput(cancelable)`은 coincident proxy 호출이 아니라 **stdin 메일박스**(`01-protocols.md` 2절)다: worker가 RPC 알림 `readInput`을 보낸 뒤 `Atomics.wait`로 멈추고, main이 메일박스에 줄(또는 취소 표식)을 써서 깨운다. worker 쪽 `stdin-callback`이 보는 인터페이스는 `(cancelable: boolean) => string | null`로 같다.
+
+## 3.1 취소 변환 규칙(`createStdinCallback(pyodide, interruptBuffer, readInput)`)
+- `readInput(true)`(취소 가능)로 읽는다. 프롬프트는 넘기지 않는다(main이 꼬리로 정한다).
+- 결과가 `null`(Ctrl+C 취소)이면 **`signalInterrupt(interruptBuffer)` → `pyodide.checkInterrupt()`**.
+  stdin 콜백은 GIL이 풀린 상태라 `checkInterrupt()`가 `FS.ErrnoError(EINTR)`를 던지고, CPython이
+  EINTR 뒤 `PyErr_CheckSignals()`로 버퍼를 소비해 **`input()` 호출 지점에서** `KeyboardInterrupt`를
+  올린다(PEP 475). 콜백 안에서 쓰고 바로 소비되므로 잔류 SIGINT가 없다.
+- `checkInterrupt()`가 던지지 않고 돌아오면 `null`이 그대로 EOF(`EOFError`)가 된다.
+- `signalInterrupt`로 써서 **요청 번호를 반드시 올린다**. 번호를 올리지 않으면 핸들러가 직전 눌림의
+  재전송으로 보고 이 취소를 무시한다(TRP-035).
+- 금지된 대안(실측으로 탈락, TRP-014): `buf[0]=2` 뒤 정상 반환(신호가 임의 지점에서 소비돼 HANG·엉뚱한
+  프레임), 일반 `Error`(→ `OSError`가 되어 `except Exception`이 삼킴), `errno`만 가진 `Error`(pyodide 사망).
+- main은 이 경로에서 버퍼를 쓰지 않는다.
+- `input()` 취소에는 `cancelSettling` 방어를 걸지 않는다(`guardAfterCancel = false`): 취소 뒤에도 사용자
+  코드가 계속 돌기 때문에 그 구간의 Ctrl+C는 실행 중단이어야 한다.
+- 의미: `try/except KeyboardInterrupt`가 잡고 `except Exception`은 못 잡으며 `with.__exit__`·`finally`가
+  실행된다. `input()`/`sys.stdin.readline()/read()/readlines()`/`for line in sys.stdin`은 같은 콜백이라
+  구분하지 않는다.
+- worker는 `PyodideConsole`에 `stdin_callback`을 넘기지 않는다. 넘기지 않으면 콘솔이 `sys.stdin`을
+  건드리지 않아 전역 `setStdin` 설정이 그대로 쓰인다.
+
+## 3.2 read-guard(`createReadGuard(readLine, readInput)`)
+- REPL 읽기와 stdin 읽기가 같은 `readline`을 쓰고, `readline.read()`는 이미 열린 읽기를 교체하면서
+  옛 읽기의 promise를 영영 끝내지 않는다. 프롬프트 대기 중 배경 콜백이 `input()`을 부르면 REPL 읽기가
+  고아가 되어 입력이 멈춘다.
+- 규칙: 돌려받은 `readLine`이 반환 promise를 "활성 REPL 읽기"로 추적하고, `readInput`은 **그 결과가
+  정해진 뒤에** 시작한다. 결과가 입력 줄이든 취소(`null`)든 실패든 stdin 읽기는 진행한다.
+- `readLine` 자체는 기다리지 않고 즉시 부른다(시작 타이밍 불변). stdin 읽기끼리는 직렬화하지 않는다
+  (worker가 동기 대기라 겹치지 않는다).
+- 목록 재그리기로 읽기가 새로 시작돼도 `readLine`이 돌려주는 promise는 바뀌지 않으므로
+  (`tab-reader.ts`의 `ReadHandle.result`) 그 promise가 최종 종료 시점이다.
+- 교착 없음: worker는 `readInput` 동안 동기 대기하고 `readLine` 응답은 포트에 큐잉된다.
+  화면 순서는 REPL 줄 → 배경 `input` 줄 → 콜백 출력 → REPL 줄 실행.
+
+## 3.3 프롬프트 꼬리(output-tail) 렌더링
+- 꼬리 = 직전 출력의 **마지막 `\n` 뒤이면서 그 안에서 마지막 `\r` 뒤** 텍스트. 꼬리가 없으면 프롬프트 없이
+  입력만 받는다. `input("x: ")`의 `x: `는 stdout으로 먼저 나가고, 읽기가 시작되면 그 꼬리를 프롬프트로
+  같은 행에 다시 그린다(3.14의 `x: abc` 한 줄과 같다).
+- 색: 줄 경계를 넘어 열린 SGR 시퀀스를 꼬리 앞에 이어 붙인다(시퀀스 목록으로 보관, 첫 파라미터가 0이거나
+  비면 초기화, **상한 64개**). SGR 스캔은 정규식 없이 ESC + `[` + 숫자/`;`/`:` + `m`을 직접 읽는다.
+  SGR 외 제어(`\b`, CSI 이동/지우기, OSC)는 걸러내지 않고 통과시킨다.
+- 꼬리 초기화 시점: println 계열 sink(`writeOutput`/`writeError`), 텍스트 안 `\n`, 읽기 시작(REPL·stdin),
+  새 worker.
+- 폭 초과 처리(`rewindTail`): 꼬리가 터미널 폭을 넘으면 `read()` 앞에 `\x1b[nA`로 첫 행까지 커서를 올린다
+  (TRP-016). 행 수는 `term.write('', cb)`로 flush를 기다린 뒤 화면 버퍼에서 커서 행부터 `isWrapped`를 위로
+  세어 구한다. **짧은 꼬리(`길이 × 2 < cols`)는 flush 없이 건너뛴다.**
+- stdin 경로(`createInputReader`)는 꼬리 그대로가 프롬프트의 전부이고, REPL 경로(`createReplBridge`)는
+  꼬리 + `\x1b[0m` + `>>> `다(sink·꼬리 규칙은 `05-output.md`, 프롬프트 문자열은 `02-console-core.md` 4.3 참고). 둘을 한 함수로 일반화하지 않았다.
+
+참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02b-input-ctrl-c.md`,
+이전 구현 설계 문서 `11-stdin-prompt.md`,
+`/work/cp949/pyodide-samples/apps/repl/src/repl/{stdin-callback,read-guard,stdin-reader,output-tail}.ts`
+

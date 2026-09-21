@@ -1,0 +1,41 @@
+{
+  "name": "@cp949/runo-pyodide-repl",
+  "version": "0.0.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cp949/runo-pyodide-repl.git",
+    "directory": "packages/pyodide-repl"
+  },
+  "homepage": "https://github.com/cp949/runo-pyodide-repl#readme",
+  "bugs": {
+    "url": "https://github.com/cp949/runo-pyodide-repl/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "eslint --max-warnings 0",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "eslint": "10.11.0",
+    "tsdown": "0.23.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.1"
+  }
+}
