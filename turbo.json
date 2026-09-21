@@ -14,9 +14,14 @@
       "dependsOn": ["^lint"]
     },
     "check-types": {
-      "dependsOn": ["^check-types"]
+      "dependsOn": ["^build"]
     },
     "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "preview": {
+      "dependsOn": ["build"],
       "cache": false,
       "persistent": true
     }
