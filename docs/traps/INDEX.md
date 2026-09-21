@@ -13,3 +13,5 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-007](./TRP-007-vite-dev-stale-module-after-file-replace.md) | 파일을 `git checkout`으로 되돌린 뒤 다시 변조하면 vite dev가 낡은 모듈을 계속 준다 | ACTIVE | vite dev를 띄워 둔 채 소스를 변조 → `git checkout` 원복 → 재변조하며 브라우저 확인을 반복할 때(양성 대조) |
 | [TRP-008](./TRP-008-negative-check-misses-scrolled-log.md) | "로그가 없다"는 브라우저 확인을 뷰포트만 훑어 하면 화면 밖으로 밀려난 로그를 놓친다 | ACTIVE | 브라우저 하니스가 후속 출력 뒤 뷰포트(24행)에서 "이 문자열이 없다"를 판정할 때, 여러 행짜리 stderr 로그가 대상일 때 |
 | [TRP-009](./TRP-009-concurrent-agents-contaminate-worktree.md) | 한 작업 트리에서 에이전트 둘이 동시에 일하면 변이 검사와 시험이 서로를 오염시킨다 | ACTIVE | 한 저장소·브랜치에서 에이전트 둘 이상이 변이 검사기·임시 계측·커밋을 동시에 쓸 때 |
+| [TRP-010](./TRP-010-stdin-read-n-leaves-newline-in-buffer.md) | `sys.stdin.read(n)`이 남긴 줄 끝 `\n`이 다음 읽기를 콜백 없이 채운다 | ACTIVE | 같은 pyodide 인스턴스에서 `sys.stdin.read(n)` 뒤 `input()`·`readline()`·`readlines()`로 읽는 시험·세션 |
+| [TRP-011](./TRP-011-echoed-input-satisfies-output-wait-instantly.md) | 출력 도착을 "화면 행에 마커 포함"으로 기다리면 입력한 코드 행이 마커를 포함해 즉시 통과한다 | ACTIVE | 브라우저 하니스가 지연·배경 출력을 텍스트 포함으로 기다리고 마커가 입력한 코드에도 들어 있을 때 |

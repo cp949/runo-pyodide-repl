@@ -57,7 +57,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - interrupt buffer: `signalInterrupt`(SEQ 먼저, SIGNAL 나중), `acknowledgeInterrupt`, `discardPendingInterrupt`(지운 경우만 ack), `hasProtocolSlots` 시험.
 - 변이 검사: `readInput` 알림을 `wait()` 뒤로 옮기면 시험이 멈춤을 잡는다. `FLAG_LAST` 누락, SEQ/SIGNAL 순서 뒤집기가 각각 실패한다.
 
-인계: `protocol/`의 공개 표면은 `createRpc`(`call`·`notify`·`dispose`), `createStdinMailbox`·`createMailboxWriter`(`deliver`·`cancel`·`fail`)·`createMailboxReader`(`wait`), `createInterruptBuffer`·`signalInterrupt`·`acknowledgeInterrupt`·`discardPendingInterrupt`·`hasProtocolSlots`, `InitFrame`·`parseInitFrame`·`postInitFrame`이다. `readInput` 알림 → `wait()` 순서는 이 RD에서 시험용 worker 역할(`src/test/roles/repl-worker.ts`)만 가진다. RD-006의 `stdin-callback.ts`가 그 순서를 프로덕션 코드로 갖게 되므로 그 파일에 같은 변이 검사를 건다. SEQ/SIGNAL 메모리 순서는 단위 시험(`Atomics.store` 가로채기)만 잡으므로 RD-007이 눌림 주입 스레드로 다시 본다. worker 스레드 시험 하니스(`src/test/thread.ts`)와 규칙은 `09-testing.md` 9.1. `runReplWorker()`는 `parseInitFrame`으로 프레임을 검증하고 에코까지만 했으며(RD-004에서 본문을 채웠다), 데모의 임시 프레임(`apps/demo/src/App.tsx`)은 검증을 통과하는 형태로 바뀌었고 RD-004에서 `createRepl`(`createWorker`·채널 생성)이 대체했다. 비격리 페이지에서는 `createRepl`이 worker를 만들지 않고 경고만 낸다(RD-004, ADR-0004). 함정: `docs/traps/` TRP-002·TRP-003.
+인계: `protocol/`의 공개 표면은 `createRpc`(`call`·`notify`·`dispose`), `createStdinMailbox`·`createMailboxWriter`(`deliver`·`cancel`·`fail`)·`createMailboxReader`(`wait`), `createInterruptBuffer`·`signalInterrupt`·`acknowledgeInterrupt`·`discardPendingInterrupt`·`hasProtocolSlots`, `InitFrame`·`parseInitFrame`·`postInitFrame`이다. `readInput` 알림 → `wait()` 순서는 이 RD에서 시험용 worker 역할(`src/test/roles/repl-worker.ts`)만 가졌다. RD-006이 `stdin-callback.ts`에 그 순서를 프로덕션 코드로 옮기고 같은 변이 검사(알림을 `wait()` 뒤로 이동)를 걸었다(`worker/stdin-callback.test.ts`). SEQ/SIGNAL 메모리 순서는 단위 시험(`Atomics.store` 가로채기)만 잡으므로 RD-007이 눌림 주입 스레드로 다시 본다. worker 스레드 시험 하니스(`src/test/thread.ts`)와 규칙은 `09-testing.md` 9.1. `runReplWorker()`는 `parseInitFrame`으로 프레임을 검증하고 에코까지만 했으며(RD-004에서 본문을 채웠다), 데모의 임시 프레임(`apps/demo/src/App.tsx`)은 검증을 통과하는 형태로 바뀌었고 RD-004에서 `createRepl`(`createWorker`·채널 생성)이 대체했다. 비격리 페이지에서는 `createRepl`이 worker를 만들지 않고 경고만 낸다(RD-004, ADR-0004). 함정: `docs/traps/` TRP-002·TRP-003.
 
 ### RD-003 — 터미널 마운트와 줄 편집
 
@@ -106,19 +106,20 @@ worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 
 
 ### RD-006 — `input()` 읽기: 메일박스·꼬리 프롬프트·read-guard
 
-상태: 대기 · 이전: RD-006, RD-006a, RD-021(가드) · 설계: `04-stdin-input.md`, `01-protocols.md` 2절, ADR-0005
+상태: 완료 · 이전: RD-006, RD-006a, RD-021(가드) · 설계: `04-stdin-input.md`, `01-protocols.md` 2절, ADR-0005
 
 worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), main `stdin-reader.ts`(꼬리 그대로가 프롬프트, `rewindTail`), `read-guard.ts`.
 
 시나리오: `name = input("x: ")` → `x: ` 뒤에서 대기, `abc` Enter → 화면은 `x: abc` 한 줄, `name == "abc"`. `input()`·`sys.stdin.readline()`은 프롬프트 없이 읽는다. flush한 `print("t", end="")` 뒤 `input()`은 `tabc`. 프롬프트 대기 중 `asyncio.get_event_loop().call_later(1, lambda: print(input()))`처럼 배경 콜백이 `input()`을 불러도 REPL이 멈추지 않고, 순서는 REPL 줄 → 배경 `input` 줄 → 콜백 출력 → REPL 줄 실행이다. 같은 대기 중 `call_later(2, print, 'TICK')`의 `TICK`이 2초 뒤 바로 보인다.
 
 완료 기준:
-- `x: abc` 한 줄, 프롬프트 없는 `input()`, `tabc`·`tp: abc`, 130자·200자·전각·정확히 폭 프롬프트에서 앞 행 중복 없음(이전 RD-006a 브라우저 52개 시나리오와 같은 결과). 세션 리셋 뒤 프롬프트가 이전 꼬리를 물려받지 않는다.
-- `input()`/`sys.stdin.readline()/read()/readlines()`/`for line in sys.stdin` 전부 같은 경로로 값이 들어온다(node + 실제 pyodide).
-- read-guard 단위 시험(RED 확인, 변이 검사)과 브라우저 프로브(가드를 빼면 `1+1`이 멈추고 넣으면 순서대로).
-- 메일박스 대기 중 worker는 `complete`에 답하지 못하지만 main이 `input()` 읽기 중 Tab을 요청하지 않으므로 교착이 없다(시험으로 고정).
+- `x: abc` 한 줄, 프롬프트 없는 `input()`, `tabc`·`tp: abc`, 130자·200자·전각·정확히 폭 프롬프트에서 앞 행 중복 없음. 이전 RD-006b 브라우저 74개 중 stdin 해당 23개(E1·K1~K3·L1·M1·M2·N1~N3·O1·O2·P1~P9·R1·U1 원형)와 ROADMAP 시나리오(`x: abc`, `TICK`)를 옮겨 dev 확인 19개 전부 PASS, preview(빌드 산출물) ROADMAP 시나리오 8/8 PASS(`pageerror`·콘솔 경고 0). 세션 리셋 뒤 프롬프트가 이전 꼬리를 물려받지 않는 성질은 새 sink 세트가 빈 꼬리로 시작하는 단위 시험까지만 본다(브라우저 확인은 RD-010).
+- `input()`/`sys.stdin.readline()/read()/readlines()`/`for line in sys.stdin` 전부 같은 경로로 값이 들어온다(node + 실제 pyodide, `worker/stdin-callback.test.ts`). `read()`·`readlines()`·반복은 EOF가 없어 끝나지 않는다(편차 34).
+- read-guard 단위 시험(RED 확인, 변이 검사 9/9)과 브라우저 프로브(`bg-input-guard-probe.mjs`: 가드를 빼면 REPL 읽기가 고아가 되어 시간 초과, 넣으면 REPL 줄 → 배경 `input` 줄 → 콜백 출력 → REPL 줄 실행 순서이고 이어서 `1+1`이 `2`). 브라우저 양성 대조 3/3(`resetTail` 삭제, 알림을 `wait()` 뒤로 이동, 가드 대기 삭제)이 해당 확인만 실패했다가 원복 후 통과했다.
+- 메일박스 대기 중 worker는 `complete`에 답하지 못하지만 요청은 포트에 큐잉되어 `deliver` 뒤 응답한다(`protocol/thread-scenario.test.ts`, 스레드 시험). main이 `input()` 읽기 중 Tab을 요청하지 않는다는 쪽은 Tab 리더가 들어오는 RD-015가 시험으로 고정한다.
+- 루트 `pnpm check-types`·`lint`·`test`·`build` 통과(시험: `xterm-readline` 78 + `demo` 3 + `pyodide-repl` 24파일 378).
 
-인계(RD-005): `stdin-reader`는 `terminal/rewind-tail.ts`의 `rewindTail`을 재사용하고, `createRepl`이 `createReplReader`에 준 터미널 뷰(`liveTerminal`, dispose 뒤 write 콜백을 전달하지 않음, `docs/traps/TRP-004`)를 같이 받아야 한다. RD-005가 건너뛴 이전 RD-006b 브라우저 시나리오: A1~A5·B1·B2·C1·C2·D1·E1·E2·H1·H2·K1~K3·L1·M1·M2·N1~N3·O1·O2·P1~P9·Q1·R1·S1·J1·J3(`input()`·stdin, 취소 포함은 RD-008). RD-005의 U1은 `input("p: ")` 대신 출력 없는 `pass`로 꼬리 비움을 확인했으므로 이 RD에서 원래 `input()` 형태로 되살린다.
+인계: worker는 `worker/stdin-callback.ts`의 `createStdinCallback({ requestInput, wait })`(`requestInput(true)` = `readInput` 알림 → `wait()` 순서를 이 모듈이 소유하고 `\n`을 붙이지 않는다)를 `boot.ts`가 `createConsole` 뒤·`ready` 알림 전에 `pyodide.setStdin({ stdin })`으로 건다(`try` 안이라 던지면 `loadFailed`). `requestInput`은 `rpc.notify("readInput", cancelable)`, `wait`는 `createMailboxReader(...).wait`가 주입된다. main은 `terminal/stdin-reader.ts`의 `createInputReader(readline, term, sinks)`(꼬리 그대로가 프롬프트, SGR 리셋 없음, `rewindTail` 재사용)와 `terminal/read-guard.ts`의 `createReadGuard({ readLine, readInput })`(활성 REPL 읽기 결과 뒤로 stdin 읽기를 미룸, 순서만 담당)를 `createRepl`이 조립한다. `readInput` 알림 핸들러는 가드를 거친 읽기 결과를 `mailbox.deliver`하고 읽기가 실패하면 `disposed`가 아닐 때만 `mailbox.fail(String(error))`로 worker를 깨운다(Python `OSError`). `readLine` 겹침 거절(`reading`)은 가드 바깥에서 검사한다(거절된 promise를 가드가 추적하면 활성 REPL 읽기를 잃는다). stdin 리더에도 REPL 리더와 같은 `liveTerminal` 뷰(TRP-004)를 준다. **중간 상태**: `wait()`의 `null`은 그대로 돌려줘 `EOFError`가 되지만 main에 `mailbox.cancel()`을 부를 경로가 없어 실제로는 오지 않고, `input()` 중 Ctrl+C는 벤더 readline이 `^C`를 찍고 같은 프롬프트를 다시 그릴 뿐 worker는 계속 정지한다(`cancelable` 인자도 무시). `index.test.ts`가 이 동작을 고정하므로 RD-008이 취소를 넣을 때 그 시험을 함께 바꾼다. 키 버퍼링은 없다(`.scratch/type-ahead`). 함정: `docs/traps/` TRP-010(`read(n)`이 남긴 `\n`)·TRP-011(브라우저 확인의 출력 대기가 입력 에코에 즉시 통과).
 
 ## Phase 1 — Ctrl+C 전체
 
@@ -139,6 +140,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 
 인계(RD-005): `discardPendingInterrupt`는 `worker/repl-loop.ts`에서 `readLine` 응답 직후·`run` 전에 넣는다(루프가 `protocol/`을 import하지 않으므로 주입 함수로 받는다). 프롬프트에서 Ctrl+C는 벤더 `Readline`이 `^C`를 찍고 프롬프트를 다시 그릴 뿐 worker에 알리지 않는다(`setCtrlCHandler`는 활성 읽기가 없을 때만 불린다). 건너뛴 이전 시나리오: RD-006b의 F×5·G1·G2, RD-011a의 S08(`while True: pass` 중 Ctrl+C).
 
+인계(RD-006): `setStdin`은 `boot.ts`에서 `createConsole` 뒤·`ready` 알림 전에 걸려 있다. SIGINT 핸들러 설치·interrupt buffer 연결은 그 앞에 끼운다(`00-architecture.md` 3.1). 건너뛴 이전 시나리오: RD-006b의 S1(실행 중 Ctrl+C의 `^C` 에코를 `except`로 잡은 뒤 `input()` → `t^Cx: abc`).
+
 ### RD-008 — 입력줄 Ctrl+C(미완성 블록 취소)와 `input()` 중 Ctrl+C
 
 상태: 대기 · 이전: RD-012b, RD-012c · 설계: `04-stdin-input.md` 3.1, `06-editing.md` 6.3(취소·`cancelSettling`), `02-console-core.md` 5.2(`run(null)`)
@@ -151,6 +154,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 - `cancelSettling` 방어: 취소 뒤 다음 읽기 활성화 전 Ctrl+C가 중단 경로로 가지 않는다(단위 시험).
 
 인계(RD-005): main `readLine` 핸들러는 `(prompt)`만 받고 `pending`·`cancelable`을 쓰지 않으며 `null`을 응답하지 않는다. 이 RD가 시그니처를 `(prompt, pending, cancelable)`로 넓히고 취소를 `null`로 응답한다. worker의 `run(null)`(버퍼 clear → `KeyboardInterrupt` 빨강 → `>>> `)과 안전망은 RD-005에서 node 시험으로 끝났다. 건너뛴 이전 시나리오: RD-006b의 G3·W2(`t>>> abc`에서 Ctrl+C), RD-011a의 S14(`if True:` 뒤 Ctrl+C).
+
+인계(RD-006): `createStdinCallback`은 `{ requestInput, wait }`를 받아 `wait()`의 `null`을 그대로 돌려준다(EOF, 중간 상태). 이 RD가 `pyodide`·`interruptBuffer`를 받아 `signalInterrupt`(요청 번호를 올린다) → `checkInterrupt()` 변환으로 바꾼다(`04-stdin-input.md` 3.1). main에는 `mailbox.cancel()`을 부르는 경로가 없다: 벤더 readline의 Ctrl+C는 `^C` 뒤 같은 프롬프트를 다시 그리고 `readInput` 핸들러는 `cancelable`을 받지 않는다. `createInputReader.read()`는 `Promise<string>`이고 `createReadGuard`의 `L`·`I` 제네릭은 `string`이라, 취소를 넣을 때 반환형을 `string | null`로 넓히면 가드 코드는 그대로다. `index.test.ts`의 "stdin 읽기 중 Ctrl+C는 `^C`를 찍고 같은 프롬프트를 다시 그리며 메일박스는 IDLE" 시험이 중간 상태를 고정하므로 취소 동작으로 바꿀 때 함께 바꾼다. 건너뛴 이전 시나리오(취소 계열): RD-006b의 A1~A5·B1·B2·C1·C2·D1·E2·H1·H2·Q1(J1·J2는 RD-010과 함께).
 
 ### RD-009 — 정지한 실행 중 Ctrl+C: 감시 타이머, `time.sleep` 조각, webloop 재보고 억제, 프롬프트 유휴 SIGINT 폐기
 
@@ -179,6 +184,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 완료 기준: 위 시나리오(브라우저). 리셋 순서(들여쓰기 단위 초기화 → 송신기 취소 → `SIGNAL=0` → terminate → 새 worker·새 메일박스·새 sink 세트)가 시험으로 고정된다. StrictMode 이중 마운트에서 경고·중복 worker가 없다. `dispose()`가 두 번 불려도 안전하다.
 
 인계(RD-005): `exit()`(`terminated`) 뒤 worker는 살아 있고 터미널·입력은 무응답이다. 복구는 이 RD의 리셋과 Alert다(데모의 `Python session terminated.` 한 줄을 Alert로 교체). `createRepl`의 `liveTerminal` 뷰가 쓰는 `disposed`는 핸들 단위이므로 리셋이 핸들을 유지한 채 세션만 바꾸면 세션 단위 해제 신호가 필요하다(이전 세션의 `rewindTail` flush 콜백이 새 세션 읽기에 끼어들 수 있다). 건너뛴 이전 시나리오: RD-006b의 AC1·J2(세션 리셋 뒤 꼬리·`input()` 취소).
+
+인계(RD-006): 세션 리셋 뒤 프롬프트가 이전 꼬리를 물려받지 않는 성질은 `stdin-reader.test.ts`의 "새 sink 세트는 빈 프롬프트로 시작한다"(단위)까지만 본다. 브라우저 확인은 RD-006b의 J1·J2·J3(J1·J2는 취소도 필요해 RD-008 뒤)·AC1이다. 리셋은 세션마다 `createStdinMailbox`·sink 세트·`createInputReader`·`createReadGuard`를 새로 만들어야 옛 세션의 stdin 읽기·가드 추적이 새 세션에 끼어들지 않는다. `readInput` 핸들러의 `disposed`는 핸들 단위라 리셋이 핸들을 유지하면 옛 worker가 죽었다는 세션 단위 신호가 필요하다(죽은 worker에 대한 `mailbox.fail()`의 `untilIdle`은 영영 안 풀린다).
 
 ### RD-011 — 여러 줄 입력 제출(붙여넣기·Shift+Enter·히스토리 재호출)
 
@@ -216,6 +223,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 
 인계(RD-005): 건너뛴 이전 시나리오는 RD-006b의 X2·X3(블록 history 재호출 뒤 `012>>> ` 프롬프트 유지)다. worker는 `readLine`에 `pending`을 보내지만 main 핸들러가 아직 쓰지 않는다.
 
+인계(RD-006): `createReadGuard`의 `readLine`은 `(prompt)`만 받는다. `pending`을 리더에 넣는 RD-013·014는 `ReadGuardDeps.readLine` 시그니처와 `createRepl`의 `readLine` 핸들러·조립을 함께 넓힌다(REPL 읽기는 가드가 즉시 부르므로 시작 타이밍은 그대로다).
+
 ### RD-015 — Tab 완성(이름·속성), 완성 중 Ctrl+C, Tab 큐
 
 상태: 대기 · 이전: RD-016, RD-016c, RD-016f · 설계: `07-tab-completion.md` 7.1~7.4
@@ -223,6 +232,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 시나리오: `a.` 뒤 Tab → 후보 하나면 삽입, 여럿이면 공통 접두사. 같은 자리 두 번째 Tab → 열 우선 목록(셀 폭 = 최장 + 2, 200개 상한). 빈 스템은 `4 - (열 % 4)`칸 공백을 왕복 없이. `important = ` 뒤 Tab 8연타(0ms) → 32칸. `__getattr__`가 무한 루프인 객체에서 `a.x` Tab 뒤 Ctrl+C → 세션 리셋 없이 `>>> `.
 
 완료 기준: 이전 RD-016 브라우저 58개 시나리오와 같은 결과(3.14 pty 목록 화면 행 일치 포함), 경합 Tab→Enter·Tab→Ctrl+C 각 20회 정지 0, `input()` 중 Tab 무동작, 세션 리셋·`exit()` 뒤 동작, 왕복 지연 중앙값 30ms 이내. 코드포인트↔UTF-16 변환 시험(서로게이트 쌍). 완성 중 취소 단위 시험(RED + 변이 검사).
+
+인계(RD-006): "main이 `input()` 읽기 중 Tab을 요청하지 않는다"는 성질(메일박스 대기 중 worker는 `complete`에 답하지 못한다)은 Tab 리더가 들어올 때 시험으로 고정한다. 프로토콜 쪽(메일박스 대기 중 보낸 `complete`는 `deliver` 전 응답 없음, 뒤 응답, 유실 없음)은 RD-006이 `protocol/thread-scenario.test.ts`에 넣었다. `input()` 안 Tab 무동작은 편차 17이다.
 
 ### RD-016 — `import`/`from` 줄의 모듈 완성
 
@@ -251,6 +262,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 완료 기준: `pnpm --filter demo e2e:<이름>`으로 기준선 5종이 재현된다(RD-016 58/58, RD-016a 129/129, RD-012b 22/24, RD-012c 20/24, RD-006b 74/74)과 `boot-press` N=30. 기준 인터프리터(3.14.4)와 pyodide 번들(3.14.2) 차이를 README에 적는다.
 
 인계(RD-005): RD-005 검증 스크립트(`lib.mjs` 하니스, `repl-check.mjs`(normal·cdn-blocked·not-isolated), `prompt-join-check.mjs`(RD-006b 이식 20개), `trailing-newline-check.mjs`(RD-011a 이식 12개), `carryover-check.mjs`, `keys-after-enter-probe.mjs`, `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있다. 이 RD가 `apps/demo/e2e/`로 옮길 때 각 RD가 넘긴 "건너뛴 시나리오"를 되살려 기준선 5종을 채운다. `ONLY=<이름 접두어,…>` 환경변수로 확인을 분리해 돌릴 수 있다. 400토큰(25행, 스크롤백) 꼬리 관찰은 새 데모에 `window.__term`이 없어 옮기지 않았다. 함정: `docs/traps/TRP-005`·`TRP-007`·`TRP-008`.
+
+인계(RD-006): RD-006 검증 스크립트(`lib.mjs`(RD-005 하니스 + `typeWhenReading`·`settled`), `stdin-input-check.mjs`(RD-006b stdin 23개 ID + `x: abc`·`TICK`), `bg-input-guard-probe.mjs`, `positive-controls.py`, 이전 74개 ID의 실행·건너뜀 표 `skipped-ids.md`)는 `_works/_completed/20260922-06-rd-006-stdin-input/verify/`에 있다. 이 RD는 `skipped-ids.md`의 표(RD-006 실행·RD-005 실행·건너뜀과 대상 RD)로 74개 복원 목록을 만든다. 입력은 읽기가 시작된 뒤에 보내야 하는데 stdin 프롬프트 글자는 읽기 시작보다 먼저 나오므로 첫 글자가 에코될 때까지 재시도한다(`TRP-005`). 출력 도착을 마커 포함으로 기다릴 때 입력한 코드 행을 뺀다(`TRP-011`).
 
 ---
 

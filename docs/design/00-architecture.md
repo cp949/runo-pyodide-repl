@@ -48,6 +48,7 @@
 3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `topLevelAwait`, pyodide `indexURL`. worker 스크립트는 첫 `await` 이전에 `message` 리스너를 걸어 이 프레임을 받는다. 프레임은 하나뿐이라 구분자(`instanceof`)가 필요 없다.
 4. worker가 pyodide를 로드하고 콘솔을 만든 뒤 `ready` 알림(또는 `loadFailed`)을 보낸다. 로드 실패는 worker를 죽이지 않는다.
 5. worker가 SIGINT 핸들러 설치 → interrupt buffer 연결 → `setStdin` → 감시 타이머 시작 → 배너 출력 → REPL 루프 진입(`03-ctrl-c.md` 2.6 순서).
+   RD-006 시점에는 이 중 `setStdin`만 있다. `createConsole` 뒤·`ready` 알림 전에 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait }) })`을 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). `try` 블록 안이라 `setStdin`이 던지면 `loadFailed`로 간다. SIGINT 핸들러·interrupt buffer 연결은 이 앞에 RD-007이, 감시 타이머는 이 뒤에 RD-009가 끼운다.
 
 ### 3.2 REPL 루프(worker)
 
@@ -75,7 +76,7 @@ stdin 콜백(cancelable=true):
   null이면 signalInterrupt(buffer) → pyodide.checkInterrupt() → EINTR → KeyboardInterrupt
 ```
 
-main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미룸)를 거쳐 readline으로 한 줄을 읽고 `mailbox.deliver(text)`, Ctrl+C면 `mailbox.cancel()`.
+main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미룸)를 거쳐 readline으로 한 줄을 읽고 `mailbox.deliver(text)`, Ctrl+C면 `mailbox.cancel()`, 읽기가 실패하면(dispose가 아닐 때) `mailbox.fail(String(error))`로 worker를 깨워 `OSError`로 드러낸다(`04-stdin-input.md` 3.2). RD-006 시점에는 Ctrl+C 경로가 없다: 벤더 readline이 `^C` 뒤 같은 프롬프트를 다시 그리고 `stdin-callback`은 `null`을 그대로 돌려준다(RD-008이 위 `null` 변환을 넣는다).
 
 ### 3.4 세션 리셋·크래시·종료
 
@@ -145,8 +146,8 @@ packages/pyodide-repl/src/
     notice.ts              세션 밖 안내 줄(writeNotice)              ← 05-output.md 4.1
     rewind-tail.ts         꼬리가 폭을 넘으면 첫 행까지 커서를 올림     ← 04 3.3 (repl-reader·stdin-reader 공용)
     repl-reader.ts         꼬리 + '>>> ' 합성 읽기                   ← 04 3.3
-    stdin-reader.ts        input() 읽기(꼬리 그대로)
-    read-guard.ts          stdin 읽기를 활성 REPL 읽기 뒤로           ← 04 3.2
+    stdin-reader.ts        input() 읽기(꼬리 그대로, SGR 리셋 없음)     ← 04 3.3
+    read-guard.ts          stdin 읽기를 활성 REPL 읽기 뒤로(순서만)    ← 04 3.2
     auto-indent.ts         순수 계산                                  ← 06 6.3
     auto-indent-reader.ts  read()/readKey 래핑(벤더링 export만 사용)
     block-history.ts       블록 → history 항목 하나                   ← 06 6.4
@@ -166,13 +167,13 @@ packages/pyodide-repl/src/
     interrupt-buffer.ts    connectInterrupts(핸들러 → 연결)            ← 03 2.6
     sigint-handler.py      SIGINT 핸들러·깨우기·sleep 조각            ← 03 2.4
     interrupt-watch.ts     감시 타이머                                ← 03 2.5
-    stdin-callback.ts      null → KeyboardInterrupt                   ← 04 3.1
+    stdin-callback.ts      readInput 알림 → wait()(RD-008: null → KeyboardInterrupt)   ← 04 3.1
     sink-writer.ts         전역 stdout/stderr Writer                   ← 05 4.2
     complete-source.ts/.py 완성 후처리·ZipStdlibModuleCompleter        ← 07 7.5
     webloop-reraise.ts/.py                                             ← 03 2.8
 ```
 
-`terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 예외는 `worker/boot.ts`다. 부팅 시퀀스를 조립하는 모듈이라 `createRpc`·`InitFrame`을 import하고, pyodide 로더는 `worker.ts`가 주입한다(브라우저는 CDN 로더, node 시험은 npm `loadPyodide`). `console.ts`·`sink-writer.ts`·`top-level-await.ts`는 `protocol/`을 import하지 않고 sink 함수를 받는다. `repl-loop.ts`와 `submission-runner.ts`도 `readLine`·`run`·출력 함수를 주입받고, RPC 래퍼는 `boot.ts`가 만든다. 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
+`terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 예외는 `worker/boot.ts`다. 부팅 시퀀스를 조립하는 모듈이라 `createRpc`·`createMailboxReader`·`InitFrame`을 import하고, pyodide 로더는 `worker.ts`가 주입한다(브라우저는 CDN 로더, node 시험은 npm `loadPyodide`). `console.ts`·`sink-writer.ts`·`top-level-await.ts`는 `protocol/`을 import하지 않고 sink 함수를 받는다. `repl-loop.ts`와 `submission-runner.ts`도 `readLine`·`run`·출력 함수를 주입받고, `stdin-callback.ts`도 `requestInput`·`wait`를 주입받으며, RPC 래퍼는 `boot.ts`가 만든다. 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
 
 ### 4.3 apps/demo
 

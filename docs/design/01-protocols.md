@@ -107,7 +107,7 @@ untilIdle():
 - 폴링 간격은 `POLL_INTERVAL_MS = 1`(ms)로 확정했다. 브라우저의 중첩 타이머 클램프(약 4ms)가 실제 간격을 늘려도 이 대기는 64KiB를 넘는 입력의 청크 사이에서만 돌아 정확성에는 영향이 없다. `Atomics.waitAsync` 유무는 호출 시점에 확인한다(Chromium 148은 메인·Worker 모두 있다. Firefox·WebKit은 미확인).
 
 - main은 `readInput` 알림을 받은 뒤에만 쓴다. 알림 없이 쓰면 worker가 없는 값을 다음 읽기에서 가져간다.
-- `deliver`·`cancel`은 둘 중 하나만, 한 번만 부른다. read-guard와 readline이 한 읽기에 한 결과만 내는 것으로 보장한다.
+- `deliver`·`cancel`·`fail`은 한 읽기에 셋 중 하나만, 한 번만 부른다. read-guard와 readline이 한 읽기에 한 결과만 내는 것으로 보장한다. `fail`은 main의 읽기가 실패했을 때(dispose가 아닐 때만) 쓴다.
 - worker가 `terminate()`로 죽으면 대기 중 값은 버려진다. 메일박스는 세션마다 새로 만들므로 다음 세션에 섞이지 않는다.
 
 ### 2.4 시험
@@ -169,7 +169,10 @@ worker: discardPendingInterrupt → runner.run → ntf writeOutput("2") → req 
 worker: run("x = input('x: ')") → stdout 콜백 → ntf write("x: ") → stdin 콜백 → ntf readInput(true) → mailbox.wait() [정지]
 main : write → 화면·꼬리 "x: " → readInput → read-guard 통과 → 꼬리를 프롬프트로 readline.read()
        Enter "abc" → mailbox.deliver("abc")           |  Ctrl+C → mailbox.cancel()
+       읽기 실패(dispose 아님) → mailbox.fail(String(error))
 worker: wait() = "abc" → 콜백 반환 → 실행 계속       |  wait() = null → signalInterrupt → checkInterrupt → KeyboardInterrupt
+       wait()가 Error를 던짐(fail) → 콜백이 그대로 전파 → input()에서 OSError
+       (RD-006 시점: `Ctrl+C → cancel()` 경로와 `null` 변환은 RD-008. `null`은 그대로 EOFError)
 
 (S4) 실행 중 Ctrl+C
 main : setCtrlCHandler → ntf 없이 sink.write("^C") → sender.send(): SEQ+1, SIGNAL=2, 5ms 점검

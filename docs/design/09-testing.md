@@ -26,7 +26,7 @@
   발동하지 못한다. 그런 변이는 간격·호출 경로를 바꾸는 방식으로 대체한다. `MessagePort`를 든 객체에는 `toContain`·
   `toEqual`을 쓰지 않는다(순환 내부 참조로 스택이 넘친다). 정체성 비교(`includes`)를 쓴다.
 - **이 저장소의 패턴**(RD-004에서 확립). 해당 파일: `worker/sink-writer-pyodide.test.ts`, `worker/top-level-await.test.ts`,
-  `worker/console.test.ts`, `worker/submission-runner.test.ts`, `terminal/sinks-pyodide.test.ts`, `worker/boot.test.ts`.
+  `worker/console.test.ts`, `worker/submission-runner.test.ts`, `terminal/sinks-pyodide.test.ts`, `worker/boot.test.ts`, `worker/stdin-callback.test.ts`.
   - 파일 상단에 `// @vitest-environment node`를 두고 `import { loadPyodide } from "pyodide"`를 인자 없이 부른다
     (npm 패키지 자체 `indexURL`을 쓴다). `beforeAll(async () => { pyodide = await loadPyodide(); }, 60_000)`으로
     파일마다 인스턴스 하나를 만들어 그 파일의 시험이 공유한다(로드가 수 초라 시험마다 만들지 않는다). CDN 로더
@@ -44,6 +44,8 @@
   - 러너(`worker/submission-runner.test.ts`)는 실제 pyodide의 `createConsole`이 만든 `ReplConsole`을 `createSubmissionRunner`에
     물려 한 줄 제출·값 에코·오류 표시·끝 개행·`exit`·`null` 취소를 본다. 사용자 코드 밖에서 새는 `KeyboardInterrupt` 안전망은
     실제 SIGINT 없이 `runLine`·`clearPending`을 `KeyboardInterrupt`를 던지는 Python 함수로 바꿔 끼워 재현한다.
+  - stdin 콜백(`worker/stdin-callback.test.ts`)은 실제 pyodide에 `setStdin({ stdin: createStdinCallback(...) })`을 걸고 `input()`·`sys.stdin.readline()`·`read(3)`·`readlines(1)`·`for line in sys.stdin`이 같은 경로로 값을 받는지, 콜백 호출 수가 소비한 줄 수와 같은지 본다. `requestInput`과 `wait`의 앞뒤 순서는 호출 순서를 기록하는 주입 함수로 단언한다(알림을 `wait()` 뒤로 옮긴 변이가 이 시험에서 잡힌다). `setStdin` 없이 `input()`을 부르면 시험이 실패하지 않고 스위트가 멈추므로(외부 `timeout`이 필요하다) 시험 인스턴스에 `setStdin({ error: true })`를 먼저 걸고, `afterEach`에서 `sys.stdin`을 새 스트림으로 교체한다(`read(n)`이 남긴 `\n`이 다음 시험을 채운다, `docs/traps/TRP-010`).
+  - 부팅의 `input()` 시험(`worker/boot.test.ts`)은 **선전달 기법**을 쓴다. `Atomics.wait(ctrl, STATE, IDLE)`은 STATE가 이미 READY면 즉시 돌아오므로, 각본이 `input()` 줄을 답하기 전에 main 역할이 `deliver`를 해 두고 타임라인(`write("x: ")` → `readInput(true)` → 다음 `readLine`)과 값(`x`의 에코 `'abc'`, `sys.stdin.readline()`의 에코 `'def\n'`)을 단언한다. 스레드는 쓰지 않는다. 메일박스 대기 중 `complete`가 큐잉되는 프로토콜 쪽은 `protocol/thread-scenario.test.ts`의 스레드 시험이 본다.
   - `exit()`를 실행하면 asyncio가 `SystemExit`을 WebLoop로 다시 던져 vitest가 `Unhandled Rejection`으로 실패 종료한다.
     `vitest.config.ts`의 `onUnhandledError`가 `PythonError` + 줄 시작 `SystemExit`만 무시하는 임시 조치이고(RD-009의
     webloop 재보고 억제가 들어오면 제거), `process.on("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
@@ -78,7 +80,9 @@
   기다리므로 배출을 두 번 한다. 읽기 Promise는 객체 `{ line }`에 담아 돌려준다(`async` 함수가 반환한 Promise를 풀어 Enter까지
   멈추는 것을 피한다). 응답이 오지 않는 시험(dispose 뒤 요청)은 `observe`로 상태만 본다.
 - 실제 pyodide의 **동기** stdin 콜백 안에서 실제 `Readline`을 기다릴 수 없어, `input()` 통합은 read를
-  동기 fake로 대신한다.
+  동기 fake로 대신한다. 이 저장소는 양쪽을 나눠 본다: main은 jsdom(`index.test.ts`의 `input() 읽기`)에서 `readInput` 알림 뒤 메일박스 상태(`STATE`·데이터 바이트·`FLAG_LAST`)를 동기로 확인하고,
+  worker는 node + 실제 pyodide(`boot.test.ts`의 선전달 기법)에서 본다. 실제 `Atomics.wait` 왕복은 RD-002의 스레드 시험이 담당한다.
+- `read-guard.test.ts`는 결과를 시험이 정하는 가짜 읽기(`deferred`)로 순서 규칙을, 실제 `Readline` + 가짜 터미널 + `createReplReader`·`createInputReader`로 "REPL 줄은 REPL 읽기가, 그다음 줄은 stdin 읽기가 받는다"를 본다(가드의 `await`를 빼면 후자가 실패한다). 마이크로태스크 한 번 안에 시작해야 하는 규칙("활성 REPL 읽기가 없으면 기다리지 않는다")은 `tick` 뒤가 아니라 `await Promise.resolve()` 뒤에 단언한다.
 - **변이 검사(mutation)** 를 관행으로 쓴다: 요청 번호와 SIGINT 쓰기 순서 뒤집기, 송신기가 ack를 먼저 읽기,
   핸들러 ack 위치 옮기기, 감시 타이머 ack를 비교 교환과 무관하게 올리기, 연결이 무조건 ack하기 등이 각각
   해당 테스트를 실패시키는지 확인했다.
@@ -94,6 +98,8 @@
 - xterm이 키와 출력을 비동기로 그리므로 하니스는 입력이 커서 행에 그려진 것을 확인한 뒤 진행하고, Enter를 친 뒤에는 화면이
   바뀐 것을 확인하고 나서 새 프롬프트(`>>>`·`... `) 행을 기다린다. 그리기 전에 화면을 읽으면 낡은 프롬프트 행에 통과하고,
   새 프롬프트가 뜨기 전에 보낸 키는 버려진다(`docs/traps/TRP-005`).
+- stdin 프롬프트(`x: `)는 읽기가 시작되기 전에 화면에 나온다(`write` 알림이 `readInput` 알림보다 먼저 그린다). 프롬프트 없는 `input()`은 화면 신호가 없다. 그래서 `waitLastEndsWith("x:")`가 참이어도 읽기가 시작됐다는 보장이 없어, 입력은 첫 글자가 에코될 때까지 재시도한다(`typeWhenReading`, 버려진 키는 화면에 흔적이 없어 안전하다, `docs/traps/TRP-005`).
+- 출력이 나온 시점을 "행에 마커 포함"으로 기다릴 때는 입력한 코드 행을 뺀다. 코드 행이 같은 마커를 포함해 즉시 통과한다(`docs/traps/TRP-011`). 시간을 재는 확인은 경과 시간과 화면 끝을 로그에 남긴다.
 - "이 로그가 없다"는 확인은 후속 출력에 밀려 뷰포트 밖으로 나간 행을 놓친다. 화면을 지우고(Ctrl+L) 한 번의 동작 직후 행 목록을
   정확히 단언한다(예: `gc.collect()` 직후 화면이 값 에코 한 줄뿐). 수정을 제거하는 변조로 확인이 실패하는지 봐서 검출력을 확인한다.
 - 미확인으로 남은 것: **프로덕션 빌드, Firefox, Safari, `sync=false` 폴백**, 자동화 E2E(범위 밖).

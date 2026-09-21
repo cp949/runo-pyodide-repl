@@ -58,6 +58,10 @@ Ctrl+C·sleep:
 
 33. **값 에코가 `sys.displayhook`을 거치지 않는다.** worker가 값의 `repr()` 전체를 만들어 `writeOutput`으로 낸다(`builtins._`는 `repr` 성공 뒤 갱신, 절단 없음). 사용자가 `sys.displayhook`을 바꿔도 반영되지 않는다. `repr()`가 예외를 내면 트레이스백은 `__repr__` 프레임부터 나오고 3.14의 첫 프레임(`File "<console>", line 1, in <module>`)이 없다(값이 이미 반환된 뒤 `repr`를 부르기 때문이다).
 
+stdin 읽기의 끝:
+
+34. **`sys.stdin.read()`·`readlines()`·`for line in sys.stdin`은 EOF(Ctrl+D)가 없어 줄마다 다시 읽고 끝나지 않는다**(RD-006). 벤더 `Readline`의 Ctrl+D는 글자 삭제이고 메일박스에 EOF 표식이 없다. 끊는 방법은 Ctrl+C뿐이며 그 경로는 RD-008이 넣는다. `input()`·`readline()`은 3.14와 같다(pyodide 314.0.7 `LegacyReader`가 콜백이 돌려준 문자열 끝에 `\n`을 붙이고 마지막 바이트가 `\n`이면 EOF를 넣지 않는다). `read(n)`·`readlines(hint)`처럼 상한이 있는 읽기는 한 줄 뒤 돌아온다(`read(n)`이 남긴 `\n`이 다음 읽기를 콜백 없이 채우는 것은 CPython 표준 동작이다, `docs/traps/TRP-010`). Ctrl+D EOF 표식은 프로토콜 확장이라 ROADMAP 항목으로 등록해야 한다.
+
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약")
 
 

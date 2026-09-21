@@ -37,3 +37,5 @@ Origin: RD-003 브라우저 검증에서 발견. `docs/design/10-parity-deviatio
   창은 여전히 약 20ms 안쪽이다. worker 왕복이 창을 늘리지 않았다. 위 "등록 시점"의 전제(RD-005가 창을 길게 만든다)는 Enter 직후 빈 줄에서는 성립하지 않았다. 실행 시간이 긴 입력(`time.sleep(2)` 등) 중에는 읽기가 없으므로 그 시간만큼 창이 열린다.
 
 - 프로브: `_works/_completed/20260922-05-rd-005-repl-loop/verify/keys-after-enter-probe.mjs`(RD-018이 저장소로 옮긴다).
+
+- RD-006 시점: `input()`(stdin 읽기) 시작 전에 친 키는 버려진다. 벤더 `Readline`은 활성 읽기가 없으면 단일 키를 버리고, stdin 읽기는 worker가 `readInput` 알림을 보낸 뒤 main이 `readline.read()`로 읽기를 시작할 때까지가 창이다. 프롬프트 글자(`x: `)는 `write` 알림이 먼저 그려 화면만 보고 키를 보내면 이 창에 걸린다(RD-006 브라우저 하니스는 첫 글자가 에코될 때까지 재시도한다). read-guard(`terminal/read-guard.ts`)는 활성 REPL 읽기가 끝난 뒤로 stdin 읽기의 시작을 미룰 뿐 키 버퍼와 무관하다: 미루는 동안 친 키는 활성 REPL 읽기가 받아 REPL 줄이 된다. 위 "결정이 필요한 것"의 `input()`·read-guard 상호작용에 대한 RD-006 시점 답은 "버퍼링 없음"이다. 상태는 `open` 유지.
