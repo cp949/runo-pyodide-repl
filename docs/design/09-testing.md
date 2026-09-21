@@ -17,6 +17,14 @@
 - 눌림은 `src/test/interrupt-presser.ts`가 `node:worker_threads`로 실제 스레드에서 버퍼에 쓴다.
 - pyodide private 의존(플래그, `run_sync`, `time.sleep.__wrapped__`, WebLoop 속성)은 **테스트가 깨지는 것이
   버전 업그레이드 알림**이라는 전제로 쓴다.
+- worker 스레드 시험(메일박스·프로토콜 통합 시나리오): `src/test/thread.ts`의 `spawnRole(name, workerData)`가
+  `src/test/roles/<name>.ts`를 실제 `worker_threads` 스레드로 띄운다. `Atomics.wait`에 영구히 막힌 스레드도 시험이
+  끝나면 `terminate()`로 회수된다. 역할 스크립트와 그것이 import하는 소스는 Node 타입 제거로 실행되므로 enum·
+  namespace·매개변수 프로퍼티를 쓰지 않고 타입 import는 `import type`으로 쓴다. 확장자 없는 상대 import는
+  `src/test/ts-resolve-hook.mjs`(`module.registerHooks`)가 푼다.
+- 변이 검사 주의: 비동기 폴링 대기를 없애는 변이는 마이크로태스크 스핀이 되어 이벤트 루프를 굶기고 시험 타임아웃도
+  발동하지 못한다. 그런 변이는 간격·호출 경로를 바꾸는 방식으로 대체한다. `MessagePort`를 든 객체에는 `toContain`·
+  `toEqual`을 쓰지 않는다(순환 내부 참조로 스택이 넘친다). 정체성 비교(`includes`)를 쓴다.
 
 ## 9.2 jsdom(기본 환경) + 실제 `Readline` + 가짜 터미널 / 가짜 타이머
 `auto-indent.test.ts`, `auto-indent-reader.test.ts`, `tab-reader.test.ts`, `stdin-reader.test.ts`,

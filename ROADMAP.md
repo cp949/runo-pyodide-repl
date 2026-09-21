@@ -45,7 +45,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 
 ### RD-002 — 프로토콜 코어 (RPC·stdin 메일박스·interrupt buffer·초기화 프레임)
 
-상태: 대기 · 이전: RD-002, RD-021(RPC 부분), RD-012e(버퍼 슬롯) · 설계: `01-protocols.md` 전체, ADR-0002
+상태: 완료 · 이전: RD-002, RD-021(RPC 부분), RD-012e(버퍼 슬롯) · 설계: `01-protocols.md` 전체, ADR-0002
 
 `packages/pyodide-repl/src/protocol/`에 `rpc.ts`, `stdin-mailbox.ts`, `interrupt-protocol.ts`, `init-frame.ts`를 만든다. pyodide 없이 순수 프로토콜만 구현·시험한다.
 
@@ -56,6 +56,8 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - 메일박스: `01-protocols.md` 2.4의 시험 전부(한 청크, 정확히 64KiB, 64KiB+1 두 청크, 멀티바이트 경계, 빈 문자열, `cancel`, `fail`). `Atomics.waitAsync` 없는 환경의 폴링 폴백 시험.
 - interrupt buffer: `signalInterrupt`(SEQ 먼저, SIGNAL 나중), `acknowledgeInterrupt`, `discardPendingInterrupt`(지운 경우만 ack), `hasProtocolSlots` 시험.
 - 변이 검사: `readInput` 알림을 `wait()` 뒤로 옮기면 시험이 멈춤을 잡는다. `FLAG_LAST` 누락, SEQ/SIGNAL 순서 뒤집기가 각각 실패한다.
+
+인계: `protocol/`의 공개 표면은 `createRpc`(`call`·`notify`·`dispose`), `createStdinMailbox`·`createMailboxWriter`(`deliver`·`cancel`·`fail`)·`createMailboxReader`(`wait`), `createInterruptBuffer`·`signalInterrupt`·`acknowledgeInterrupt`·`discardPendingInterrupt`·`hasProtocolSlots`, `InitFrame`·`parseInitFrame`·`postInitFrame`이다. `readInput` 알림 → `wait()` 순서는 이 RD에서 시험용 worker 역할(`src/test/roles/repl-worker.ts`)만 가진다. RD-006의 `stdin-callback.ts`가 그 순서를 프로덕션 코드로 갖게 되므로 그 파일에 같은 변이 검사를 건다. SEQ/SIGNAL 메모리 순서는 단위 시험(`Atomics.store` 가로채기)만 잡으므로 RD-007이 눌림 주입 스레드로 다시 본다. worker 스레드 시험 하니스(`src/test/thread.ts`)와 규칙은 `09-testing.md` 9.1. `runReplWorker()`는 `parseInitFrame`으로 프레임을 검증하고 에코까지만 하며(RD-004가 본문을 채운다), 데모의 임시 프레임(`apps/demo/src/App.tsx`)은 검증을 통과하는 형태로 바뀌었고 RD-003의 `createRepl`이 대체한다. 비격리 페이지에서는 데모가 worker를 만들지 않는다(안내는 RD-004). 함정: `docs/traps/` TRP-002·TRP-003.
 
 ### RD-003 — 터미널 마운트와 줄 편집
 

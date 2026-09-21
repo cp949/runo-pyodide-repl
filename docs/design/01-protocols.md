@@ -16,8 +16,10 @@ type RpcMessage =
 
 - 값은 구조적 복제로 그대로 간다. `null`은 `null`로 도착한다(이전 구현의 TRP-010 같은 변환이 없다).
 - `id`는 보내는 쪽에서 1부터 증가. 양쪽이 독립 카운터를 가져도 `res`는 요청을 보낸 쪽에서만 해석하므로 충돌하지 않는다.
-- 핸들러가 없는 `req`는 `ok: false, error: 'unknown method <name>'`로 답한다. 없는 `ntf`는 버린다.
-- `dispose()`는 대기 중 요청을 모두 `Error('rpc disposed')`로 reject하고 포트를 닫는다.
+- 핸들러가 없는 `req`는 `ok: false, error: 'unknown method <name>'`로 답한다. 없는 `ntf`는 버린다. 핸들러 표는 own 속성만 본다(`toString` 같은 `Object.prototype` 이름은 없는 메서드다).
+- 알림 핸들러가 던지거나 reject하면 응답 통로가 없으므로 `console.error("[rpc] 알림 핸들러 예외", name, error)`를 남기고 다음 메시지를 계속 처리한다.
+- `dispose()`는 대기 중 요청을 모두 `Error('rpc disposed')`로 reject하고 포트를 닫는다. 두 번 불러도 안전하고, `dispose()` 뒤의 `call()`은 보내지 않고 바로 같은 오류로 reject한다(닫힌 포트의 응답은 오지 않는다).
+- 알려진 한계: 핸들러 결과는 구조적 복제가 가능해야 한다. 복제할 수 없는 값(함수 등)을 돌려주면 응답 `postMessage`가 `DataCloneError`를 던지고 호출자는 응답을 받지 못해 멈춘다. 현재 핸들러 결과(문자열·`null`·`{completions, start}`)에서는 재현되지 않는다.
 
 ### 1.2 메서드 표
 
@@ -74,11 +76,12 @@ loop:
              Atomics.store(ctrl, STATE, IDLE); Atomics.notify(ctrl, STATE)   # main의 다음 청크 신호
              if last: return decoder.decode()
              continue
-  CANCELLED: Atomics.store(ctrl, STATE, IDLE); return null
-  ERROR:     msg = data[0 .. BYTE_LENGTH) UTF-8 디코드; Atomics.store(ctrl, STATE, IDLE); throw new Error(msg)
+  CANCELLED: Atomics.store(ctrl, STATE, IDLE); Atomics.notify(ctrl, STATE); return null
+  ERROR:     msg = data[0 .. BYTE_LENGTH) UTF-8 디코드; Atomics.store(ctrl, STATE, IDLE); Atomics.notify(ctrl, STATE); throw new Error(msg)
 ```
 
 - `Atomics.wait`는 worker에서만 허용된다. 코어의 worker 쪽에서만 부른다.
+- IDLE로 되돌릴 때는 세 경로(READY·CANCELLED·ERROR) 모두 `Atomics.notify`한다. main이 취소·오류 표식을 worker가 가져가기 전에 다음 `deliver`를 부르면 `untilIdle()`이 IDLE 복귀를 기다리는데, notify가 없으면 그 대기가 깨어나지 않는다.
 - `null`은 취소 표식이고, stdin 콜백이 `03`·`04`의 규칙으로 `KeyboardInterrupt`로 바꾼다. pyodide `setStdin` 콜백에 `null`을 그대로 돌려주면 EOF가 되므로(`11-known-traps.md` TRAP-05) 이 값은 콜백 밖으로 새지 않는다.
 
 ### 2.3 main `deliver(text)` / `cancel()` / `fail(message)`
@@ -91,7 +94,7 @@ deliver(text):
     data.set(chunk); ctrl[BYTE_LENGTH] = chunk.length; ctrl[FLAGS] = isLast ? FLAG_LAST : 0
     Atomics.store(ctrl, STATE, READY); Atomics.notify(ctrl, STATE)
 cancel():  await untilIdle(); Atomics.store(ctrl, STATE, CANCELLED); Atomics.notify(ctrl, STATE)
-fail(msg): await untilIdle(); data ← UTF-8(msg) 잘라서; BYTE_LENGTH; Atomics.store(ctrl, STATE, ERROR); notify
+fail(msg): await untilIdle(); data ← encodeInto(msg)(완전한 문자만 쓰므로 넘치면 문자 경계에서 잘린다); BYTE_LENGTH; Atomics.store(ctrl, STATE, ERROR); notify
 
 untilIdle():
   Atomics.load(ctrl, STATE) == IDLE이면 즉시.
@@ -99,13 +102,15 @@ untilIdle():
   없으면 setTimeout(1ms) 폴링.
 ```
 
+- 폴링 간격은 `POLL_INTERVAL_MS = 1`(ms)로 확정했다. 브라우저의 중첩 타이머 클램프(약 4ms)가 실제 간격을 늘려도 이 대기는 64KiB를 넘는 입력의 청크 사이에서만 돌아 정확성에는 영향이 없다. `Atomics.waitAsync` 유무는 호출 시점에 확인한다(Chromium 148은 메인·Worker 모두 있다. Firefox·WebKit은 미확인).
+
 - main은 `readInput` 알림을 받은 뒤에만 쓴다. 알림 없이 쓰면 worker가 없는 값을 다음 읽기에서 가져간다.
 - `deliver`·`cancel`은 둘 중 하나만, 한 번만 부른다. read-guard와 readline이 한 읽기에 한 결과만 내는 것으로 보장한다.
 - worker가 `terminate()`로 죽으면 대기 중 값은 버려진다. 메일박스는 세션마다 새로 만들므로 다음 세션에 섞이지 않는다.
 
 ### 2.4 시험
 
-- node `worker_threads`에서 실제 `SharedArrayBuffer`로 왕복: 한 청크, 정확히 `CAPACITY` 바이트, `CAPACITY + 1` 바이트(2청크), 멀티바이트 문자가 청크 경계에 걸리는 경우, 빈 문자열, `cancel`, `fail`.
+- node `worker_threads`에서 실제 `SharedArrayBuffer`로 왕복: 한 청크, 정확히 `CAPACITY` 바이트, `CAPACITY + 1` 바이트(2청크), 멀티바이트 문자가 청크 경계에 걸리는 경우, 빈 문자열, `cancel`, `fail`(넘치는 메시지의 문자 경계 절단 포함), worker가 표식을 가져가기 전에 main이 다음 `deliver`를 부르는 경우.
 - 변이 검사: `readInput` 알림을 `wait()` 뒤로 옮기면 main이 알림을 받지 못하고 멈추는지, `FLAG_LAST`를 빼면 worker가 영원히 기다리는지.
 
 ## 3. interrupt buffer
@@ -137,7 +142,7 @@ interface InitFrame {
 ```
 
 - main: `worker.postMessage(frame, [frame.rpcPort])`. worker 생성 직후 첫 메시지로 보낸다.
-- worker: 스크립트 최상단(첫 `await` 이전)에서 `addEventListener('message', once)`로 첫 메시지를 받는다. 첫 메시지는 계약상 `init`이며 `kind !== 'init'`이면 `console.error` 후 무시한다. 이후 네이티브 `message` 채널은 쓰지 않는다.
+- worker: 스크립트 최상단(첫 `await` 이전)에서 `addEventListener('message', once)`로 첫 메시지를 받고 `parseInitFrame`으로 검증한다. 검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`). 실패하면 필드 이름을 담아 `console.error` 후 프레임을 무시한다. 이후 네이티브 `message` 채널은 쓰지 않는다.
 - `SharedArrayBuffer` 뷰는 postMessage로 넘겨도 같은 메모리를 공유한다(coincident 프록시가 값으로 직렬화하던 문제가 없다).
 - 설정 변경(`topLevelAwait`)은 새 프레임 = 새 worker다. worker가 main에 설정을 되묻는 호출은 없다.
 

@@ -45,6 +45,5 @@
 
 ## 미확정 사항(구현 시점에 확인)
 
-- `Atomics.waitAsync` 미지원 브라우저의 폴링 폴백 간격(기본 1ms). RD-002.
 - 벤더링 readline에 `History` 삭제/복원 API를 추가할지(RD-014에서 결정).
 - Firefox·Safari 동작. 이전 구현은 Chromium만 확인했다. 브라우저별 차이는 `10-parity-deviations.md`에 적는다.

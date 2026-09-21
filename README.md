@@ -2,7 +2,7 @@
 
 브라우저에서 pyodide(Python 3.14)를 Web Worker로 실행하고 xterm.js 터미널로 CPython 3.14 기본 REPL과 같은 조작감을 제공하는 라이브러리(`@cp949/runo-pyodide-repl`)와 데모 앱.
 
-상태: 구현 초기. `ROADMAP.md` 순서로 진행하며 RD-001(워크스페이스 정비, xterm-readline 벤더링)까지 끝났다. 터미널 마운트와 pyodide 로드는 아직 없다. 데모는 worker 생성과 `crossOriginIsolated` 표시만 한다.
+상태: 구현 초기. `ROADMAP.md` 순서로 진행하며 RD-001(워크스페이스 정비, xterm-readline 벤더링)·RD-002(프로토콜 코어: RPC, stdin 메일박스, interrupt buffer, 초기화 프레임)까지 끝났다. 터미널 마운트와 pyodide 로드는 아직 없다. 데모는 worker 생성과 `crossOriginIsolated` 표시만 한다.
 
 ## 문서
 
