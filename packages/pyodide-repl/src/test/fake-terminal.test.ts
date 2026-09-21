@@ -174,3 +174,48 @@ describe("addon과 dispose", () => {
     expect(fake.disposedBufferReads).toBe(1);
   });
 });
+
+describe("화면 모델(screen)", () => {
+  test("기본값은 cursorY 0·baseY 0·wrapped 행 없음이다", () => {
+    const fake = createFakeTerminal();
+    const active = fake.term.buffer.active;
+
+    expect(fake.screen).toEqual({
+      cursorY: 0,
+      baseY: 0,
+      wrappedRows: new Set<number>(),
+    });
+    expect(active.cursorY).toBe(0);
+    expect(active.baseY).toBe(0);
+  });
+
+  test("screen에 지정한 cursorY·baseY를 buffer.active가 읽는다", () => {
+    const fake = createFakeTerminal();
+
+    fake.screen.cursorY = 3;
+    fake.screen.baseY = 5;
+
+    expect(fake.term.buffer.active.cursorY).toBe(3);
+    expect(fake.term.buffer.active.baseY).toBe(5);
+  });
+
+  test("getLine은 wrappedRows에 넣은 절대 행만 isWrapped이고 음수 행은 없다", () => {
+    const fake = createFakeTerminal();
+    fake.screen.wrappedRows.add(4);
+    const active = fake.term.buffer.active;
+
+    expect(active.getLine(4)?.isWrapped).toBe(true);
+    expect(active.getLine(3)?.isWrapped).toBe(false);
+    expect(active.getLine(-1)).toBeUndefined();
+  });
+
+  test("dispose() 뒤의 baseY·getLine 읽기도 disposedBufferReads로 센다", () => {
+    const fake = createFakeTerminal();
+    fake.term.dispose();
+
+    void fake.term.buffer.active.baseY;
+    fake.term.buffer.active.getLine(0);
+
+    expect(fake.disposedBufferReads).toBe(2);
+  });
+});

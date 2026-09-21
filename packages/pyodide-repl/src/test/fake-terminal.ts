@@ -2,12 +2,13 @@
  * jsdom 시험용 가짜 xterm `Terminal`. 실제 `Readline`이 읽는 멤버만 구현한다.
  * 실제 xterm은 jsdom에서 `open()`이 실패하므로(`matchMedia` 없음) 브라우저에서만 쓸 수 있다.
  *
- * 화면은 해석하지 않는다. write한 원문을 `written`에 모으고, 입력은 `type()`·`paste()`로 넣는다.
+ * 화면은 해석하지 않는다. write한 원문을 `written`에 모으고, 입력은 `type()`·`paste()`로 넣는다. 화면 버퍼를 보는
+ * 코드(`rewindTail`)를 위해 `screen`에 시험이 값을 지정한 커서 행·스크롤백·감긴 행만 둔다(VT 해석은 없다).
  * write 콜백은 동기로 돌리거나(`asyncWrite: false`) `flush()`까지 미룬다(`asyncWrite: true`).
  * 비동기 모드는 실제 xterm의 비동기 파싱을 흉내내 콜백이 다음 동기 문장 뒤에 오는 순서를 시험이 통제하게 한다.
  * 동기 모드만 쓰면 `read()`가 입력 상태를 콜백 안에서 만드는 데서 오는 오류(TRP-008)를 놓친다.
  */
-import type { ITerminalAddon, Terminal } from "@xterm/xterm";
+import type { IBufferLine, ITerminalAddon, Terminal } from "@xterm/xterm";
 
 export interface FakeTerminalOptions {
   /** 참이면 write 콜백을 `flush()` 때까지 미룬다. 기본은 거짓(write 안에서 바로 실행). */
@@ -16,9 +17,21 @@ export interface FakeTerminalOptions {
   rows?: number;
 }
 
+/** 시험이 값을 지정하는 화면 모델. `buffer.active.{cursorY, baseY, getLine(row)?.isWrapped}`가 이것을 읽는다. */
+export interface FakeScreen {
+  /** 뷰포트 안 커서 행. 기본 0. */
+  cursorY: number;
+  /** 스크롤백 행 수. 기본 0. */
+  baseY: number;
+  /** 절대 행 번호(`baseY + y`) 중 윗 행에서 이어진 행. */
+  wrappedRows: Set<number>;
+}
+
 export interface FakeTerminal {
   /** `Readline`과 `createRepl`에 넘기는 가짜. 구현한 멤버는 아래 `FakeXterm`뿐이다. */
   term: Terminal;
+  /** 화면 버퍼 모델. 기본은 커서 0행·스크롤백 없음·감긴 행 없음이라 값을 지정하지 않는 시험에는 영향이 없다. */
+  readonly screen: FakeScreen;
   /** `write`로 받은 원문. 콜백 유무·모드와 무관하게 호출 즉시 호출 순서대로 쌓인다. */
   written: string[];
   /** 키 하나마다 `onData`를 한 번씩 부른다. 이스케이프 시퀀스(`\x1b[D` 등)와 서로게이트 쌍은 한 키다. */
@@ -38,7 +51,13 @@ interface FakeXterm {
   cols: number;
   rows: number;
   options: { tabStopWidth: number };
-  buffer: { active: { readonly cursorY: number } };
+  buffer: {
+    active: {
+      readonly cursorY: number;
+      readonly baseY: number;
+      getLine(row: number): IBufferLine | undefined;
+    };
+  };
   onData(listener: (data: string) => void): { dispose(): void };
   onResize(listener: (size: { cols: number; rows: number }) => void): {
     dispose(): void;
@@ -91,6 +110,15 @@ export function createFakeTerminal(
   let keyHandler: ((event: KeyboardEvent) => boolean) | undefined;
   let disposed = false;
   let disposedBufferReads = 0;
+  const screen: FakeScreen = {
+    cursorY: 0,
+    baseY: 0,
+    wrappedRows: new Set<number>(),
+  };
+  /** 실제 xterm은 dispose 뒤 `buffer` 접근에 경고를 낸다. 화면 모델 읽기마다 센다. */
+  const countDisposedRead = () => {
+    if (disposed) disposedBufferReads += 1;
+  };
 
   const xterm: FakeXterm = {
     cols,
@@ -99,8 +127,17 @@ export function createFakeTerminal(
     buffer: {
       active: {
         get cursorY() {
-          if (disposed) disposedBufferReads += 1;
-          return 0;
+          countDisposedRead();
+          return screen.cursorY;
+        },
+        get baseY() {
+          countDisposedRead();
+          return screen.baseY;
+        },
+        getLine(row) {
+          countDisposedRead();
+          if (row < 0) return undefined;
+          return { isWrapped: screen.wrappedRows.has(row) } as IBufferLine;
         },
       },
     },
@@ -143,6 +180,7 @@ export function createFakeTerminal(
 
   return {
     term,
+    screen,
     written,
     type(text) {
       for (const key of splitKeys(text)) emit(key);
