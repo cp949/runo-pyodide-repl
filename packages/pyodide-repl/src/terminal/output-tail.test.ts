@@ -1,0 +1,134 @@
+/**
+ * 출력 꼬리 추적(`createOutputTail`) 시험.
+ * 직전 출력의 마지막 `\n` 뒤이면서 그 안에서 마지막 `\r` 뒤 텍스트와, 줄 경계를 넘어 열린 SGR을
+ * 순수 함수로 확인한다. 터미널·pyodide·worker 없이 도는 jsdom 기본 환경 시험이다(04-stdin-input.md 3.3).
+ */
+import { describe, expect, test } from "vitest";
+import { createOutputTail, MAX_ACTIVE_SGR } from "./output-tail";
+
+const GREEN = "\x1b[32m";
+const RED = "\x1b[31m";
+const RESET = "\x1b[0m";
+
+/** 새 추적기에 조각을 순서대로 먹이고 꼬리를 돌려준다. */
+function tail(...chunks: string[]): string {
+  const tracker = createOutputTail();
+  for (const chunk of chunks) tracker.feed(chunk);
+  return tracker.value();
+}
+
+describe("출력 꼬리 추적", () => {
+  test("아무것도 내지 않았으면 꼬리가 비어 있다", () => {
+    expect(tail()).toBe("");
+  });
+
+  test("개행 없는 조각을 이어 붙인다", () => {
+    expect(tail("x: ")).toBe("x: ");
+    expect(tail("x", ": ")).toBe("x: ");
+  });
+
+  test("개행이 들어오면 마지막 개행 뒤 텍스트만 꼬리다", () => {
+    expect(tail("a\nb")).toBe("b");
+    expect(tail("a\nb\nc")).toBe("c");
+  });
+
+  test("개행으로 끝나면 꼬리가 비어 있다", () => {
+    expect(tail("a\n")).toBe("");
+    expect(tail("a", "\n")).toBe("");
+  });
+
+  test("`\\r\\n`은 개행으로 본다", () => {
+    expect(tail("a\r\n")).toBe("");
+    expect(tail("a\r\nb")).toBe("b");
+  });
+
+  test("개행 뒤에 조각으로 나뉘어 온 텍스트도 이어 붙는다", () => {
+    expect(tail("a", "\n", "b", "c")).toBe("bc");
+  });
+
+  test("마지막 `\\r` 뒤 텍스트만 꼬리다(진행률 갱신)", () => {
+    expect(tail("abc\rX")).toBe("X");
+    expect(tail("10%\r20%\r30%")).toBe("30%");
+  });
+
+  test("`\\r`로 끝나면 꼬리가 비어 있다", () => {
+    expect(tail("Loading\r")).toBe("");
+  });
+
+  test("열린 SGR은 줄 경계를 넘어 꼬리 앞에 이어진다", () => {
+    expect(tail(`${GREEN}A\nB`)).toBe(`${GREEN}B`);
+    expect(tail(`${GREEN}A`, "\n", "B")).toBe(`${GREEN}B`);
+  });
+
+  test("`\\r` 경계에서도 열린 SGR을 이어받는다", () => {
+    expect(tail(`${GREEN}A\rB`)).toBe(`${GREEN}B`);
+  });
+
+  test("닫힌 SGR은 이어받지 않는다", () => {
+    expect(tail(`${GREEN}A${RESET}\nB`)).toBe("B");
+  });
+
+  test("파라미터가 없는 `\\x1b[m`도 초기화다", () => {
+    expect(tail(`${GREEN}A\x1b[m\nB`)).toBe("B");
+  });
+
+  test("초기화 뒤에 다시 연 SGR만 이어받는다", () => {
+    expect(tail(`${RED}A${RESET}${GREEN}B\nC`)).toBe(`${GREEN}C`);
+  });
+
+  test("0으로 시작하는 SGR은 초기화 뒤 나머지를 켜는 것으로 본다", () => {
+    expect(tail(`${GREEN}A\x1b[0;31mB\nC`)).toBe("\x1b[0;31mC");
+  });
+
+  test("꼬리 안의 SGR은 그대로 남는다", () => {
+    expect(tail("x\x1b[1my")).toBe("x\x1b[1my");
+    expect(tail(`${RED}err${RESET}`)).toBe(`${RED}err${RESET}`);
+  });
+
+  test("SGR 외 제어 시퀀스는 걸러내지 않고 통과시키며 SGR 상태를 바꾸지 않는다", () => {
+    expect(tail("a\x1b[2Kb")).toBe("a\x1b[2Kb");
+    expect(tail("a\x1b[?25lb")).toBe("a\x1b[?25lb");
+    expect(tail(`${GREEN}A\x1b[2K\nB`)).toBe(`${GREEN}B`);
+  });
+
+  test("여러 줄에 걸쳐 색을 씌우면 마지막 줄도 같은 색으로 이어진다", () => {
+    expect(tail(`${RED}line1\nline2${RESET}`)).toBe(`${RED}line2${RESET}`);
+  });
+
+  test("`reset()`은 꼬리와 SGR 상태를 모두 비운다", () => {
+    const tracker = createOutputTail();
+    tracker.feed(`${GREEN}A`);
+
+    tracker.reset();
+
+    expect(tracker.value()).toBe("");
+  });
+
+  test("`reset()` 뒤에는 이전에 열린 SGR을 이어받지 않는다", () => {
+    const tracker = createOutputTail();
+    tracker.feed(`${GREEN}A\n`);
+
+    tracker.reset();
+    tracker.feed("B");
+
+    expect(tracker.value()).toBe("B");
+  });
+
+  test("색을 닫지 않고 계속 바꿔도 이어받는 SGR은 가장 최근 64개까지만 남는다", () => {
+    const tracker = createOutputTail();
+    for (let i = 0; i < 100; i += 1) tracker.feed(`\x1b[38;5;${i}m`);
+    tracker.feed("\n");
+    tracker.feed("x");
+
+    const value = tracker.value();
+
+    expect(MAX_ACTIVE_SGR).toBe(64);
+    expect(value.endsWith("\x1b[38;5;99mx")).toBe(true);
+    expect(value.split("\x1b[").length - 1).toBe(64);
+  });
+
+  test("탭과 전각 문자는 그대로 꼬리에 남는다", () => {
+    expect(tail("a\tb")).toBe("a\tb");
+    expect(tail("이름: ")).toBe("이름: ");
+  });
+});
