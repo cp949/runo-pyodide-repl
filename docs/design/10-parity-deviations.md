@@ -50,6 +50,10 @@ Ctrl+C·sleep:
 30. **`warnings` 출력의 파일명**이 `<console>`이다(3.14는 `<python-input-N>`) — 범위 밖.
 31. **확인 범위**: 위 측정은 모두 Chromium(대개 headless, 개발 서버) 한 대 기준이다. Firefox·Safari·`sync=false` 폴백은 미확인.
 
+읽기 없는 구간:
+
+32. **읽기가 활성이 아닌 동안 친 키는 버려진다**(3.14는 tty가 버퍼링했다가 다음 프롬프트에 보여준다). 벤더 `Readline`은 활성 읽기가 없으면 Ctrl+C·Ctrl+L 외 단일 키를 버리고, Enter로 읽기가 끝난 뒤 다음 읽기의 입력 상태가 만들어지기까지(`term.write("", cb)`의 flush 대기)도 같다. Enter 뒤 `z`를 치기까지의 지연별 측정(Chromium 148 headless, preview 빌드, RD-003 데모의 worker 없는 읽기 루프, N=10): 0ms 0/10, 5ms 2/10, 10ms 2/10, 20ms 이상 10/10 들어옴. worker 왕복(RD-005)과 실행 시간이 더해지면 창이 길어진다. 창 안의 붙여넣기는 낡은 `State`에 그려질 수 있으나 화면 결과는 미확인. 브라우저 하니스는 새 프롬프트가 보인 뒤에 입력한다(`docs/traps/TRP-005`). 입력 버퍼링은 후속 후보로 `.scratch/type-ahead/`에 있다.
+
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약")
 
 

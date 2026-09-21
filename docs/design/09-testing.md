@@ -34,6 +34,11 @@
 `App.test.tsx`(배선: 전송·재전송, `readLine`/`readInput` 진입, 세션 리셋, 언마운트).
 - 가짜 터미널(`src/test/fake-terminal.ts`)은 `write` 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다
   (동기만 쓰면 TRP-008을 놓친다). history는 ↑ 재호출로만 관찰한다.
+  `createFakeTerminal({ asyncWrite })`가 `{ term, written, type, paste, keyDown, flush, disposedBufferReads }`를 돌려준다.
+  `Readline`이 읽는 xterm 멤버와 `loadAddon`·`dispose`만 구현하고 화면은 해석하지 않는다(원문 `written`).
+  `type()`은 키 하나마다 `onData`를 한 번씩 부르고(이스케이프 시퀀스는 한 키) `paste()`는 한 번에 보낸다. 비동기 모드는 콜백을 `flush()`까지 미룬다.
+  실제 xterm처럼 `dispose()` 뒤에도 write 콜백을 돌리고 그때의 `buffer` 읽기를 `disposedBufferReads`로 센다(TRP-001 유형 관찰).
+  실제 xterm `Terminal`은 jsdom에서 `open()`이 `matchMedia` 없음으로 실패해 브라우저(9.3)에서만 쓴다.
 - 실제 pyodide의 **동기** stdin 콜백 안에서 실제 `Readline`을 기다릴 수 없어, `input()` 통합은 read를
   동기 fake로 대신한다.
 - **변이 검사(mutation)** 를 관행으로 쓴다: 요청 번호와 SIGINT 쓰기 순서 뒤집기, 송신기가 ack를 먼저 읽기,

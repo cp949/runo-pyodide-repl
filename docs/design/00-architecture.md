@@ -97,8 +97,7 @@ apps/
 export function createRepl(options: ReplOptions): ReplHandle
 
 interface ReplOptions {
-  terminal: Terminal                       // @xterm/xterm
-  readline?: Readline                      // 생략하면 코어가 만든다(@cp949/runo-xterm-readline)
+  terminal: Terminal                       // @xterm/xterm. 호출자가 만들고 dispose한다
   createWorker: () => Worker               // 리셋마다 다시 호출된다
   pyodide?: { indexURL?: string }          // 기본 CDN https://cdn.jsdelivr.net/pyodide/v314.0.7/full/
   topLevelAwait?: boolean                  // 기본 false. 바꾸려면 reset()
@@ -115,6 +114,8 @@ interface ReplHandle {
 // worker 쪽 진입점(앱의 얇은 worker 파일이 부른다)
 export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
 ```
+
+RD-003 시점의 부분 구현: `ReplOptions`는 `terminal`뿐이고 `ReplHandle`은 임시 `readLine(prompt): Promise<string>`과 `dispose()`뿐이다. 나머지 옵션은 그것을 쓰는 RD가 추가한다(`createWorker`·`pyodide`·`onStatus`는 RD-004, `topLevelAwait`는 RD-012, `onCrash`·`reset`은 RD-010). `readLine`은 RD-005에서 worker의 REPL 루프가 읽기를 요청하면 핸들에서 빠진다. `readline?` 옵션은 두지 않는다. 호출자가 준 `Readline`은 `persist: false`를 보장할 수 없고, auto-indent·tab 래퍼는 코어가 만든 인스턴스를 감싼다. 코어는 `terminal.loadAddon(readline)`과 `readline.dispose()`만 하고 `Terminal`은 dispose하지 않는다. `term.dispose()`도 로드된 addon을 dispose하므로 `Readline.dispose()`는 멱등이다(`06-editing.md` 6.1).
 
 앱의 worker 파일은 두 줄이다: `import { runReplWorker } from '@cp949/runo-pyodide-repl/worker'; runReplWorker()`. 앱은 `new Worker(new URL('./repl.worker.ts', import.meta.url), { type: 'module' })`로 만든다. worker 파일에 top-level `await`가 들어갈 수 있으므로 Vite `worker.format`은 `'es'`여야 한다. RD-001에서 확인했다: `es`는 빌드가 성공하고 번들 끝에 `await`가 남는다. 기본 `iife`는 `[UNSUPPORTED_FEATURE] Top-level await is currently not supported with the 'iife' output format`으로 실패한다. 앱의 얇은 worker 파일이 패키지 서브패스를 import하는 이 방식은 dev(소스 해석)와 build·preview(`dist` 해석) 양쪽에서 동작한다(4.4).
 

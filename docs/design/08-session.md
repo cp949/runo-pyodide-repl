@@ -28,6 +28,7 @@
 - 대응: **상시 `while read()` 재귀 루프를 두지 않는다**(worker가 필요할 때만 읽기를 요청). 그 뒤로 경고가
   재현되지 않았고 트랩은 ACTIVE로 남겼다. 이중 마운트로 interrupt buffer·송신기가 두 번 만들어지는 것은
   측정에서 수용했다(정확성 영향 없음).
+- 새 구현: 벤더 `Readline.dispose()`가 `term`을 비우고 대기 읽기를 reject하므로(`06-editing.md` 6.1) 마운트 직후 읽기를 시작하는 루프도 안전하다. RD-003 데모(`ReplView`)가 이 순서로 동작하고 dev StrictMode에서 콘솔 경고 0과 `.xterm` 1개를 확인했다. `dispose()` 뒤 읽기 promise는 `Error`로 reject되므로 읽기 루프는 dispose로 끝난 reject를 정상 종료로 처리한다.
 
 ## 8.3 종료 후 상태
 - `exit()`/`quit()`/`raise SystemExit()` → worker 루프가 `break`하고 `onSessionTerminated`로 main에 알린다

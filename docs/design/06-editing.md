@@ -8,6 +8,7 @@
 - 새 구현은 소스를 **`packages/xterm-readline`(`@cp949/runo-xterm-readline`)으로 벤더링**한다([ADR-0003](../adr/0003-vendor-xterm-readline.md)). 원본은 `/work/thrd/xterm-readline`(strtok/xterm-readline 1.2.2, MIT, `src/*.ts` 2,832행 중 테스트 제외 약 1,470행). `LICENSE-MIT`와 저작권 고지를 패키지에 유지한다.
 - 벤더링 뒤 수정 방침: 아래 6.2 표의 우회 중 **TRP-006(`readPaste` 탭 보존)·TRP-016/TRP-004(재그리기 전제)·TRP-030(`moveCursorBack` 단위)은 소스에서 직접 고치고**, `read()`의 write 콜백 타이밍(TRP-008)은 공개 훅(`onInputReady` 콜백 또는 `read()`가 입력 상태 생성 뒤 resolve되는 `ready` Promise)으로 계약을 명시한다. `InputType`은 export해 상수 복제를 없앤다. `History`에 `replaceFrom(snapshot)`/`truncate(n)` 같은 삭제 API를 추가해 블록 히스토리의 "진행형 교체" 스냅샷 우회를 단순화할 수 있다(선택, RD 항목에서 결정).
 - `History`의 `localStorage` 자동 저장/복원은 옵션으로 끈다(벤더링했으므로 no-op 덮어쓰기 대신 생성자 옵션 `persist: false`).
+- `Readline.dispose()`는 리스너를 해제하고 `term`을 비우며 대기 중인 읽기(write 콜백 대기 중이라 `activeRead`가 없는 것 포함)를 `Error("readline disposed")`로 reject한다. 두 번째 호출은 무동작이다(RD-003). `term.dispose()`가 로드된 addon을 다시 dispose하므로 멱등이 필수다. dispose 뒤 `read()`는 reject하고 `println`·`print`는 터미널에 쓰지 않는다. 실제 xterm 6은 `term.dispose()` 뒤에도 write 콜백을 돌리고 그 안의 `term.buffer` 읽기는 `DisposableStore` 경고를 낸다.
 - `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다.
 - 업스트림 추적: 원격을 연결하지 않는다(runo-coincident와 같은 방식). 업스트림 변경을 가져올 때는 `CHANGELOG.md`의 버전 기준으로 수동 diff한다.
 
@@ -20,7 +21,7 @@
 | TRP-017 | 뷰포트를 채운 레이아웃에서 행이 늘 때 스크롤백 맨 윗행이 사라짐 | **미해결**. 보이는 화면은 정상이라 관찰로만 남겼다(꼬리 상한을 두려던 계획은 근거가 없어 폐기) |
 | TRP-030 | `moveCursorBack(0)`은 줄 맨 앞으로 가고 `n`은 코드포인트 수 | 목록 재그리기 뒤 커서 복원에서 **0이면 호출을 생략**하고 개수는 `[...text]` 코드포인트로 센다 |
 | TRP-006 | `readPaste`가 붙여넣은 `\t`를 버림 | `preservePastedTabs(readline)`가 `readPaste`를 감싼다(붙여넣기 경로에서만) |
-| TRP-001 | StrictMode 이중 마운트에서 dispose된 인스턴스의 지연 콜백 | 상시 `while read()` 루프를 없애(필요할 때만 `read()` 호출) 재현이 사라졌다. 트랩 상태는 ACTIVE 유지 |
+| TRP-001 | StrictMode 이중 마운트에서 dispose된 인스턴스의 지연 콜백 | 이전 구현: 상시 `while read()` 루프를 없애(필요할 때만 `read()` 호출) 재현이 사라졌다. 새 구현: `Readline.dispose()`가 `term`을 비워 소스에서 막는다(6.1). 마운트 직후 읽기를 시작해도 안전하다 |
 
 ## 6.3 자동 들여쓰기 규칙(`createAutoIndentReader(readline, term)`)
 - 기준은 `_pyrepl/readline.py`의 `maybe_accept`/`backspace_dedent`. `auto-indent.ts`가
