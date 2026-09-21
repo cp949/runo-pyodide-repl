@@ -26,6 +26,8 @@ export class Readline implements ITerminalAddon {
   private history: History;
   private activeRead: ActiveRead | undefined;
   private disposables: IDisposable[] = [];
+  /** write 콜백이 아직 오지 않아 activeRead가 없는 읽기의 reject. dispose가 이 읽기들도 끝내야 한다. */
+  private pendingReads = new Set<(e: unknown) => void>();
   private watermark = 0;
   private highWatermark = 10000;
   private lowWatermark = 1000;
@@ -73,9 +75,19 @@ export class Readline implements ITerminalAddon {
   /**
    * Dispose
    *
+   * 리스너를 해제하고 term을 비운다. 대기 중인 읽기(write 콜백 대기 중인 것 포함)는 Error로 reject한다.
+   * term.dispose()도 addon을 dispose하므로 두 번 불릴 수 있어 두 번째 호출은 아무것도 하지 않는다.
    */
   public dispose(): void {
     this.disposables.forEach((d) => d.dispose());
+    this.disposables = [];
+    this.term = undefined;
+    const rejects = [...this.pendingReads];
+    if (this.activeRead !== undefined) rejects.push(this.activeRead.reject);
+    this.pendingReads.clear();
+    this.activeRead = undefined;
+    const error = new Error("readline disposed");
+    rejects.forEach((reject) => reject(error));
   }
 
   /**
@@ -252,7 +264,10 @@ export class Readline implements ITerminalAddon {
       // may not have updated buffer.active.cursorY by the time we read it
       // synchronously. Wait for the buffer to flush so the anchor row
       // accurately reflects where the prompt will land.
+      this.pendingReads.add(reject);
       this.term.write("", () => {
+        this.pendingReads.delete(reject);
+        // 콜백이 오기 전에 dispose됐으면 이미 reject됐다. 해제된 터미널에는 닿지 않는다.
         if (this.term === undefined) return;
         this.state = new State(
           prompt,
