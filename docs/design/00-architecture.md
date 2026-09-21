@@ -5,7 +5,7 @@
 - 브라우저에서 pyodide(`314.0.7`, Python 3.14.2)를 Web Worker에서 실행하고, 메인 스레드의 xterm.js 터미널로 **CPython 3.14 기본 대화형 REPL(`python`)과 같은 조작감**을 제공한다. 동등성 판정은 주관이 아니라 3.14.4 pty 실측과의 화면 행 비교다(`09-testing.md`, `10-parity-deviations.md`).
 - 프롬프트 대기 중 worker 이벤트 루프는 살아 있다(asyncio 콜백이 돈다). 이 점은 `python`이 아니라 `python -m asyncio` 쪽에 정렬한 의도적 선택이다([ADR-0005](../adr/0005-input-stays-blocking-prompt-stays-async.md)).
 - `input()`·`sys.stdin` 읽기만 worker를 멈추는 동기 대기다. pyodide `setStdin` 콜백이 문자열 동기 반환을 요구하고, CPython 의미(대기 중 다른 콜백이 돌지 않음)를 지키기 위해서다.
-- 실행 환경은 **cross-origin isolated** 페이지다(`SharedArrayBuffer` 필요, [ADR-0004](../adr/0004-cross-origin-isolation-required.md)). 격리되지 않은 페이지에서는 Ctrl+C와 `input()`이 동작하지 않으므로 시작 시 감지해 터미널에 경고를 낸다. Service Worker 우회는 범위 밖이다.
+- 실행 환경은 **cross-origin isolated** 페이지다(`SharedArrayBuffer` 필요, [ADR-0004](../adr/0004-cross-origin-isolation-required.md)). 격리되지 않은 페이지에서는 초기화 프레임이 요구하는 `SharedArrayBuffer` 뷰를 만들 수 없으므로 시작 시 감지해 worker 없이 터미널에 경고만 낸다(세션이 없다). Service Worker 우회는 범위 밖이다.
 - 이전 구현(`/work/cp949/pyodide-samples/apps/repl`)이 쓰던 coincident 동기 브리지는 쓰지 않는다([ADR-0001](../adr/0001-no-sync-bridge-library.md)). 그 위의 기능 규칙은 그대로 계승한다(`02`~`08`).
 
 ## 2. 프로세스 모델과 채널
@@ -42,6 +42,7 @@
 
 ### 3.1 시작
 
+0. `crossOriginIsolated`가 거짓이면 main은 worker를 만들지 않는다. 안내 줄(`writeNotice`, `05-output.md` 4.1)로 경고만 내고 `onStatus('not-isolated')`를 부른 뒤 끝난다(ADR-0004). 아래 1~5는 격리된 페이지의 절차다.
 1. main이 `Terminal`·`Readline`을 만든다(세션과 무관하게 마운트당 1회).
 2. main이 `MessageChannel`, interrupt buffer, stdin 메일박스를 만들고 worker를 생성한다(`createWorker()` 팩토리).
 3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `topLevelAwait`, pyodide `indexURL`. worker 스크립트는 첫 `await` 이전에 `message` 리스너를 걸어 이 프레임을 받는다. 프레임은 하나뿐이라 구분자(`instanceof`)가 필요 없다.
@@ -101,21 +102,21 @@ interface ReplOptions {
   createWorker: () => Worker               // 리셋마다 다시 호출된다
   pyodide?: { indexURL?: string }          // 기본 CDN https://cdn.jsdelivr.net/pyodide/v314.0.7/full/
   topLevelAwait?: boolean                  // 기본 false. 바꾸려면 reset()
-  onStatus?: (s: ReplStatus) => void       // 'loading' | 'ready' | 'load-failed' | 'terminated' | 'crashed'
+  onStatus?: (s: ReplStatus) => void       // 'loading' | 'ready' | 'load-failed' | 'not-isolated' | 'terminated' | 'crashed'
   onCrash?: (message: string) => void
 }
 
 interface ReplHandle {
   reset(options?: { topLevelAwait?: boolean }): void   // worker 교체. 화면 유지
   dispose(): void                                       // worker 종료·리스너 해제. Terminal은 호출자가 소유
-  readonly crossOriginIsolated: boolean
+  readonly crossOriginIsolated: boolean                 // 거짓이면 worker가 없다(경고만 낸 상태)
 }
 
 // worker 쪽 진입점(앱의 얇은 worker 파일이 부른다)
 export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
 ```
 
-RD-003 시점의 부분 구현: `ReplOptions`는 `terminal`뿐이고 `ReplHandle`은 임시 `readLine(prompt): Promise<string>`과 `dispose()`뿐이다. 나머지 옵션은 그것을 쓰는 RD가 추가한다(`createWorker`·`pyodide`·`onStatus`는 RD-004, `topLevelAwait`는 RD-012, `onCrash`·`reset`은 RD-010). `readLine`은 RD-005에서 worker의 REPL 루프가 읽기를 요청하면 핸들에서 빠진다. `readline?` 옵션은 두지 않는다. 호출자가 준 `Readline`은 `persist: false`를 보장할 수 없고, auto-indent·tab 래퍼는 코어가 만든 인스턴스를 감싼다. 코어는 `terminal.loadAddon(readline)`과 `readline.dispose()`만 하고 `Terminal`은 dispose하지 않는다. `term.dispose()`도 로드된 addon을 dispose하므로 `Readline.dispose()`는 멱등이다(`06-editing.md` 6.1).
+RD-004 시점의 부분 구현: `ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`이고 `ReplHandle`은 임시 `readLine(prompt): Promise<string>`, `dispose()`, `crossOriginIsolated`다. 나머지 옵션은 그것을 쓰는 RD가 추가한다(`topLevelAwait`는 RD-012, `onCrash`·`reset`은 RD-010). `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`를 발행하고 `terminated`는 RD-005, `crashed`는 RD-010이 발행한다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다. `readLine`은 RD-005에서 worker의 REPL 루프가 읽기를 요청하면 핸들에서 빠진다. `readline?` 옵션은 두지 않는다. 호출자가 준 `Readline`은 `persist: false`를 보장할 수 없고, auto-indent·tab 래퍼는 코어가 만든 인스턴스를 감싼다. 코어는 `terminal.loadAddon(readline)`과 `readline.dispose()`만 하고 `Terminal`은 dispose하지 않는다. `term.dispose()`도 로드된 addon을 dispose하므로 `Readline.dispose()`는 멱등이다(`06-editing.md` 6.1).
 
 앱의 worker 파일은 두 줄이다: `import { runReplWorker } from '@cp949/runo-pyodide-repl/worker'; runReplWorker()`. 앱은 `new Worker(new URL('./repl.worker.ts', import.meta.url), { type: 'module' })`로 만든다. worker 파일에 top-level `await`가 들어갈 수 있으므로 Vite `worker.format`은 `'es'`여야 한다. RD-001에서 확인했다: `es`는 빌드가 성공하고 번들 끝에 `await`가 남는다. 기본 `iife`는 `[UNSUPPORTED_FEATURE] Top-level await is currently not supported with the 'iife' output format`으로 실패한다. 앱의 얇은 worker 파일이 패키지 서브패스를 import하는 이 방식은 dev(소스 해석)와 build·preview(`dist` 해석) 양쪽에서 동작한다(4.4).
 
@@ -126,7 +127,7 @@ RD-003 시점의 부분 구현: `ReplOptions`는 `terminal`뿐이고 `ReplHandle
 ```text
 packages/pyodide-repl/src/
   index.ts                 createRepl (main 쪽 조립)
-  worker.ts                runReplWorker (worker 쪽 조립, REPL 루프)
+  worker.ts                runReplWorker (프레임 검증 → CDN 로더를 주입해 boot 호출. REPL 루프는 RD-005)
   protocol/
     rpc.ts                 MessagePort 위 요청/응답/알림          ← 01-protocols.md 1절
     stdin-mailbox.ts       SAB 메일박스 (main: deliver/cancel/fail, worker: wait)   ← 01 2절
@@ -135,6 +136,7 @@ packages/pyodide-repl/src/
   terminal/                main 쪽. Terminal·Readline에만 의존
     sinks.ts               sink 4종 + 꼬리 추적                      ← 05-output.md
     output-tail.ts
+    notice.ts              세션 밖 안내 줄(writeNotice)              ← 05-output.md 4.1
     repl-reader.ts         꼬리 + '>>> ' 합성 읽기                   ← 04 3.3
     stdin-reader.ts        input() 읽기(꼬리 그대로), rewindTail
     read-guard.ts          stdin 읽기를 활성 REPL 읽기 뒤로           ← 04 3.2
@@ -146,7 +148,10 @@ packages/pyodide-repl/src/
     tab-reader.ts          Tab 가로채기·큐·목록 재그리기
     selection-copy.ts      Ctrl+Shift+C                              ← 06 6.6
     interrupt-sender.ts    송신·점검·재전송 상태기계                   ← 03 2.3
-  worker/                  worker 쪽. pyodide 프록시에만 의존
+  worker/                  worker 쪽. pyodide 프록시에만 의존(boot.ts는 조립 모듈이라 예외, 아래)
+    boot.ts                부팅 시퀀스(로드 → 콘솔 → ready → 배너)      ← 01 5절 S1
+    load-pyodide.ts        CDN 동적 import(브라우저 전용, 시험은 npm loadPyodide 주입)
+    console.ts             PyodideConsole 생성·runLine·await_fut       ← 02 5.1
     submission-runner.ts   제출 실행 규칙                             ← 02
     multiline.py           split_paste
     top-level-await.ts
@@ -159,11 +164,11 @@ packages/pyodide-repl/src/
     webloop-reraise.ts/.py                                             ← 03 2.8
 ```
 
-`terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
+`terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 예외는 `worker/boot.ts`다. 부팅 시퀀스를 조립하는 모듈이라 `createRpc`·`InitFrame`을 import하고, pyodide 로더는 `worker.ts`가 주입한다(브라우저는 CDN 로더, node 시험은 npm `loadPyodide`). `console.ts`·`sink-writer.ts`·`top-level-await.ts`는 `protocol/`을 import하지 않고 sink 함수를 받는다. 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
 
 ### 4.3 apps/demo
 
-React 19 + Vite 8. `ReplView` 컴포넌트가 `createRepl`을 마운트 시 1회 호출하고, 상태(`crossOriginIsolated` Chip, `ready` Chip, 세션 리셋 버튼, top-level await 스위치, 종료·크래시 Alert)만 React state로 둔다. StrictMode 이중 마운트에서 `dispose()`가 두 번 불려도 안전해야 한다(`08-session.md` 8.2). UI 라이브러리는 정하지 않았다(이전 구현은 MUI v9였고, 이 데모에는 필수가 아니다).
+React 19 + Vite 8. `ReplView` 컴포넌트가 `createRepl`을 마운트 시 1회 호출하고, 상태(`crossOriginIsolated` Chip, `ready` Chip, 세션 리셋 버튼, top-level await 스위치, 종료·크래시 Alert)만 React state로 둔다. StrictMode 이중 마운트에서 `dispose()`가 두 번 불려도 안전해야 한다(`08-session.md` 8.2). UI 라이브러리는 정하지 않았다(이전 구현은 MUI v9였고, 이 데모에는 필수가 아니다). RD-004 시점의 데모는 `createRepl({ terminal, createWorker, onStatus })`를 부르고 상태를 `<output data-testid="status">` 텍스트로 보여 준다(Chip·버튼·스위치는 후속 RD).
 
 ### 4.4 워크스페이스 빌드 규칙
 

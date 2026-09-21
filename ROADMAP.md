@@ -41,7 +41,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - 프로덕션 빌드에서 worker가 ES 모듈로 번들되고 top-level `await`가 든 worker 파일이 빌드에 실패하지 않는다.
 - 루트 `pnpm build`·`lint`·`check-types`·`test` 통과.
 
-인계: `packages/pyodide-repl/src/worker.ts`의 `runReplWorker()`는 초기화 프레임 에코 뼈대다(RD-002의 `init-frame.ts`가 `kind` 인라인 검사를 대체하고, RD-004가 본문을 채운다). `apps/demo/src/App.tsx`의 인라인 부분 프레임은 RD-004의 `createRepl`(`createWorker`·채널 생성)이 대체한다. 워크스페이스 빌드 규칙(`exports`의 `development` 조건, `check-types`의 `^build`)은 `00-architecture.md` 4.4.
+인계: `packages/pyodide-repl/src/worker.ts`의 `runReplWorker()`는 초기화 프레임 에코 뼈대였다(RD-002의 `init-frame.ts`가 `kind` 인라인 검사를 대체했고, RD-004에서 본문을 채웠다). `apps/demo/src/App.tsx`의 인라인 부분 프레임은 RD-004에서 `createRepl`(`createWorker`·채널 생성)이 대체했다. 워크스페이스 빌드 규칙(`exports`의 `development` 조건, `check-types`의 `^build`)은 `00-architecture.md` 4.4.
 
 ### RD-002 — 프로토콜 코어 (RPC·stdin 메일박스·interrupt buffer·초기화 프레임)
 
@@ -57,7 +57,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - interrupt buffer: `signalInterrupt`(SEQ 먼저, SIGNAL 나중), `acknowledgeInterrupt`, `discardPendingInterrupt`(지운 경우만 ack), `hasProtocolSlots` 시험.
 - 변이 검사: `readInput` 알림을 `wait()` 뒤로 옮기면 시험이 멈춤을 잡는다. `FLAG_LAST` 누락, SEQ/SIGNAL 순서 뒤집기가 각각 실패한다.
 
-인계: `protocol/`의 공개 표면은 `createRpc`(`call`·`notify`·`dispose`), `createStdinMailbox`·`createMailboxWriter`(`deliver`·`cancel`·`fail`)·`createMailboxReader`(`wait`), `createInterruptBuffer`·`signalInterrupt`·`acknowledgeInterrupt`·`discardPendingInterrupt`·`hasProtocolSlots`, `InitFrame`·`parseInitFrame`·`postInitFrame`이다. `readInput` 알림 → `wait()` 순서는 이 RD에서 시험용 worker 역할(`src/test/roles/repl-worker.ts`)만 가진다. RD-006의 `stdin-callback.ts`가 그 순서를 프로덕션 코드로 갖게 되므로 그 파일에 같은 변이 검사를 건다. SEQ/SIGNAL 메모리 순서는 단위 시험(`Atomics.store` 가로채기)만 잡으므로 RD-007이 눌림 주입 스레드로 다시 본다. worker 스레드 시험 하니스(`src/test/thread.ts`)와 규칙은 `09-testing.md` 9.1. `runReplWorker()`는 `parseInitFrame`으로 프레임을 검증하고 에코까지만 하며(RD-004가 본문을 채운다), 데모의 임시 프레임(`apps/demo/src/App.tsx`)은 검증을 통과하는 형태로 바뀌었고 RD-004의 `createRepl`(`createWorker`·채널 생성)이 대체한다. 비격리 페이지에서는 데모가 worker를 만들지 않는다(안내는 RD-004). 함정: `docs/traps/` TRP-002·TRP-003.
+인계: `protocol/`의 공개 표면은 `createRpc`(`call`·`notify`·`dispose`), `createStdinMailbox`·`createMailboxWriter`(`deliver`·`cancel`·`fail`)·`createMailboxReader`(`wait`), `createInterruptBuffer`·`signalInterrupt`·`acknowledgeInterrupt`·`discardPendingInterrupt`·`hasProtocolSlots`, `InitFrame`·`parseInitFrame`·`postInitFrame`이다. `readInput` 알림 → `wait()` 순서는 이 RD에서 시험용 worker 역할(`src/test/roles/repl-worker.ts`)만 가진다. RD-006의 `stdin-callback.ts`가 그 순서를 프로덕션 코드로 갖게 되므로 그 파일에 같은 변이 검사를 건다. SEQ/SIGNAL 메모리 순서는 단위 시험(`Atomics.store` 가로채기)만 잡으므로 RD-007이 눌림 주입 스레드로 다시 본다. worker 스레드 시험 하니스(`src/test/thread.ts`)와 규칙은 `09-testing.md` 9.1. `runReplWorker()`는 `parseInitFrame`으로 프레임을 검증하고 에코까지만 했으며(RD-004에서 본문을 채웠다), 데모의 임시 프레임(`apps/demo/src/App.tsx`)은 검증을 통과하는 형태로 바뀌었고 RD-004에서 `createRepl`(`createWorker`·채널 생성)이 대체했다. 비격리 페이지에서는 `createRepl`이 worker를 만들지 않고 경고만 낸다(RD-004, ADR-0004). 함정: `docs/traps/` TRP-002·TRP-003.
 
 ### RD-003 — 터미널 마운트와 줄 편집
 
@@ -69,11 +69,11 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 
 완료 기준: 위 시나리오(브라우저 수동 또는 Playwright). 새로고침 뒤 history가 비어 있다(localStorage 미사용). jsdom + 실제 `Readline` + 가짜 터미널 시험이 도는 `src/test/fake-terminal.ts`가 있다(write 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다, `09-testing.md` 9.2).
 
-인계: `createRepl({ terminal })`은 부분 구현이다(`00-architecture.md` 4.1). 옵션은 `terminal`뿐이고(`readline?`은 뺐다) 핸들은 임시 `readLine(prompt): Promise<string>`과 `dispose()`다. `readLine`은 RD-005에서 worker의 REPL 루프가 읽기를 요청하면 핸들에서 빠진다. 열린 읽기가 있을 때 다시 부르면 `Error`로 reject한다(벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다). Terminal은 호출자(데모 `ReplView`)가 `new Terminal({ cursorBlink: true })`(80×24 고정, FitAddon 없음)로 만들고 dispose하며 코어는 `terminal.loadAddon(readline)`만 한다. 벤더 `Readline.dispose()`는 `term`을 비우고 대기 중 읽기를 `Error`로 reject하는 멱등 연산으로 고쳤다(`packages/xterm-readline/README.md`, 이전 구현 TRP-001을 소스에서 처리). 시험: `src/test/fake-terminal.ts`의 `createFakeTerminal({ asyncWrite })`가 `type()`·`paste()`·`keyDown()`·`flush()`·`disposedBufferReads`를 준다(화면 모델은 없고, RD-005·006의 꼬리 재그리기가 처음 필요로 할 때 얹는다). 실제 xterm `Terminal`은 jsdom에서 `open()`이 실패해(`matchMedia` 없음) 브라우저에서만 쓴다. vitest는 워크스페이스 패키지를 `development` 조건(`src`)으로 푼다. 데모: `ReplView.tsx`와 임시 읽기 루프 `echo-loop.ts`(받은 줄을 `[read] <JSON 문자열>`로 되찍음, RD-005가 대체). `App.tsx`의 임시 worker effect와 초기화 프레임은 그대로 두었다(RD-004가 대체). 알려진 한계: 읽기가 없는 구간(Enter 직후 약 10~20ms, RD-005부터는 실행 중 전체)에 친 키는 벤더 `Readline`이 버린다(`10-parity-deviations.md` 32). 브라우저 하니스는 새 프롬프트가 보인 뒤에 입력해야 한다. 검증 스크립트는 저장소에 없고 RD-018이 보관한다.
+인계: RD-003 시점의 `createRepl({ terminal })`은 부분 구현이었다(`00-architecture.md` 4.1, RD-004에서 `createWorker`·`pyodide`·`onStatus` 옵션과 `crossOriginIsolated` 핸들 속성이 늘었다). 옵션은 `terminal`뿐이었고(`readline?`은 뺐다) 핸들은 임시 `readLine(prompt): Promise<string>`과 `dispose()`였다. `readLine`은 RD-005에서 worker의 REPL 루프가 읽기를 요청하면 핸들에서 빠진다. 열린 읽기가 있을 때 다시 부르면 `Error`로 reject한다(벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다). Terminal은 호출자(데모 `ReplView`)가 `new Terminal({ cursorBlink: true })`(80×24 고정, FitAddon 없음)로 만들고 dispose하며 코어는 `terminal.loadAddon(readline)`만 한다. 벤더 `Readline.dispose()`는 `term`을 비우고 대기 중 읽기를 `Error`로 reject하는 멱등 연산으로 고쳤다(`packages/xterm-readline/README.md`, 이전 구현 TRP-001을 소스에서 처리). 시험: `src/test/fake-terminal.ts`의 `createFakeTerminal({ asyncWrite })`가 `type()`·`paste()`·`keyDown()`·`flush()`·`disposedBufferReads`를 준다(화면 모델은 없고, RD-005·006의 꼬리 재그리기가 처음 필요로 할 때 얹는다). 실제 xterm `Terminal`은 jsdom에서 `open()`이 실패해(`matchMedia` 없음) 브라우저에서만 쓴다. vitest는 워크스페이스 패키지를 `development` 조건(`src`)으로 푼다. 데모: `ReplView.tsx`와 임시 읽기 루프 `echo-loop.ts`(받은 줄을 `[read] <JSON 문자열>`로 되찍음, RD-004에서 삭제했다). `App.tsx`의 임시 worker effect와 초기화 프레임은 RD-004에서 `createRepl`이 대체했다. 알려진 한계: 읽기가 없는 구간(Enter 직후 약 10~20ms, RD-005부터는 실행 중 전체)에 친 키는 벤더 `Readline`이 버린다(`10-parity-deviations.md` 32). 브라우저 하니스는 새 프롬프트가 보인 뒤에 입력해야 한다. 검증 스크립트는 저장소에 없고 RD-018이 보관한다.
 
 ### RD-004 — pyodide 로드, 배너, 출력 sink 4종, 전역 스트림
 
-상태: 대기 · 이전: RD-005, RD-009(로드 실패), RD-011a, RD-011b, RD-015, RD-021(전역 스트림) · 설계: `05-output.md`, `01-protocols.md` 1.2·4절
+상태: 완료 · 이전: RD-005, RD-009(로드 실패), RD-011a, RD-011b, RD-015, RD-021(전역 스트림) · 설계: `05-output.md`, `01-protocols.md` 1.2·4절
 
 worker 진입점 `runReplWorker()`: 초기화 프레임 수신 → CDN `loadPyodide` → `ready`/`loadFailed` 알림. main 쪽 `sinks.ts`(4종 + 꼬리 추적)와 worker 쪽 `sink-writer.ts`(전역 stdout/stderr Writer). 아직 REPL 루프는 없고 worker가 시험용 코드를 실행해 출력만 낸다. `createRepl`에 `createWorker`·`pyodide`·`onStatus` 옵션을 추가하며 `apps/demo/src/App.tsx`의 임시 worker effect와 초기화 프레임 생성을 대체한다.
 
@@ -85,16 +85,19 @@ worker 진입점 `runReplWorker()`: 초기화 프레임 수신 → CDN `loadPyod
 - 전역 스트림 Writer: 바이트 수 반환, 청크 경계의 멀티바이트 이어 붙임(node + 실제 pyodide, 변이 검사 6종 상당).
 - 로드 실패 경로와 비격리 경고 경로가 시험 또는 브라우저 확인으로 있다.
 
+인계: worker는 `runReplWorker()` → `bootReplWorker(frame, { loadPyodide })`(`worker/boot.ts`) → `createConsole(pyodide, sinks, { topLevelAwait })`(`worker/console.ts`)로 부팅하고 `ready` → `writeOutput(BANNER)` 뒤 임시 `DEMO_LINES`를 `runLine`으로 실행한다. RD-005는 `DEMO_LINES`와 그 실행 루프를 REPL 루프(`readLine` 요청 → `submission-runner.run`)로 바꾸고, `runLine(source): Promise<RunLineResult>`(`incomplete`/`syntax-error`/`complete{value, exited}`/`error{formattedError}`, `formattedError`는 끝 개행 포함) 위에 취소·여러 줄·값 에코(`repr_shorten`)·안전망을 얹는다. Python `await_fut`(`SystemExit` → `exited`, `builtins._` 갱신)는 이미 있다. main의 `createRepl`은 `createWorker`·`pyodide`·`onStatus`를 받고 `ReplStatus` 6값 중 `loading`·`ready`·`load-failed`·`not-isolated`를 발행한다(`terminated`는 RD-005, `crashed`는 RD-010). sink 4종은 `terminal/sinks.ts`(`tail`/`resetTail` 포함), 안내 줄은 `terminal/notice.ts`의 `writeNotice(readline, text, "warning" | "info")`(RD-010 리셋 안내가 `info`를 쓴다). 전역 Writer는 `worker/sink-writer.ts`. TLA 비트는 `worker/top-level-await.ts`가 프레임 값으로 적용한다(RD-012는 옵션·스위치·리셋 연동만). 비격리 페이지는 worker 없이 경고만 낸다(ADR-0004 정정). `readLine` 임시 핸들 API는 RD-005가 뺀다. 데모의 상태 표시는 `<output data-testid="status">` 텍스트다. 이 저장소의 node + 실제 pyodide 시험 패턴은 `09-testing.md` 9.1. 주의: `exit()`는 RD-009의 webloop 재보고 억제 전까지 브라우저 worker에 `unhandledrejection` 콘솔 오류를 남길 수 있다(node 시험은 `vitest.config.ts`의 `SystemExit` 한정 `onUnhandledError` 필터가 가리고 RD-009가 제거한다). 브라우저 확인(Playwright: 정상 dev·preview, CDN 차단, 비격리)의 스크립트는 저장소에 없고 RD-018이 보관한다. 함정: 화면 행 텍스트만 비교하면 출력 끝의 여분 빈 줄을 놓친다 — 커서 행을 단언한다(`docs/traps/TRP-006`).
+
 ### RD-005 — REPL 루프와 PyodideConsole 코어
 
-상태: 대기 · 이전: RD-007, RD-011, RD-014(종료 감지) · 설계: `02-console-core.md`, `00-architecture.md` 3.2
+상태: 대기 · 이전: RD-007, RD-011, RD-014(종료 감지) · 설계: `02-console-core.md`(5.1의 `runLine` 포함), `00-architecture.md` 3.2
 
 worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 `repl-reader`(꼬리 + `>>> ` 합성). 한 줄 제출만 다룬다(여러 줄은 RD-011).
 
 시나리오: `>>> 1 + 1` Enter → `2` → `>>> `. 빈 줄 Enter는 무해하다. `if True:` Enter → `... ` → `    print(1)` Enter → 빈 줄 Enter → `1`. `1 +` Enter → SyntaxError 즉시 표시. `1/0` → 트레이스백에 `__repl_run`/`push`/`runcode` 프레임이 없다. `print("t", end="")` 실행 뒤 다음 프롬프트가 `t>>> `로 같은 줄에 붙는다. `exit()` → "Python session terminated." 안내, 이후 입력 무응답.
 
 완료 기준:
-- 위 시나리오 전부(브라우저). `sys.ps1`/`ps2` 설정, 배너는 `writeOutput`로 개행 추가 없이.
+- 위 시나리오 전부(브라우저). (RD-004에서 완료) 배너 뒤·값 에코 뒤 빈 줄 없음. `sys.ps1`/`ps2` 설정과 배너 `writeOutput`도 RD-004에서 끝났다.
+- EOF에서 끊긴 문법 오류(`1 +`·`foo bar`)는 pyodide 314.0.7 콘솔이 `SyntaxError: invalid syntax`가 아니라 `_IncompleteInputError: incomplete input`으로 표시한다(`runLine`은 `syntax-error`로 분류하고 `formattedError`를 그대로 돌려준다). 위 `1 +` 시나리오의 화면 마지막 줄을 3.14.4 pty와 비교해 맞추거나 편차로 등록한다(근거·표: `.scratch/incomplete-input-error-display/issues/01-incomplete-input-error-display.md`).
 - `ConsoleFuture`는 Python 쪽 `await_fut` 헬퍼로만 await한다. `run(null)` 선분기(버퍼 clear → `KeyboardInterrupt` 빨강 → `>>> `). `run()` 안전망(`ConversionError` 판별)이 있다. node + 실제 pyodide 시험(이전 `submission-runner.test.ts` 상당).
 - REPL 프롬프트 이어붙임: `t>>> `, 빈 Enter 뒤 열 0의 `>>> `, 블록 실행 뒤 `012>>> `, stderr 꼬리 뒤 `e>>> `(`e`만 빨강), 닫히지 않은 색 뒤 기본색, `\r30%`→`\r100%` 뒤 `100%>>> `, 100·130·200자·전각·정확히 80자 꼬리에서 앞 행 중복 없음(이전 RD-006b 브라우저 74개 시나리오를 옮겨 같은 결과).
 - 값 에코 뒤·트레이스백 뒤·SyntaxError 뒤·배너 뒤에 빈 줄이 없다(이전 RD-011a 16개 시나리오).
@@ -153,6 +156,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 - 무효 인자(`-1`·`'a'`·NaN·inf)는 CPython과 같은 예외, `0`·`True`는 오류 없음.
 - 프롬프트 유휴 폐기 단위 시험(RED + 변이 검사), 실행 중 규칙(깨울 수 없으면 남긴다) 유지 시험.
 - 설치 가드 5종이 pyodide 내부 변화를 `console.warn`으로 알린다(시험).
+- `packages/pyodide-repl/vitest.config.ts`의 `onUnhandledError` 필터(`PythonError` + 줄 시작 `SystemExit`, RD-004가 `exit()` 시험을 위해 넣은 임시 조치)를 제거하고 `exit()` 시험이 필터 없이 통과한다(webloop 재보고 억제가 들어와 불필요).
 
 ## Phase 2 — 세션·제출·편집·완성
 
@@ -178,7 +182,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 
 시나리오: 기본 상태에서 `await asyncio.sleep(1)`은 `SyntaxError: 'await' outside function`. 스위치를 켜면 세션이 리셋되고 바로 실행된다. 새로고침하면 꺼짐.
 
-완료 기준: 위 시나리오. `setTopLevelAwait`가 TLA 비트만 토글하고(`0x6200` 확인) 콘솔 생성 직후 한 번만 적용된다(node + 실제 pyodide). 꺼짐/켜짐 모두 `asyncio.run(main())` 동작. 한 줄/블록/`input()`/Ctrl+C 기존 동작 유지.
+완료 기준: 위 시나리오. `setTopLevelAwait`가 TLA 비트만 토글하고(`0x6200` 확인) 콘솔 생성 직후 한 번만 적용된다(node + 실제 pyodide) — (RD-004에서 완료: `worker/top-level-await.ts`가 초기화 프레임의 `topLevelAwait`를 적용한다. 프레임 값은 아직 항상 `false`). 이 RD에 남는 범위는 `createRepl`의 `topLevelAwait` 옵션, 데모 스위치, 리셋 시 새 프레임에 값을 싣는 연동이다. 꺼짐/켜짐 모두 `asyncio.run(main())` 동작. 한 줄/블록/`input()`/Ctrl+C 기존 동작 유지.
 
 ### RD-013 — 자동 들여쓰기
 

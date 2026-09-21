@@ -2,7 +2,7 @@
 
 브라우저에서 pyodide(Python 3.14)를 Web Worker로 실행하고 xterm.js 터미널로 CPython 3.14 기본 REPL과 같은 조작감을 제공하는 라이브러리(`@cp949/runo-pyodide-repl`)와 데모 앱.
 
-상태: 구현 초기. `ROADMAP.md` 순서로 진행하며 RD-001(워크스페이스 정비, xterm-readline 벤더링)·RD-002(프로토콜 코어: RPC, stdin 메일박스, interrupt buffer, 초기화 프레임)·RD-003(터미널 마운트와 줄 편집)까지 끝났다. pyodide 로드는 아직 없다. 데모는 터미널에서 입력한 줄을 `[read] "…"`로 되찍고, worker 생성과 `crossOriginIsolated` 표시를 한다.
+상태: 구현 초기. `ROADMAP.md` 순서로 진행하며 RD-001(워크스페이스 정비, xterm-readline 벤더링)·RD-002(프로토콜 코어: RPC, stdin 메일박스, interrupt buffer, 초기화 프레임)·RD-003(터미널 마운트와 줄 편집)·RD-004(pyodide 로드, 배너, 출력 sink 4종, 전역 스트림)까지 끝났다. 데모는 pyodide를 CDN에서 worker로 로드해 배너와 시험용 출력(개행 없는 출력, `\r` 진행률, 빨간 stderr)을 내고, `crossOriginIsolated`와 세션 상태(`loading`·`ready`·`load-failed`·`not-isolated`)를 표시한다. 입력은 RD-005부터 받는다.
 
 ## 문서
 
@@ -51,7 +51,7 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-dev·preview·정적 배포 모두 필요하다. `apps/demo/vite.config.ts`가 `server.headers`와 `preview.headers` 둘 다에 설정하고, `apps/demo/src/vite-config.test.ts`가 두 곳과 `worker.format: 'es'`를 시험한다. 정적 배포는 HTML과 worker 스크립트를 포함한 모든 응답에 헤더를 붙인다(preview에서 HTML·worker 에셋 둘 다 확인). 격리되지 않은 페이지에서는 Ctrl+C와 `input()`이 동작하지 않는다. pyodide는 jsdelivr CDN에서 로드한다(CORP 헤더 제공).
+dev·preview·정적 배포 모두 필요하다. `apps/demo/vite.config.ts`가 `server.headers`와 `preview.headers` 둘 다에 설정하고, `apps/demo/src/vite-config.test.ts`가 두 곳과 `worker.format: 'es'`를 시험한다. 정적 배포는 HTML과 worker 스크립트를 포함한 모든 응답에 헤더를 붙인다(preview에서 HTML·worker 에셋 둘 다 확인). 격리되지 않은 페이지에서는 `createRepl`이 worker를 만들지 않고 터미널에 경고 한 줄만 낸다(상태 `not-isolated`, ADR-0004). pyodide는 jsdelivr CDN에서 로드한다(CORP 헤더 제공).
 
 ## 이전 구현
 

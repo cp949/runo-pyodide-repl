@@ -25,6 +25,25 @@
 - 변이 검사 주의: 비동기 폴링 대기를 없애는 변이는 마이크로태스크 스핀이 되어 이벤트 루프를 굶기고 시험 타임아웃도
   발동하지 못한다. 그런 변이는 간격·호출 경로를 바꾸는 방식으로 대체한다. `MessagePort`를 든 객체에는 `toContain`·
   `toEqual`을 쓰지 않는다(순환 내부 참조로 스택이 넘친다). 정체성 비교(`includes`)를 쓴다.
+- **이 저장소의 패턴**(RD-004에서 확립). 해당 파일: `worker/sink-writer-pyodide.test.ts`, `worker/top-level-await.test.ts`,
+  `worker/console.test.ts`, `terminal/sinks-pyodide.test.ts`, `worker/boot.test.ts`.
+  - 파일 상단에 `// @vitest-environment node`를 두고 `import { loadPyodide } from "pyodide"`를 인자 없이 부른다
+    (npm 패키지 자체 `indexURL`을 쓴다). `beforeAll(async () => { pyodide = await loadPyodide(); }, 60_000)`으로
+    파일마다 인스턴스 하나를 만들어 그 파일의 시험이 공유한다(로드가 수 초라 시험마다 만들지 않는다). CDN 로더
+    `loadPyodideFromCdn`은 브라우저 전용이라 단위 시험이 없고 9.3의 브라우저 확인이 본다.
+  - 실제 `Readline`(`persist: false`) + 가짜 터미널은 node에서 `window` stub 없이 돈다. 벤더 `readline.ts`의
+    `@xterm/xterm` import는 타입뿐이고 `History`는 `persist: false`면 `window`를 만지지 않는다. 그래서 실제
+    `PyodideConsole`·sink·`Readline`을 이어 터미널 바이트를 검사하는 시험(`sinks-pyodide.test.ts`)이 node에서 돈다.
+  - 부팅 시퀀스(`boot.test.ts`)는 `bootReplWorker(frame, { loadPyodide })`에 로더를 주입하고 main 역할은 실제
+    `MessageChannel`의 다른 포트에서 알림을 받는다. 실패 경로는 로더가 던지게 하거나, `Proxy`로 감싼 pyodide의
+    `pyimport`만 던지게 해(콘솔 모듈 가져오기 실패) 콘솔 생성 실패를 만든다.
+  - `exit()`를 실행하면 asyncio가 `SystemExit`을 WebLoop로 다시 던져 vitest가 `Unhandled Rejection`으로 실패 종료한다.
+    `vitest.config.ts`의 `onUnhandledError`가 `PythonError` + 줄 시작 `SystemExit`만 무시하는 임시 조치이고(RD-009의
+    webloop 재보고 억제가 들어오면 제거), `process.on("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
+  - 시험 입력 함정: `1 +`·`foo bar` 같은 EOF 문법 오류는 pyodide 314.0.7에서 `_IncompleteInputError: incomplete
+    input`으로 표시되므로 `SyntaxError`를 기대하면 실패한다(`x = = 1`은 `SyntaxError: invalid syntax`). 한 줄에 `;`로
+    이은 앞 식문장의 값은 콘솔이 stdout으로 에코해 꼬리를 비우므로, 개행 없는 출력 시험은 값이 없는
+    `print(..., end="")`로 만든다.
 
 ## 9.2 jsdom(기본 환경) + 실제 `Readline` + 가짜 터미널 / 가짜 타이머
 `auto-indent.test.ts`, `auto-indent-reader.test.ts`, `tab-reader.test.ts`, `stdin-reader.test.ts`,
@@ -51,6 +70,8 @@
 - 눌림 간격·소실률·위험 구간 같은 타이밍 통계(연타 매트릭스 조합별 N=20, `while True: pass` 단일 눌림
   N=200 등), 부팅 중 Ctrl+C(N=30), 정지한 실행 12조합.
 - StrictMode 이중 마운트 거동.
+- 화면 행 텍스트(`.xterm-rows > div`)만 비교하면 출력 끝의 여분 빈 줄이 보이지 않는다. 개행 수는 커서 행 번호로
+  단언한다(`docs/traps/TRP-006`).
 - 미확인으로 남은 것: **프로덕션 빌드, Firefox, Safari, `sync=false` 폴백**, 자동화 E2E(범위 밖).
 
 ## 9.4 측정·비교 기준

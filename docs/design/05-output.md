@@ -23,6 +23,11 @@
 - 모든 sink는 화면에 낸 바이트를 `output-tail`에 먹인다(`println`은 `text + '\n'`을 먹인다).
   `tail()`/`resetTail()`을 함께 노출한다. **sink 세트는 worker(세션)마다 새로 만든다** — 새 세션이 이전
   꼬리를 물려받지 않게.
+- **안내 줄**(`terminal/notice.ts`의 `writeNotice(readline, text, kind)`): 세션 밖에서 main이 찍는 개행으로 끝나는
+  한 줄이다. 비격리 경고는 노랑(`warning`, `\x1b[33m…\x1b[0m`), RD-010의 리셋 안내는 청록(`info`, `\x1b[36m`)이다.
+  sink 세트가 아니므로 꼬리에 먹이지 않는다. 끝 개행 없는 텍스트를 받아 `println`으로 개행을 붙이고 부분 줄은 내지
+  않는다. `11-known-traps.md`의 TRAP-12 규칙(sink를 거치지 않는 출력 경로 금지)의 유일한 예외 함수이며, 세션이 없거나(비격리) 리셋으로
+  sink 세트를 새로 만드는 자리에서만 쓴다 — 꼬리가 남은 sink 세트 옆에서 부르면 화면과 꼬리가 어긋난다.
 
 ## 4.2 batched vs raw, 전역 스트림
 - `PyodideConsole`은 `runcode()` 동안에만 `sys.stdout`/`sys.stderr`를 `stdout_callback`/`stderr_callback`
@@ -36,11 +41,17 @@
   잘린 상태는 Writer마다 따로 둔다.
 - Python 쪽 stdout 버퍼는 건드리지 않는다: `flush=True` 없는 `print(..., end='')`는 CPython처럼 개행·flush
   까지 보이지 않는다.
-- stderr 버퍼링(`line_buffering=True`)은 모사하지 않는다 — 웹은 즉시 낸다(TRP-013).
+- 전역 스트림은 `isatty()`가 False여도 pyodide 기본으로 `line_buffering=True`, `write_through=False`다(node 프로브,
+  pyodide 314.0.7). 그래서 전역 stdout의 `print("t", end="")`는 다음 개행까지 Writer에 오지 않고(`"tline\n"` 한
+  조각) 개행·`\r`·`flush=True`에서 나온다. 전역 stderr도 같아 `sys.stderr.write("raw-err")`는 flush 전까지 오지
+  않는다. 버퍼링이 없는 쪽은 콘솔 콜백 경로(`runcode()` 중)뿐이다.
+- stderr 버퍼링(`line_buffering=True`)은 모사하지 않는다 — 콘솔 콜백 경로의 웹은 즉시 낸다(TRP-013).
 
 ## 4.3 BANNER / 프롬프트 문자열
 - 시작 배너는 `pyodide.console` 모듈의 `BANNER`를 `writeOutput`으로 그대로 낸다(sink가 개행을 붙이므로
-  배너에 개행을 더하지 않는다). 가짜 리눅스/GCC 배너를 흉내내지 않는다.
+  배너에 개행을 더하지 않는다). 가짜 리눅스/GCC 배너를 흉내내지 않는다. `BANNER`는 `pyodide.pyimport("pyodide.console")`
+  모듈의 속성이고 끝 개행이 없다: `Python 3.14.2 (main, Sep 14 2026 03:03:51) on WebAssembly/Emscripten\nType "help",
+  "copyright", "credits" or "license" for more information.`(pyodide 314.0.7, 2행).
 - worker 시작 시 `sys.ps1 = ">>> "`, `sys.ps2 = "... "`를 직접 설정한다(pyodide 기본은 `None`이라
   `hasattr(sys, 'ps1')`로 REPL을 판정하는 코드가 어긋난다).
 

@@ -36,6 +36,8 @@ type RpcMessage =
 | `loadFailed` | ntf | worker→main | `message: string` | — | pyodide 로드 실패. worker는 살아 있고 루프에 들어가지 않는다 |
 | `sessionTerminated` | ntf | worker→main | — | — | `exit()`/`quit()`/`SystemExit` |
 
+`loadFailed`의 `message`는 worker의 `String(error)`이고 main이 `pyodide 로드 실패: ` 접두사를 붙여 `writeError`로 낸다(빨강 + 개행). pyodide 로드뿐 아니라 콘솔 생성 실패도 같은 알림으로 온다.
+
 main→worker 알림은 없다. 설정은 초기화 프레임(4절)으로만 간다.
 
 ### 1.3 순서 규칙
@@ -150,10 +152,14 @@ interface InitFrame {
 
 ```text
 (S1) 시작
-main : Terminal/Readline 생성 → 채널 3종 생성 → createWorker() → postMessage(init, [port])
-worker: init 수신 → loadPyodide → PyodideConsole → sys.ps1/ps2 → 핸들러 설치 → 버퍼 연결 → setStdin → 감시 타이머
-      → ntf ready → ntf writeOutput(BANNER) → req readLine('>>> ')
-main : ready Chip 갱신 → readLine 핸들러: 꼬리 + '>>> ' 합성 → readline.read()
+main : Terminal/Readline 생성 → 채널 3종 생성 → createWorker() → postMessage(init, [port]) → onStatus('loading')
+       (crossOriginIsolated가 거짓이면 위를 하지 않고 경고 한 줄 + onStatus('not-isolated')로 끝난다)
+worker: init 수신 → loadPyodide → setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(프레임 값)
+      → 핸들러 설치 → 버퍼 연결 → setStdin → 감시 타이머     (RD-004는 앞 다섯 단계까지, 뒤 넷은 후속 RD)
+      → ntf ready → ntf writeOutput(BANNER) → req readLine('>>> ')   (RD-004는 readLine 대신 시험용 스크립트를 runLine으로 실행)
+      로드·콘솔 생성 실패 → ntf loadFailed(String(error))만 보내고 돌아온다(worker는 살아 있다)
+main : ready → onStatus('ready') → readLine 핸들러: 꼬리 + '>>> ' 합성 → readline.read()
+       loadFailed → writeError('pyodide 로드 실패: ' + message) + onStatus('load-failed')
 
 (S2) 한 줄 실행
 main : Enter → res readLine("1+1")

@@ -14,6 +14,15 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
   `formatted_error`를 읽으면 이미 파괴된 프록시다. Python 쪽 `await_fut(fut)` 헬퍼 하나를 별도 namespace에
   두고 그것으로만 await한다. 헬퍼는 `SystemExit`만 따로 잡아 `[None, True]`로 돌려준다(문자열 파싱 대신
   `isinstance` 판별). 값이 `None`이 아니면 `builtins._`를 갱신한다. 표시는 `repr_shorten`.
+- **`runLine(source)`**(`worker/console.ts`의 `createConsole(pyodide, sinks, { topLevelAwait })`가 돌려주는
+  `ReplConsole`, RD-004): `push`와 `await_fut`를 묶은 한 줄 실행이다. 결과 `RunLineResult`는
+  `{ kind: 'incomplete' }`, `{ kind: 'syntax-error', formattedError }`, `{ kind: 'complete', value, exited }`,
+  `{ kind: 'error', formattedError }` 넷이다. `formattedError`는 `fut.formatted_error`(내부 프레임이 잘린 것,
+  `e.message`가 아니다) 그대로라 끝 개행을 포함하고, 제거는 호출부가 한다. `fut.destroy()`는 `finally`에서 부른다.
+  `value`가 `PyProxy`일 때의 `destroy()`는 값 에코를 만드는 쪽(RD-005)이 맡는다. `await_fut` 소스는
+  `worker/console.ts`에 TS 템플릿 문자열로 인라인돼 있다. `createConsole`의 순서는 전역 stdout/stderr Writer 등록
+  → `sys.ps1/ps2` → `PyodideConsole(pyodide.globals)` + 콜백 → TLA 비트 → `await_fut` namespace다. 취소·여러 줄·값
+  에코·안전망(5.2)은 이 위에 RD-005의 `createSubmissionRunner`가 얹는다.
 
 ## 5.2 `createSubmissionRunner(pyodide, pyconsole, io)` — `run(line: string | null)`
 - 반환은 `{ prompt, exit, pending? }`. `PS1 = '>>> '`, `PS2 = '... '`. `pending`은 블록 입력 중일 때만
@@ -48,9 +57,10 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
 - **기본 OFF**. 콘솔은 부모 `Console.__init__`이 `PyCF_ALLOW_TOP_LEVEL_AWAIT`를 항상 켜므로 기본이 ON이고
   생성자로 끌 수 없다(TRP-007). 생성 직후 `pyconsole._compile.compiler.flags == 0x6200`
   (0x2000 TLA | 0x4000 ALLOW_INCOMPLETE_INPUT | 0x200 DONT_IMPLY_DEDENT).
-- `setTopLevelAwait(pyodide, pyconsole, enabled)`가 **TLA 비트만** 켜고 끈다. 다른 비트는 여러 줄 입력
+- `setTopLevelAwait(pyconsole, enabled)`(`worker/top-level-await.ts`)가 **TLA 비트만** 켜고 끈다. 다른 비트는 여러 줄 입력
   판정에 쓰이므로 건드리지 않는다. `_Compile.__call__`이 매 호출 flags를 읽으므로 다음 `push`부터 반영된다.
-- **적용 시점**: worker가 시작할 때 main에 설정을 묻고 **콘솔 생성 직후 한 번만** 적용한다. 값을 바꾸려면
+- **적용 시점**: worker가 시작할 때 초기화 프레임의 `topLevelAwait`를 **콘솔 생성 직후 한 번만** 적용한다
+  (main에 되묻지 않는다, `01-protocols.md` 4절). 값을 바꾸려면
   worker를 새로 만든다(실행 중 콘솔의 플래그를 바꾸면 다음 `push`가 buffer 전체를 새 플래그로 재컴파일해
   `_IncompleteInputError`가 나고 buffer가 비워진다). `=== true`일 때만 ON으로 취급한다.
 - ON은 컴파일 플래그만 켠다. `asyncio` 선주입·배너 변경 등 `python -m asyncio`의 나머지는 흉내내지 않는다.

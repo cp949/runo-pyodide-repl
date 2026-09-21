@@ -22,6 +22,10 @@ _Avoid_: 커널, 인스턴스
 세션을 새 worker로 바꾸는 것. 화면은 남는다.
 _Avoid_: 재시작(크래시 복구를 가리킬 때만), 화면 지우기(Ctrl+L, 별개 동작)
 
+**상태**:
+`ReplStatus`. 세션의 생애를 앱에 알리는 값(`loading`·`ready`·`load-failed`·`not-isolated`·`terminated`·`crashed`).
+_Avoid_: 단계, 페이즈
+
 ### 읽기
 
 **REPL 읽기**:
@@ -122,6 +126,10 @@ _Avoid_: 로거, 출력 콜백
 
 **전역 스트림**:
 콘솔 리다이렉트 밖에서 Python이 쓰는 stdout/stderr. 배경 콜백 출력이 여기로 온다.
+
+**안내 줄**:
+세션 밖에서 main이 찍는 개행으로 끝나는 한 줄(비격리 경고·리셋 안내). sink 세트가 아니라 `writeNotice`로 낸다.
+_Avoid_: 시스템 메시지, 로그
 
 ### 동등성
 
