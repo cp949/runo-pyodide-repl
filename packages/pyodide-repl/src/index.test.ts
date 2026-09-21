@@ -4,6 +4,8 @@
  * 편집기를 붙여 한 줄을 읽어 돌려주는 것까지가 이 범위다.
  * RD-004: worker 세션 시작(초기화 프레임 전송·출력 알림 4종·`ready`/`loadFailed`·상태 콜백)과 비격리 페이지 경로.
  * worker는 가짜(`postMessage`·`terminate`만 기록)이고, worker 역할의 rpc는 시험이 프레임의 포트에 직접 만든다.
+ * RD-005: 줄 읽기는 worker가 RPC `readLine`을 요청하는 경로가 유일하다. RD-003의 줄 편집 시험은 worker 역할 rpc가
+ * `readLine`을 요청하는 형태로 옮겼고, `sessionTerminated` 알림 → `onStatus('terminated')`를 더했다.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
@@ -15,7 +17,10 @@ import {
 } from "./index";
 import { parseInitFrame, type InitFrame } from "./protocol/init-frame";
 import { createRpc, type Rpc } from "./protocol/rpc";
-import { createFakeTerminal } from "./test/fake-terminal";
+import {
+  createFakeTerminal,
+  type FakeTerminalOptions,
+} from "./test/fake-terminal";
 
 type Outcome =
   | { state: "pending" }
@@ -90,8 +95,11 @@ function createFakeWorker() {
 const createWorker = () => createFakeWorker().worker;
 
 /** 세션을 시작하고 worker 역할 rpc를 프레임의 포트에 만든다. */
-function startSession(overrides: Partial<ReplOptions> = {}) {
-  const fake = createFakeTerminal();
+function startSession(
+  overrides: Partial<ReplOptions> = {},
+  terminalOptions: FakeTerminalOptions = {},
+) {
+  const fake = createFakeTerminal(terminalOptions);
   const fakeWorker = createFakeWorker();
   const onStatus = vi.fn();
   const createWorkerSpy = vi.fn(() => fakeWorker.worker);
@@ -116,6 +124,38 @@ function startSession(overrides: Partial<ReplOptions> = {}) {
   };
 }
 
+/**
+ * worker 역할 rpc로 `readLine`을 요청하고, main이 읽기를 시작해 입력 상태가 만들어질 때까지 write 콜백을 배출한다.
+ * 읽기는 `term.write("", cb)`를 낸다(긴 꼬리를 정리하는 `rewindTail`의 flush도 같다). 출력 알림은 빈 조각을 쓰지
+ * 않으므로 빈 문자열 write가 늘어난 것이 "요청이 도착했다"는 신호다. 꼬리가 길면 flush를 두 번 배출해야 읽기가 시작된다.
+ * 읽기가 끝나기를 기다리지 않도록(async 함수는 반환한 Promise를 풀어 버린다) 읽기 Promise를 객체에 담아 돌려준다.
+ */
+async function startRead(
+  session: Pick<ReturnType<typeof startSession>, "fake" | "workerRpc">,
+  prompt = ">>> ",
+): Promise<{ line: Promise<string | null> }> {
+  const { fake, workerRpc } = session;
+  const flushRequests = () => fake.written.filter((text) => text === "").length;
+  const before = flushRequests();
+  const line = workerRpc.call<string | null>(
+    "readLine",
+    prompt,
+    undefined,
+    true,
+  );
+  // 시험이 읽기 결과를 기다리지 않고 끝나도 afterEach의 rpc 정리가 처리되지 않은 rejection을 만들지 않게 한다.
+  void line.catch(() => {});
+  await Promise.race([
+    waitFor(() => flushRequests() > before),
+    // 요청이 거절되면(핸들러 없음 등) 기다리지 않고 그 오류로 실패한다.
+    line.then(() => undefined),
+  ]);
+  fake.flush();
+  await tick();
+  fake.flush();
+  return { line };
+}
+
 beforeEach(() => {
   localStorage.clear();
   // jsdom에는 crossOriginIsolated가 없다(undefined → 비격리). 격리 페이지로 만든다.
@@ -134,106 +174,165 @@ describe.each([
   { mode: "동기", asyncWrite: false },
   { mode: "비동기", asyncWrite: true },
 ])("write 콜백이 $mode 모드일 때", ({ asyncWrite }) => {
-  /** readLine으로 읽기를 시작하고 입력 상태가 만들어질 때까지 write 콜백을 배출한다. */
-  function startRead(
-    fake: ReturnType<typeof createFakeTerminal>,
-    repl: ReturnType<typeof createRepl>,
-  ) {
-    const line = repl.readLine(">>> ");
-    fake.flush();
-    return line;
-  }
+  test("타이핑한 글자를 터미널에 에코하고 Enter로 그 줄을 worker에게 돌려준다", async () => {
+    const session = startSession({}, { asyncWrite });
 
-  test("타이핑한 글자를 터미널에 에코하고 Enter로 그 줄을 호출자에게 돌려준다", async () => {
-    const fake = createFakeTerminal({ asyncWrite });
-    const repl = createRepl({ terminal: fake.term, createWorker });
-
-    const line = startRead(fake, repl);
-    fake.type("abc\r");
+    const { line } = await startRead(session);
+    session.fake.type("abc\r");
 
     await expect(line).resolves.toBe("abc");
-    expect(fake.written.join("")).toContain("abc");
+    expect(session.bytes()).toContain("abc");
   });
 
   test("Backspace와 방향키(←/→)로 고친 줄을 돌려준다", async () => {
-    const fake = createFakeTerminal({ asyncWrite });
-    const repl = createRepl({ terminal: fake.term, createWorker });
+    const session = startSession({}, { asyncWrite });
 
-    const line = startRead(fake, repl);
+    const { line } = await startRead(session);
     // "acd" → ←← → a 뒤에 "b" 삽입 → "abcd" → → → Backspace가 c를 지움 → "abd"
-    fake.type("acd\x1b[D\x1b[Db\x1b[C\x7f\r");
+    session.fake.type("acd\x1b[D\x1b[Db\x1b[C\x7f\r");
 
     await expect(line).resolves.toBe("abd");
   });
 
   test("↑/↓로 이전에 입력한 줄을 불러온다", async () => {
-    const fake = createFakeTerminal({ asyncWrite });
-    const repl = createRepl({ terminal: fake.term, createWorker });
-    const first = startRead(fake, repl);
-    fake.type("one\r");
+    const session = startSession({}, { asyncWrite });
+    const { line: first } = await startRead(session);
+    session.fake.type("one\r");
     await first;
-    const second = startRead(fake, repl);
-    fake.type("two\r");
+    const { line: second } = await startRead(session);
+    session.fake.type("two\r");
     await second;
 
-    const third = startRead(fake, repl);
+    const { line: third } = await startRead(session);
     // ↑ two, ↑ one, ↓ two
-    fake.type("\x1b[A\x1b[A\x1b[B\r");
+    session.fake.type("\x1b[A\x1b[A\x1b[B\r");
 
     await expect(third).resolves.toBe("two");
   });
 
-  test("읽기가 열려 있는 동안 readLine을 다시 부르면 Error로 reject하고 첫 읽기는 정상 완료된다", async () => {
-    const fake = createFakeTerminal({ asyncWrite });
-    const repl = createRepl({ terminal: fake.term, createWorker });
-    const first = observe(startRead(fake, repl));
+  test("worker의 readLine 요청에 직전 출력의 꼬리와 프롬프트를 이어 그린다(`t>>> `)", async () => {
+    const session = startSession({}, { asyncWrite });
+    session.workerRpc.notify("write", "t");
 
-    const second = observe(repl.readLine(">>> "));
-    fake.flush();
-    fake.type("ok\r");
-    await tick();
+    await startRead(session);
 
-    expect(second()).toEqual({ state: "rejected", reason: expect.any(Error) });
-    expect(first()).toEqual({ state: "resolved", value: "ok" });
+    expect(session.bytes()).toContain("t\x1b[0m>>> ");
   });
 
-  test("dispose하면 대기 중인 읽기가 Error로 reject된다", async () => {
-    const fake = createFakeTerminal({ asyncWrite });
-    const repl = createRepl({ terminal: fake.term, createWorker });
-    const line = observe(startRead(fake, repl));
+  test("worker가 요청한 프롬프트(`... `)를 그대로 그린다", async () => {
+    const session = startSession({}, { asyncWrite });
 
-    repl.dispose();
-    await tick();
+    await startRead(session, "... ");
 
-    expect(line()).toEqual({ state: "rejected", reason: expect.any(Error) });
+    expect(session.bytes()).toContain("... ");
+    expect(session.bytes()).not.toContain(">>> ");
   });
 
-  test("dispose 뒤 readLine은 터미널에 쓰지 않고 Error로 reject된다", async () => {
-    const fake = createFakeTerminal({ asyncWrite });
-    const repl = createRepl({ terminal: fake.term, createWorker });
-    repl.dispose();
+  test("폭을 넘는 꼬리도 flush를 기다린 뒤 이어 그리고 줄을 읽는다", async () => {
+    const session = startSession({}, { asyncWrite });
+    session.workerRpc.notify("write", "x".repeat(100));
+
+    const { line } = await startRead(session);
+    session.fake.type("ok\r");
+
+    await expect(line).resolves.toBe("ok");
+    // 벤더 Tty가 폭에 맞춰 행을 나눠 그리므로 꼬리 전체가 아니라 꼬리 끝과 프롬프트의 이음매를 본다.
+    expect(session.bytes()).toContain("x\x1b[0m>>> ");
+  });
+
+  test("readLine 응답은 편집 버퍼 그대로의 문자열이다", async () => {
+    const session = startSession({}, { asyncWrite });
+
+    const { line } = await startRead(session);
+    session.fake.type("1 + 1\r");
+
+    await expect(line).resolves.toBe("1 + 1");
+  });
+
+  test("빈 줄 Enter는 null(취소)이 아니라 빈 문자열로 응답한다", async () => {
+    const session = startSession({}, { asyncWrite });
+
+    const { line } = await startRead(session);
+    session.fake.type("\r");
+
+    await expect(line).resolves.toBe("");
+  });
+
+  test("읽기가 열려 있는 동안 readLine을 다시 요청하면 Error로 reject하고 첫 읽기는 정상 완료된다", async () => {
+    const session = startSession({}, { asyncWrite });
+    const { line: first } = await startRead(session);
+
+    const second = observe(
+      session.workerRpc.call("readLine", ">>> ", undefined, true),
+    );
+    await waitFor(() => second().state === "rejected");
+    session.fake.type("ok\r");
+
+    expect(second()).toEqual({
+      state: "rejected",
+      reason: expect.objectContaining({
+        message: expect.stringContaining("이미 읽는 중"),
+      }),
+    });
+    await expect(first).resolves.toBe("ok");
+  });
+
+  test("dispose하면 대기 중인 읽기가 끝나 뒤늦은 입력이 터미널에 쓰이지 않고 worker에 응답도 가지 않는다", async () => {
+    const session = startSession({}, { asyncWrite });
+    const { handle, fake } = session;
+    const { line } = await startRead(session);
+    const outcome = observe(line);
+
+    handle.dispose();
+    const writtenAtDispose = fake.written.length;
+    fake.type("abc\r");
+    await settle();
+
+    expect(fake.written).toHaveLength(writtenAtDispose);
+    // RPC가 닫혀 응답이 오지 않는다(응답이 갔다면 "abc"가 그대로 돌아온다).
+    expect(outcome().state).toBe("pending");
+  });
+
+  test("dispose 뒤 도착한 readLine 요청은 터미널에 쓰지 않는다", async () => {
+    const { handle, fake, workerRpc } = startSession({}, { asyncWrite });
+    handle.dispose();
     const writtenAtDispose = fake.written.length;
 
-    const line = observe(repl.readLine(">>> "));
+    // 응답은 오지 않으므로 promise는 결과를 보지 않고 observe로만 붙여 둔다.
+    observe(workerRpc.call("readLine", ">>> ", undefined, true));
     fake.flush();
-    await tick();
+    await settle();
 
-    expect(line()).toEqual({ state: "rejected", reason: expect.any(Error) });
     expect(fake.written).toHaveLength(writtenAtDispose);
   });
 
   // StrictMode의 mount → cleanup 순서: 읽기를 시작하자마자 dispose하고, 이어서 terminal.dispose()가 addon을 다시 dispose한다.
   test("dispose 직후 terminal.dispose()가 addon을 다시 dispose해도 안전하고 뒤늦은 콜백이 해제된 buffer를 읽지 않는다", async () => {
-    const fake = createFakeTerminal({ asyncWrite });
-    const repl = createRepl({ terminal: fake.term, createWorker });
-    const line = observe(repl.readLine(">>> "));
+    const { handle, fake, workerRpc } = startSession({}, { asyncWrite });
+    observe(workerRpc.call("readLine", ">>> ", undefined, true));
+    await waitFor(() => fake.written.includes(""));
 
-    repl.dispose();
+    handle.dispose();
     expect(() => fake.term.dispose()).not.toThrow();
     fake.flush();
     await tick();
 
-    expect(line().state).toBe("rejected");
+    expect(fake.disposedBufferReads).toBe(0);
+  });
+
+  test("폭을 넘는 꼬리를 정리하려고 flush를 기다리는 중에 dispose해도 뒤늦은 콜백이 해제된 buffer를 읽지 않는다", async () => {
+    const { handle, fake, workerRpc } = startSession({}, { asyncWrite });
+    // 100자 꼬리는 짧지 않아 `rewindTail`이 flush를 기다린다(비동기 모드에서는 그 콜백이 dispose 뒤에 온다).
+    workerRpc.notify("write", "x".repeat(100));
+    observe(workerRpc.call("readLine", ">>> ", undefined, true));
+    await waitFor(() => fake.written.includes(""));
+
+    handle.dispose();
+    expect(() => fake.term.dispose()).not.toThrow();
+    fake.flush();
+    await tick();
+    fake.flush();
+
     expect(fake.disposedBufferReads).toBe(0);
   });
 });
@@ -260,15 +359,14 @@ test("dispose는 호출자가 소유한 Terminal을 dispose하지 않는다", ()
 describe("history 저장", () => {
   test("저장된 history를 복원하지도 덮어쓰지도 않고 메모리에서만 이전 줄을 불러온다", async () => {
     localStorage.setItem("history", JSON.stringify(["old"]));
-    const fake = createFakeTerminal();
-    const repl = createRepl({ terminal: fake.term, createWorker });
-    const first = repl.readLine(">>> ");
-    fake.type("new\r");
+    const session = startSession();
+    const { line: first } = await startRead(session);
+    session.fake.type("new\r");
     await first;
 
-    const second = repl.readLine(">>> ");
+    const { line: second } = await startRead(session);
     // ↑를 두 번 눌러도 "new"에서 멈춘다. 저장된 "old"를 복원했다면 두 번째 ↑가 "old"를 불러온다.
-    fake.type("\x1b[A\x1b[A\r");
+    session.fake.type("\x1b[A\x1b[A\r");
 
     await expect(second).resolves.toBe("new");
     expect(localStorage.getItem("history")).toBe(JSON.stringify(["old"]));
@@ -366,6 +464,24 @@ describe("격리 페이지의 세션 시작", () => {
     expect(info).not.toHaveBeenCalled();
   });
 
+  test("sessionTerminated 알림에 `onStatus('terminated')`로 답하고 그 뒤 입력은 터미널에 쓰이지 않는다", async () => {
+    const session = startSession();
+    const { fake, fakeWorker, onStatus, workerRpc } = session;
+    const { line } = await startRead(session);
+    fake.type("exit()\r");
+    await line;
+    const writtenBefore = fake.written.length;
+
+    workerRpc.notify("sessionTerminated");
+    await waitFor(() => onStatus.mock.calls.length === 2);
+    fake.type("abc");
+
+    expect(onStatus.mock.calls.at(-1)).toEqual(["terminated"]);
+    // 종료는 터미널에 아무것도 쓰지 않고(3.14도 종료 메시지가 없다) worker도 살려 둔다(복구는 RD-010 reset()).
+    expect(fake.written).toHaveLength(writtenBefore);
+    expect(fakeWorker.terminate).not.toHaveBeenCalled();
+  });
+
   test("dispose를 두 번 불러도 worker는 한 번만 종료된다", () => {
     const { handle, fakeWorker } = startSession();
 
@@ -433,16 +549,5 @@ describe("비격리 페이지", () => {
       handle.dispose();
       handle.dispose();
     }).not.toThrow();
-  });
-
-  test("readLine 임시 API는 비격리에서도 동작한다", async () => {
-    const fake = createFakeTerminal();
-    const handle = createRepl({ terminal: fake.term, createWorker });
-    handles.push(handle);
-
-    const line = handle.readLine(">>> ");
-    fake.type("a\r");
-
-    await expect(line).resolves.toBe("a");
   });
 });

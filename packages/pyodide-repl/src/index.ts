@@ -5,6 +5,8 @@ import { createInterruptBuffer } from "./protocol/interrupt-protocol";
 import { createRpc, type Rpc } from "./protocol/rpc";
 import { createStdinMailbox } from "./protocol/stdin-mailbox";
 import { writeNotice } from "./terminal/notice";
+import { createReplReader } from "./terminal/repl-reader";
+import type { RewindTerminal } from "./terminal/rewind-tail";
 import { createTerminalSinks } from "./terminal/sinks";
 
 /** 기본 pyodide CDN 위치. 끝 `/`를 포함한다(`00-architecture.md` 4.1). */
@@ -16,8 +18,8 @@ export const NOT_ISOLATED_WARNING =
   "경고: cross-origin isolation이 꺼져 있어 Python 세션을 시작하지 않습니다. 서버가 COOP/COEP 헤더를 보내야 합니다.";
 
 /**
- * 세션의 생애를 앱에 알리는 값. RD-004는 `loading`·`ready`·`load-failed`·`not-isolated`만 발행한다.
- * `terminated`는 RD-005, `crashed`는 RD-010이 발행한다.
+ * 세션의 생애를 앱에 알리는 값. RD-004는 `loading`·`ready`·`load-failed`·`not-isolated`를 발행하고, RD-005부터
+ * `terminated`(`exit()`)를 발행한다. `crashed`는 RD-010이 발행한다.
  */
 export type ReplStatus =
   | "loading"
@@ -44,15 +46,7 @@ export interface ReplOptions {
 
 export interface ReplHandle {
   /**
-   * 프롬프트를 그리고 Enter까지 한 줄을 읽어 돌려준다. 값은 편집 버퍼 그대로다.
-   * 임시 API다. RD-005에서 worker의 REPL 루프가 읽기를 요청하면 핸들에서 빠진다.
-   *
-   * 열린 읽기가 있는 동안 다시 부르면 `Error`로 reject한다(벤더 `Readline`은 열린 읽기를 교체하고
-   * 앞 promise를 끝내지 않는다). `dispose()`나 그 뒤의 호출도 `Error`로 reject한다.
-   */
-  readLine(prompt: string): Promise<string>;
-  /**
-   * worker와 RPC를 정리하고 대기 중인 읽기를 reject하며 줄 편집기를 뗀다. 두 번 불러도 안전하다.
+   * worker와 RPC를 정리하고 대기 중인 읽기를 끝내며 줄 편집기를 뗀다. 두 번 불러도 안전하다.
    * `Terminal`은 dispose하지 않는다.
    */
   dispose(): void;
@@ -71,7 +65,6 @@ export function createRepl(options: ReplOptions): ReplHandle {
   const onStatus = options.onStatus ?? (() => {});
   const isolated = globalThis.crossOriginIsolated === true;
 
-  let reading = false;
   let disposed = false;
   let session: { worker: Worker; rpc: Rpc } | undefined;
 
@@ -82,6 +75,28 @@ export function createRepl(options: ReplOptions): ReplHandle {
   } else {
     // sink 세트는 세션마다 새로 만든다. 새 세션이 이전 꼬리를 물려받지 않게(05-output.md 4.1).
     const sinks = createTerminalSinks(readline);
+    // xterm의 write 콜백은 `term.dispose()` 뒤에도 돈다(TRP-004). `rewindTail`이 flush 콜백에서 해제된 터미널의
+    // buffer를 읽지 않도록, dispose 뒤에는 콜백을 전달하지 않는 뷰를 리더에 준다.
+    const liveTerminal: RewindTerminal = {
+      get cols() {
+        return options.terminal.cols;
+      },
+      get buffer() {
+        return options.terminal.buffer;
+      },
+      write: (text, callback) =>
+        options.terminal.write(
+          text,
+          callback &&
+            (() => {
+              if (!disposed) callback();
+            }),
+        ),
+    };
+    const reader = createReplReader(readline, liveTerminal, sinks);
+    // 벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다. worker 루프는 응답을 받은 뒤에만 다시
+    // 요청하므로 겹치는 요청은 오류로 거절한다.
+    let reading = false;
     const channel = new MessageChannel();
     const mailbox = createStdinMailbox();
     const frame: InitFrame = {
@@ -102,6 +117,17 @@ export function createRepl(options: ReplOptions): ReplHandle {
       writeErrorRaw: (text: string) => sinks.writeErrorRaw(text),
       writeOutput: (text: string) => sinks.writeOutput(text),
       writeError: (text: string) => sinks.writeError(text),
+      // 꼬리 + 프롬프트를 그리고 Enter까지 한 줄을 읽어 응답한다. 요청의 나머지 인자(pending, cancelable)는 후속
+      // RD(RD-013·014·015, RD-008)가 쓴다. 지금은 받지 않고 버린다.
+      readLine: (prompt: string): Promise<string | null> => {
+        if (reading) return Promise.reject(new Error("이미 읽는 중"));
+        reading = true;
+        return reader.read(prompt).finally(() => {
+          reading = false;
+        });
+      },
+      // 종료는 터미널에 쓰지 않는다(3.14도 종료 메시지가 없다). worker는 살려 두고 복구는 RD-010 `reset()`이다.
+      sessionTerminated: () => onStatus("terminated"),
       ready: ({ pyodideVersion }: { pyodideVersion: string }) => {
         console.info("[repl] pyodide 준비", pyodideVersion);
         onStatus("ready");
@@ -119,14 +145,6 @@ export function createRepl(options: ReplOptions): ReplHandle {
   }
 
   return {
-    readLine(prompt) {
-      if (disposed) return Promise.reject(new Error("repl disposed"));
-      if (reading) return Promise.reject(new Error("이미 읽는 중"));
-      reading = true;
-      return readline.read(prompt).finally(() => {
-        reading = false;
-      });
-    },
     dispose() {
       if (disposed) return;
       disposed = true;

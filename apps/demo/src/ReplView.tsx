@@ -8,7 +8,8 @@ import { createWorker } from "./create-worker";
 /**
  * xterm Terminal을 마운트하고 `createRepl`로 세션을 시작한다(RD-004). Terminal은 이 컴포넌트가 소유한다.
  * 크기는 xterm 기본값(80×24)으로 고정한다(FitAddon 없음). 세션 상태는 코어의 `onStatus`를 그대로 보여준다.
- * 입력은 RD-005(worker의 REPL 루프)까지 아무 동작도 하지 않는다.
+ * `exit()`로 세션이 끝나면(`terminated`) 상태 아래에 종료 문구를 보인다. 터미널에는 아무것도 쓰지 않는다.
+ * 복구 버튼과 Alert는 RD-010이 더한다.
  */
 export function ReplView() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,6 +36,9 @@ export function ReplView() {
       <p>
         status: <output data-testid="status">{status}</output>
       </p>
+      {status === "terminated" && (
+        <p data-testid="terminated">Python session terminated.</p>
+      )}
       <div ref={containerRef} data-testid="terminal" />
     </>
   );
