@@ -1,7 +1,8 @@
 /**
  * worker 쪽 콘솔 코어(02-console-core.md 5.1·5.4). `PyodideConsole`을 만들어 콜백을 sink에 잇고, `sys.ps1/ps2`·배너·
  * TLA 비트를 갖추며, `push()` 결과를 Python `await_fut` 헬퍼로만 await하는 `runLine`을 제공한다.
- * 취소·여러 줄 제출·값 에코·안전망은 이 위에 RD-005의 `submission-runner`가 얹는다.
+ * 값 에코 문자열(`repr()` 전체)과 EOF에서 끊긴 문법 오류의 표준 문구 정규화도 Python 헬퍼가 만든다.
+ * 취소·안전망은 이 위에 RD-005의 `submission-runner`가 얹는다.
  */
 import type { PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
@@ -30,14 +31,21 @@ export interface PyodideConsoleProxy extends PyProxy, CompilerFlagsHolder {
   stdout_callback: ((text: string) => void) | undefined;
   stderr_callback: ((text: string) => void) | undefined;
   push(line: string): ConsoleFutureProxy;
+  /** 접근할 때마다 새 proxy다. 쓴 뒤 `destroy()`한다(02-console-core.md 5.1). */
+  readonly buffer: PyProxy & {
+    readonly length: number;
+    clear(): void;
+    toJs(): string[];
+  };
 }
 
 export type RunLineResult =
   | { kind: "incomplete" }
-  /** pyodide `formatted_error` 그대로(끝 개행 포함). 개행 제거는 호출부(RD-005)가 한다. */
+  /** 표준 문구로 정규화한 문법 오류(끝 개행 포함). 개행 제거는 호출부(러너)가 한다. */
   | { kind: "syntax-error"; formattedError: string }
-  /** `exited`는 `SystemExit`(`exit()`/`quit()`)다. */
-  | { kind: "complete"; value: unknown; exited: boolean }
+  /** `echo`는 값의 `repr()` 전체다. 값이 `None`이거나 `exited`면 null. `exited`는 `SystemExit`(`exit()`/`quit()`)다. */
+  | { kind: "complete"; echo: string | null; exited: boolean }
+  /** 실행 예외 또는 `repr` 예외의 트레이스백(끝 개행 포함, 내부 프레임 없음). */
   | { kind: "error"; formattedError: string };
 
 export interface ReplConsole {
@@ -46,28 +54,64 @@ export interface ReplConsole {
   readonly pyconsole: PyodideConsoleProxy;
   /** 한 줄을 push하고 결과를 기다린다. `ConsoleFuture`는 Python `await_fut`로만 await한다. */
   runLine(source: string): Promise<RunLineResult>;
+  /** 블록 입력 중이면 콘솔 buffer의 줄들을 `\n`으로 이은 텍스트, 아니면 undefined. */
+  pending(): string | undefined;
+  /** 미완성 블록을 버린다(`buffer.clear()`). 블록이 없어도 안전하다. */
+  clearPending(): void;
 }
+
+/** `formatted_error`의 마지막 줄이 이것이면 재컴파일로 정규화한다. */
+export const INCOMPLETE_INPUT_MARKER =
+  "_IncompleteInputError: incomplete input";
+/** codeop이 최종 컴파일에서 끄는 두 비트: ALLOW_INCOMPLETE_INPUT(0x4000) | DONT_IMPLY_DEDENT(0x200). */
+export const INCOMPLETE_INPUT_FLAGS = 0x4200;
 
 /** pyodide.globals에서 실행한다. `sys`가 사용자 전역에 남는 편차 22는 유지한다(10-parity-deviations.md). */
 const PROMPT_SETUP = 'import sys\nsys.ps1 = ">>> "\nsys.ps2 = "... "\n';
 
-// ConsoleFuture를 JS에서 직접 await하지 않는다(TRAP-02). 값이 None이 아니면 builtins._를 갱신한다.
-// SystemExit은 [None, True]로 돌려 exit()/quit()를 구분한다.
-const AWAIT_FUT_SOURCE = `
-import builtins
+// ConsoleFuture를 JS에서 직접 await하지 않는다(TRAP-02). 결과는 [echo, exited, error] 세 값이다(None은 JS의 undefined).
+// SystemExit은 [None, True, None]으로 돌려 exit()/quit()를 구분한다. 값이 None이 아니면 repr() 전체를 echo로 만들고
+// 성공한 뒤에만 builtins._를 갱신한다. repr가 예외를 내면 error에 트레이스백을 담고 _는 건드리지 않는다.
+// format_syntax_error는 pyrepl처럼 끝 개행을 붙여(없으면 캐럿 줄이 사라진다) codeop의 최종 컴파일과 같은 플래그로 재컴파일한다.
+// retrieve_exception은 await하지 않는 문법 오류 future의 예외를 회수한다. 그대로 두면 사이클 GC 때 asyncio가
+// "ConsoleFuture exception was never retrieved"를 sys.stderr로 내 터미널에 끼어든다(JS에서 부르면 예외 proxy를 destroy해야 해 Python에 둔다).
+const HELPERS_SOURCE = `
+import builtins, traceback
 from pyodide.ffi import to_js
 
 async def await_fut(fut):
     try:
         res = await fut
     except SystemExit:
-        return to_js([None, True], depth=1)
-    if res is not None:
-        builtins._ = res
-    return to_js([res, False], depth=1)
+        return to_js([None, True, None], depth=1)
+    if res is None:
+        return to_js([None, False, None], depth=1)
+    try:
+        text = repr(res)
+    except Exception as e:
+        # 첫 프레임(이 함수)을 떼고 __repr__ 프레임부터 남긴다.
+        tb = "".join(traceback.format_exception(type(e), e, e.__traceback__.tb_next))
+        return to_js([None, False, tb], depth=1)
+    builtins._ = res
+    return to_js([text, False, None], depth=1)
 
-await_fut
+def format_syntax_error(source, flags):
+    try:
+        compile(source + "\\n", "<console>", "single", flags & ~0x${INCOMPLETE_INPUT_FLAGS.toString(16)}, True)
+    except SyntaxError as e:
+        return "".join(traceback.format_exception_only(type(e), e))
+    return None
+
+def retrieve_exception(fut):
+    fut.exception()
 `;
+
+/** `await_fut`가 돌려주는 세 값. Python `None`은 JS `undefined`로 온다. */
+type AwaitFutResult = [
+  echo: string | undefined,
+  exited: boolean,
+  error: string | undefined,
+];
 
 /**
  * 순서: 전역 stdout/stderr Writer 등록 → `sys.ps1/ps2` → `PyodideConsole(pyodide.globals)` + 콜백 → TLA 비트 →
@@ -89,27 +133,85 @@ export function createConsole(
   pyconsole.stdout_callback = (text) => sinks.write(text);
   pyconsole.stderr_callback = (text) => sinks.writeErrorRaw(text);
   setTopLevelAwait(pyconsole, options.topLevelAwait);
-  // 별도 namespace(빈 dict)에서 정의해 사용자 globals를 오염시키지 않는다. 마지막 식의 값(함수 proxy)이 돌아온다.
-  const awaitFut = pyodide.runPython(AWAIT_FUT_SOURCE, {
-    globals: pyodide.toPy({}),
-  }) as (fut: ConsoleFutureProxy) => Promise<[unknown, boolean]>;
+  // 별도 namespace(빈 dict)에서 정의해 사용자 globals를 오염시키지 않는다. 함수는 세션 동안 쓰므로 proxy를 유지한다.
+  const namespace = pyodide.toPy({}) as PyProxy & {
+    get(name: string): unknown;
+  };
+  pyodide.runPython(HELPERS_SOURCE, { globals: namespace });
+  const awaitFut = namespace.get("await_fut") as (
+    fut: ConsoleFutureProxy,
+  ) => Promise<AwaitFutResult>;
+  const formatSyntaxError = namespace.get("format_syntax_error") as (
+    source: string,
+    flags: number,
+  ) => string | undefined;
+  const retrieveException = namespace.get("retrieve_exception") as (
+    fut: ConsoleFutureProxy,
+  ) => void;
+
+  function pending(): string | undefined {
+    const buffer = pyconsole.buffer;
+    try {
+      return buffer.length > 0 ? buffer.toJs().join("\n") : undefined;
+    } finally {
+      buffer.destroy();
+    }
+  }
+
+  /**
+   * pyodide는 EOF에서 끊긴 문법 오류를 `_IncompleteInputError: incomplete input`으로 표시한다. 3.14 REPL은
+   * `SyntaxError: invalid syntax`이므로 그 경우만 재컴파일한 문구로 바꾼다. 재컴파일이 오류 없이 끝나거나 실패하면 원문이다.
+   * `pending`은 push 전에 읽은 buffer(push가 끝나면 buffer는 비워진다)다.
+   */
+  function normalizeSyntaxError(
+    raw: string,
+    pendingBefore: string | undefined,
+    source: string,
+  ): string {
+    const lines = raw.replace(/\n$/, "").split("\n");
+    if (lines[lines.length - 1] !== INCOMPLETE_INPUT_MARKER) return raw;
+    const whole =
+      pendingBefore === undefined ? source : `${pendingBefore}\n${source}`;
+    try {
+      return formatSyntaxError(whole, pyconsole._compile.compiler.flags) ?? raw;
+    } catch {
+      return raw;
+    }
+  }
 
   return {
     banner: consoleModule.BANNER,
     pyconsole,
+    pending,
+    clearPending() {
+      const buffer = pyconsole.buffer;
+      try {
+        buffer.clear();
+      } finally {
+        buffer.destroy();
+      }
+    },
     async runLine(source) {
+      const pendingBefore = pending();
       const fut = pyconsole.push(source);
       try {
         if (fut.syntax_check === "incomplete") return { kind: "incomplete" };
         if (fut.syntax_check === "syntax-error") {
+          retrieveException(fut);
           return {
             kind: "syntax-error",
-            formattedError: fut.formatted_error ?? "",
+            formattedError: normalizeSyntaxError(
+              fut.formatted_error ?? "",
+              pendingBefore,
+              source,
+            ),
           };
         }
         try {
-          const [value, exited] = await awaitFut(fut);
-          return { kind: "complete", value, exited };
+          const [echo, exited, error] = await awaitFut(fut);
+          if (error !== undefined)
+            return { kind: "error", formattedError: error };
+          return { kind: "complete", echo: echo ?? null, exited };
         } catch {
           // 오류 문자열은 e.message가 아니라 fut.formatted_error(내부 프레임이 잘린 것)를 쓴다.
           return { kind: "error", formattedError: fut.formatted_error ?? "" };
