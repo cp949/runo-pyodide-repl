@@ -89,7 +89,7 @@ worker 진입점 `runReplWorker()`: 초기화 프레임 수신 → CDN `loadPyod
 
 ### RD-005 — REPL 루프와 PyodideConsole 코어
 
-상태: 대기 · 이전: RD-007, RD-011, RD-014(종료 감지) · 설계: `02-console-core.md`(5.1의 `runLine` 포함), `00-architecture.md` 3.2
+상태: 완료 · 이전: RD-007, RD-011, RD-014(종료 감지) · 설계: `02-console-core.md`(5.1의 `runLine` 포함), `00-architecture.md` 3.2
 
 worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 `repl-reader`(꼬리 + `>>> ` 합성). 한 줄 제출만 다룬다(여러 줄은 RD-011).
 
@@ -97,10 +97,12 @@ worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 
 
 완료 기준:
 - 위 시나리오 전부(브라우저). (RD-004에서 완료) 배너 뒤·값 에코 뒤 빈 줄 없음. `sys.ps1`/`ps2` 설정과 배너 `writeOutput`도 RD-004에서 끝났다.
-- EOF에서 끊긴 문법 오류(`1 +`·`foo bar`)는 pyodide 314.0.7 콘솔이 `SyntaxError: invalid syntax`가 아니라 `_IncompleteInputError: incomplete input`으로 표시한다(`runLine`은 `syntax-error`로 분류하고 `formattedError`를 그대로 돌려준다). 위 `1 +` 시나리오의 화면 마지막 줄을 3.14.4 pty와 비교해 맞추거나 편차로 등록한다(근거·표: `.scratch/incomplete-input-error-display/issues/01-incomplete-input-error-display.md`).
+- EOF에서 끊긴 문법 오류(`1 +`·`foo bar`)는 pyodide 314.0.7 콘솔이 `SyntaxError: invalid syntax`가 아니라 `_IncompleteInputError: incomplete input`으로 표시한다(`runLine`은 `syntax-error`로 분류하고 `formattedError`를 그대로 돌려준다). 위 `1 +` 시나리오의 화면 마지막 줄을 3.14.4 pty와 비교해 맞추거나 편차로 등록한다(근거·표: `.scratch/incomplete-input-error-display/issues/01-incomplete-input-error-display.md`). 결과: 재컴파일 정규화를 채택해 `1 +`·`foo bar`·블록 안 `1 +`가 3.14.4 pty와 캐럿까지 일치하고 본문 없는 중첩 블록은 `IndentationError` 문구가 같다(이슈 `done`, 편차 13은 즉시 표시(편차 11)만 남는다).
 - `ConsoleFuture`는 Python 쪽 `await_fut` 헬퍼로만 await한다. `run(null)` 선분기(버퍼 clear → `KeyboardInterrupt` 빨강 → `>>> `). `run()` 안전망(`ConversionError` 판별)이 있다. node + 실제 pyodide 시험(이전 `submission-runner.test.ts` 상당).
 - REPL 프롬프트 이어붙임: `t>>> `, 빈 Enter 뒤 열 0의 `>>> `, 블록 실행 뒤 `012>>> `, stderr 꼬리 뒤 `e>>> `(`e`만 빨강), 닫히지 않은 색 뒤 기본색, `\r30%`→`\r100%` 뒤 `100%>>> `, 100·130·200자·전각·정확히 80자 꼬리에서 앞 행 중복 없음(이전 RD-006b 브라우저 74개 시나리오를 옮겨 같은 결과).
 - 값 에코 뒤·트레이스백 뒤·SyntaxError 뒤·배너 뒤에 빈 줄이 없다(이전 RD-011a 16개 시나리오).
+
+인계: worker 루프는 `worker/repl-loop.ts`의 `runReplLoop(deps)`(`readLine(prompt, pending)` → `run(line)` → `exit`면 `onTerminated` 후 종료)이고 `protocol/`을 import하지 않는다(`boot.ts`가 rpc 래퍼를 주입한다). 한 줄 실행은 `worker/submission-runner.ts`의 `createSubmissionRunner(pyodide, repl, io).run(line | null)`이다(`PS1`/`PS2`, 값 에코, 오류 표시에서 끝 개행 하나 제거, `null` 선분기, `KeyboardInterrupt` 안전망). `ReplConsole`에 `pending()`/`clearPending()`이 생겼고 `RunLineResult.complete`는 `{ echo, exited }`다(`echo`는 Python이 만든 `repr()` 전체, `None`은 `null`). 예상 밖 오류는 `repl 내부 오류: …`(빨강) + `clearPending()` 후 `>>> `로 계속하고, `readLine` reject는 `rpc disposed`면 조용히·아니면 `console.error` 후 루프가 끝난다. main은 `terminal/repl-reader.ts`의 `createReplReader`(`rewindTail` → 꼬리 재조회 → `resetTail` → `readline.read(꼬리 + "\x1b[0m" + 프롬프트)`)와 `terminal/rewind-tail.ts`를 쓰고, `createRepl`은 RPC `readLine` 핸들러(겹치는 요청은 `Error("이미 읽는 중")`로 거절, `pending`·`cancelable`은 받지 않는다)와 `sessionTerminated` → `onStatus('terminated')`(터미널 무출력, worker는 살려 둔다)를 처리한다. `ReplHandle`은 `dispose`·`crossOriginIsolated`만 남았다. 리더는 dispose 뒤 write 콜백을 전달하지 않는 터미널 뷰(`createRepl`의 `liveTerminal`)를 받는다(`docs/traps/TRP-004`). 데모는 `terminated`일 때 `Python session terminated.`를 보인다. **중간 상태**: 개행이 든 붙여넣기·Shift+Enter 제출은 통째로 `push`되어 대개 SyntaxError다(RD-011이 분기를 추가한다). 값 에코가 `sys.displayhook`을 거치지 않는 것은 편차 33이다. 브라우저 확인 스크립트(`lib.mjs` 하니스, `repl-check.mjs`, `prompt-join-check.mjs`, `trailing-newline-check.mjs`, `carryover-check.mjs`, `keys-after-enter-probe.mjs`, 양성 대조 드라이버 `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있고 RD-018이 보관한다. 결과: dev `repl-check normal` 15/15(preview 15/15), `prompt-join-check` 20/20, `trailing-newline-check` 13/13, `carryover-check` 4/4, 양성 대조 4/4. 편차 32 재측정(N=10)의 창은 약 20ms로 worker 왕복이 더해지기 전과 같다(`10-parity-deviations.md` 32). `exit()` 뒤 브라우저 `pageerror` 1건(webloop `run_handle`의 `SystemExit` 재보고)은 RD-009 대상이다. 건너뛴 이전 브라우저 시나리오 ID는 아래 각 RD의 인계에 있다. 함정: 하니스에서 Enter 뒤 `waitPrompt`가 화면 갱신 전의 낡은 프롬프트 행에 통과한다(`TRP-005`), 변조·원복을 반복하며 vite dev를 재시작하지 않으면 원복한 파일의 다음 변조가 반영되지 않는다(`TRP-007`), "로그가 없다"는 확인은 화면을 지우고 직후 정확한 행 목록으로 단언한다(`TRP-008`).
 
 ### RD-006 — `input()` 읽기: 메일박스·꼬리 프롬프트·read-guard
 
@@ -115,6 +117,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 - `input()`/`sys.stdin.readline()/read()/readlines()`/`for line in sys.stdin` 전부 같은 경로로 값이 들어온다(node + 실제 pyodide).
 - read-guard 단위 시험(RED 확인, 변이 검사)과 브라우저 프로브(가드를 빼면 `1+1`이 멈추고 넣으면 순서대로).
 - 메일박스 대기 중 worker는 `complete`에 답하지 못하지만 main이 `input()` 읽기 중 Tab을 요청하지 않으므로 교착이 없다(시험으로 고정).
+
+인계(RD-005): `stdin-reader`는 `terminal/rewind-tail.ts`의 `rewindTail`을 재사용하고, `createRepl`이 `createReplReader`에 준 터미널 뷰(`liveTerminal`, dispose 뒤 write 콜백을 전달하지 않음, `docs/traps/TRP-004`)를 같이 받아야 한다. RD-005가 건너뛴 이전 RD-006b 브라우저 시나리오: A1~A5·B1·B2·C1·C2·D1·E1·E2·H1·H2·K1~K3·L1·M1·M2·N1~N3·O1·O2·P1~P9·Q1·R1·S1·J1·J3(`input()`·stdin, 취소 포함은 RD-008). RD-005의 U1은 `input("p: ")` 대신 출력 없는 `pass`로 꼬리 비움을 확인했으므로 이 RD에서 원래 `input()` 형태로 되살린다.
 
 ## Phase 1 — Ctrl+C 전체
 
@@ -133,6 +137,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 - 폴링 경로에 접근자·Proxy를 넣지 않는다(`str(i)` 루프 plain 대비 1.03 이내).
 - 변이 검사: SEQ/SIGNAL 순서 뒤집기, 송신기가 ACK를 먼저 읽기, 핸들러 ack 위치 이동, 연결이 무조건 ack하기가 각각 시험을 실패시킨다.
 
+인계(RD-005): `discardPendingInterrupt`는 `worker/repl-loop.ts`에서 `readLine` 응답 직후·`run` 전에 넣는다(루프가 `protocol/`을 import하지 않으므로 주입 함수로 받는다). 프롬프트에서 Ctrl+C는 벤더 `Readline`이 `^C`를 찍고 프롬프트를 다시 그릴 뿐 worker에 알리지 않는다(`setCtrlCHandler`는 활성 읽기가 없을 때만 불린다). 건너뛴 이전 시나리오: RD-006b의 F×5·G1·G2, RD-011a의 S08(`while True: pass` 중 Ctrl+C).
+
 ### RD-008 — 입력줄 Ctrl+C(미완성 블록 취소)와 `input()` 중 Ctrl+C
 
 상태: 대기 · 이전: RD-012b, RD-012c · 설계: `04-stdin-input.md` 3.1, `06-editing.md` 6.3(취소·`cancelSettling`), `02-console-core.md` 5.2(`run(null)`)
@@ -143,6 +149,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 - 프롬프트 취소: 본문이 쌓인 블록·Shift+Enter 버퍼·세션 리셋 뒤에도 같다. 다음 입력에 취소된 글자가 섞이지 않는다. 취소한 입력은 history에 없다(이전 RD-012b 브라우저 24개 중 22 통과, E1·E2 기준선 실패 유지).
 - `input()` 취소: `null` → `signalInterrupt` → `checkInterrupt()` → `KeyboardInterrupt`가 `input()` 호출 지점에서 난다. `try/except KeyboardInterrupt`가 잡고 `except Exception`은 못 잡으며 `finally`가 실행된다. `sys.stdin.readline()`도 같다. Ctrl+C 연타(0ms 2회·5회, 키 반복 20회)에도 REPL 생존(이전 RD-012c 24개 중 20 통과, A1·C2·H1·J1 기준선 실패 유지). 요청 번호를 올리지 않으면 무시되는 경우를 시험이 잡는다(TRAP-05, TRAP-35 상당).
 - `cancelSettling` 방어: 취소 뒤 다음 읽기 활성화 전 Ctrl+C가 중단 경로로 가지 않는다(단위 시험).
+
+인계(RD-005): main `readLine` 핸들러는 `(prompt)`만 받고 `pending`·`cancelable`을 쓰지 않으며 `null`을 응답하지 않는다. 이 RD가 시그니처를 `(prompt, pending, cancelable)`로 넓히고 취소를 `null`로 응답한다. worker의 `run(null)`(버퍼 clear → `KeyboardInterrupt` 빨강 → `>>> `)과 안전망은 RD-005에서 node 시험으로 끝났다. 건너뛴 이전 시나리오: RD-006b의 G3·W2(`t>>> abc`에서 Ctrl+C), RD-011a의 S14(`if True:` 뒤 Ctrl+C).
 
 ### RD-009 — 정지한 실행 중 Ctrl+C: 감시 타이머, `time.sleep` 조각, webloop 재보고 억제, 프롬프트 유휴 SIGINT 폐기
 
@@ -158,6 +166,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 - 설치 가드 5종이 pyodide 내부 변화를 `console.warn`으로 알린다(시험).
 - `packages/pyodide-repl/vitest.config.ts`의 `onUnhandledError` 필터(`PythonError` + 줄 시작 `SystemExit`, RD-004가 `exit()` 시험을 위해 넣은 임시 조치)를 제거하고 `exit()` 시험이 필터 없이 통과한다(webloop 재보고 억제가 들어와 불필요).
 
+인계(RD-005): `exit()` 뒤 브라우저 worker에서 webloop `run_handle`이 `SystemExit`을 다시 던져 `pageerror`가 1건 남는다(dev·preview 동일, 콘솔 경고·오류는 0). 이 RD의 재보고 억제가 들어오면 브라우저에서도 0이어야 한다(`repl-check.mjs normal` ⑦이 건수를 기록한다).
+
 ## Phase 2 — 세션·제출·편집·완성
 
 ### RD-010 — 세션 리셋, 종료 정책, 크래시 재시작 UI
@@ -168,6 +178,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 
 완료 기준: 위 시나리오(브라우저). 리셋 순서(들여쓰기 단위 초기화 → 송신기 취소 → `SIGNAL=0` → terminate → 새 worker·새 메일박스·새 sink 세트)가 시험으로 고정된다. StrictMode 이중 마운트에서 경고·중복 worker가 없다. `dispose()`가 두 번 불려도 안전하다.
 
+인계(RD-005): `exit()`(`terminated`) 뒤 worker는 살아 있고 터미널·입력은 무응답이다. 복구는 이 RD의 리셋과 Alert다(데모의 `Python session terminated.` 한 줄을 Alert로 교체). `createRepl`의 `liveTerminal` 뷰가 쓰는 `disposed`는 핸들 단위이므로 리셋이 핸들을 유지한 채 세션만 바꾸면 세션 단위 해제 신호가 필요하다(이전 세션의 `rewindTail` flush 콜백이 새 세션 읽기에 끼어들 수 있다). 건너뛴 이전 시나리오: RD-006b의 AC1·J2(세션 리셋 뒤 꼬리·`input()` 취소).
+
 ### RD-011 — 여러 줄 입력 제출(붙여넣기·Shift+Enter·히스토리 재호출)
 
 상태: 대기 · 이전: RD-017 · 설계: `02-console-core.md` 5.2·5.3
@@ -175,6 +187,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 시나리오: `def add(a, b):\n    return a + b\n\nprint(add(1, 2))`를 붙여넣고 Enter 한 번 → `3`, SyntaxError 없음. 클래스 메서드 사이 빈 줄이 블록을 끊지 않는다. 붙여넣은 탭이 보존된다. `1\n2\n3` → `3`만 에코. 파싱 오류가 있으면 아무 문장도 실행하지 않는다.
 
 완료 기준: 위 시나리오 + `split_paste` 코퍼스 27개 전부 일치(node + 실제 pyodide). 블록 입력 중(`... `) 붙여넣기는 한 줄씩 흘려 넣는다. 예외·`exit()` 뒤 나머지 문장 미실행. 한 줄 입력·빈 줄·`input()` 기존 동작 유지.
+
+인계(RD-005): RD-005의 러너(`submission-runner.run`)에는 개행 분기가 없다. 이 RD가 `/[\r\n]/` 분기·`replayLines`·`multiline.py`·`.py` raw import 관례를 추가한다. 그 전까지 개행이 든 붙여넣기·Shift+Enter 제출은 통째로 `push`되어 대개 SyntaxError다. 건너뛴 이전 시나리오: RD-011a의 S03·S07(붙여넣기 분할).
 
 ### RD-012 — top-level await 옵션(기본 꺼짐)
 
@@ -199,6 +213,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 시나리오: `for i in range(2):` / `    print(i)` / 빈 줄로 끝낸 뒤 ↑ → 블록 전체가 돌아오고 Enter 한 번으로 재실행. Ctrl+C로 취소한 블록은 history에 남지 않는다.
 
 완료 기준: 위 시나리오 + 괄호 안 빈 줄 보존, 문법 오류·예외·`exit()`로 끝난 블록도 전체가 남음, 공백만 있는 제출 제외, `... ` 입력줄의 ↑ 무동작. 벤더링 `History`에 삭제/복원 API를 추가할지 착수 시 결정하고 결정을 DELTA에 남긴다.
+
+인계(RD-005): 건너뛴 이전 시나리오는 RD-006b의 X2·X3(블록 history 재호출 뒤 `012>>> ` 프롬프트 유지)다. worker는 `readLine`에 `pending`을 보내지만 main 핸들러가 아직 쓰지 않는다.
 
 ### RD-015 — Tab 완성(이름·속성), 완성 중 Ctrl+C, Tab 큐
 
@@ -233,6 +249,8 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 이전 구현의 Playwright 스크립트(`browser-check*.mjs`, 프로브 4종, `run-harness.sh`)와 pty 기준 데이터(기대 행 파일)를 `apps/demo/e2e/`로 옮겨 수동 실행 가능하게 한다. CI 상시 실행은 범위 밖이다.
 
 완료 기준: `pnpm --filter demo e2e:<이름>`으로 기준선 5종이 재현된다(RD-016 58/58, RD-016a 129/129, RD-012b 22/24, RD-012c 20/24, RD-006b 74/74)과 `boot-press` N=30. 기준 인터프리터(3.14.4)와 pyodide 번들(3.14.2) 차이를 README에 적는다.
+
+인계(RD-005): RD-005 검증 스크립트(`lib.mjs` 하니스, `repl-check.mjs`(normal·cdn-blocked·not-isolated), `prompt-join-check.mjs`(RD-006b 이식 20개), `trailing-newline-check.mjs`(RD-011a 이식 12개), `carryover-check.mjs`, `keys-after-enter-probe.mjs`, `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있다. 이 RD가 `apps/demo/e2e/`로 옮길 때 각 RD가 넘긴 "건너뛴 시나리오"를 되살려 기준선 5종을 채운다. `ONLY=<이름 접두어,…>` 환경변수로 확인을 분리해 돌릴 수 있다. 400토큰(25행, 스크롤백) 꼬리 관찰은 새 데모에 `window.__term`이 없어 옮기지 않았다. 함정: `docs/traps/TRP-005`·`TRP-007`·`TRP-008`.
 
 ---
 

@@ -10,3 +10,6 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-004](./TRP-004-xterm-write-callback-runs-after-dispose.md) | xterm write 콜백은 `term.dispose()` 뒤에도 실행되고, 그 안의 `buffer` 접근은 경고만 남긴다 | ACTIVE | `term.write(text, callback)` 콜백 안에서 `term`에 접근하는 코드를 추가·수정할 때, 마운트 직후 읽기를 시작하는 코드를 StrictMode 아래에서 쓸 때 |
 | [TRP-005](./TRP-005-automation-input-before-prompt-is-dropped.md) | 자동화 입력은 새 프롬프트가 보인 뒤에 보내야 한다(활성 읽기 전 키는 버려진다) | ACTIVE | 브라우저 하니스가 Enter 뒤 이어서 키를 보낼 때, 읽기를 요청하는 코드(REPL 읽기, `input()`)를 추가하거나 읽기 시작 경로를 바꿀 때 |
 | [TRP-006](./TRP-006-row-text-check-misses-extra-blank-line.md) | 화면 행 텍스트만 비교하면 출력 끝의 여분 빈 줄을 놓친다(커서 행을 봐야 한다) | ACTIVE | Playwright로 xterm 화면의 출력 뒤 개행 수를 확인하는 하니스, 배너·값 에코·트레이스백·stderr 뒤 "빈 줄 없음"을 검증할 때 |
+| [TRP-007](./TRP-007-vite-dev-stale-module-after-file-replace.md) | 파일을 `git checkout`으로 되돌린 뒤 다시 변조하면 vite dev가 낡은 모듈을 계속 준다 | ACTIVE | vite dev를 띄워 둔 채 소스를 변조 → `git checkout` 원복 → 재변조하며 브라우저 확인을 반복할 때(양성 대조) |
+| [TRP-008](./TRP-008-negative-check-misses-scrolled-log.md) | "로그가 없다"는 브라우저 확인을 뷰포트만 훑어 하면 화면 밖으로 밀려난 로그를 놓친다 | ACTIVE | 브라우저 하니스가 후속 출력 뒤 뷰포트(24행)에서 "이 문자열이 없다"를 판정할 때, 여러 행짜리 stderr 로그가 대상일 때 |
+| [TRP-009](./TRP-009-concurrent-agents-contaminate-worktree.md) | 한 작업 트리에서 에이전트 둘이 동시에 일하면 변이 검사와 시험이 서로를 오염시킨다 | ACTIVE | 한 저장소·브랜치에서 에이전트 둘 이상이 변이 검사기·임시 계측·커밋을 동시에 쓸 때 |

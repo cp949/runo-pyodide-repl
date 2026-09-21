@@ -124,6 +124,10 @@ _Avoid_: handshake
 main이 터미널에 쓰는 함수 4종(`write`, `writeErrorRaw`, `writeOutput`, `writeError`). 개행·색 규칙을 가진다.
 _Avoid_: 로거, 출력 콜백
 
+**값 에코**:
+식의 결과를 `repr()`로 `writeOutput`에 내는 것. `None`은 내지 않는다.
+_Avoid_: displayhook, 결과 출력
+
 **전역 스트림**:
 콘솔 리다이렉트 밖에서 Python이 쓰는 stdout/stderr. 배경 콜백 출력이 여기로 온다.
 

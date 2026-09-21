@@ -18,7 +18,7 @@
    - `06-editing.md` 벤더링 xterm-readline·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사
    - `07-tab-completion.md` Tab 완성
    - `08-session.md` 리셋·이중 마운트·종료 후 상태
-4. **검증과 한계**: `09-testing.md`, `10-parity-deviations.md`(3.14 편차 32건·범위 밖), `11-known-traps.md`(함정 33건)
+4. **검증과 한계**: `09-testing.md`, `10-parity-deviations.md`(3.14 편차 33건·범위 밖), `11-known-traps.md`(함정 33건)
 5. **이전 구현 참조**: `12-previous-implementation.md`(이전 RD 인벤토리·모듈 지도)
 
 ## 결정된 스택

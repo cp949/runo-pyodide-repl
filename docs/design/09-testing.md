@@ -26,7 +26,7 @@
   발동하지 못한다. 그런 변이는 간격·호출 경로를 바꾸는 방식으로 대체한다. `MessagePort`를 든 객체에는 `toContain`·
   `toEqual`을 쓰지 않는다(순환 내부 참조로 스택이 넘친다). 정체성 비교(`includes`)를 쓴다.
 - **이 저장소의 패턴**(RD-004에서 확립). 해당 파일: `worker/sink-writer-pyodide.test.ts`, `worker/top-level-await.test.ts`,
-  `worker/console.test.ts`, `terminal/sinks-pyodide.test.ts`, `worker/boot.test.ts`.
+  `worker/console.test.ts`, `worker/submission-runner.test.ts`, `terminal/sinks-pyodide.test.ts`, `worker/boot.test.ts`.
   - 파일 상단에 `// @vitest-environment node`를 두고 `import { loadPyodide } from "pyodide"`를 인자 없이 부른다
     (npm 패키지 자체 `indexURL`을 쓴다). `beforeAll(async () => { pyodide = await loadPyodide(); }, 60_000)`으로
     파일마다 인스턴스 하나를 만들어 그 파일의 시험이 공유한다(로드가 수 초라 시험마다 만들지 않는다). CDN 로더
@@ -37,27 +37,46 @@
   - 부팅 시퀀스(`boot.test.ts`)는 `bootReplWorker(frame, { loadPyodide })`에 로더를 주입하고 main 역할은 실제
     `MessageChannel`의 다른 포트에서 알림을 받는다. 실패 경로는 로더가 던지게 하거나, `Proxy`로 감싼 pyodide의
     `pyimport`만 던지게 해(콘솔 모듈 가져오기 실패) 콘솔 생성 실패를 만든다.
+  - 부팅 뒤 REPL 루프는 각본 `readLine`으로 시험한다. main 역할이 `readLine` 핸들러를 각본 배열로 답하고(각본이 끝난 뒤의
+    요청은 오류로 답하되 기록은 남긴다), 알림과 `readLine` 요청을 한 타임라인(`events`)에 도착 순서대로 기록해 "출력 → 다음
+    프롬프트 요청" 순서 전체를 단언한다. 종료 뒤에는 시간을 두고 이벤트 수가 늘지 않는지(요청이 더 오지 않는지) 본다.
+    실행 밖 오류 경로는 각본이 문자열이 아닌 값(`42`)을 답하게 해 실제 `push`가 `TypeError`를 던지게 만든다.
+  - 러너(`worker/submission-runner.test.ts`)는 실제 pyodide의 `createConsole`이 만든 `ReplConsole`을 `createSubmissionRunner`에
+    물려 한 줄 제출·값 에코·오류 표시·끝 개행·`exit`·`null` 취소를 본다. 사용자 코드 밖에서 새는 `KeyboardInterrupt` 안전망은
+    실제 SIGINT 없이 `runLine`·`clearPending`을 `KeyboardInterrupt`를 던지는 Python 함수로 바꿔 끼워 재현한다.
   - `exit()`를 실행하면 asyncio가 `SystemExit`을 WebLoop로 다시 던져 vitest가 `Unhandled Rejection`으로 실패 종료한다.
     `vitest.config.ts`의 `onUnhandledError`가 `PythonError` + 줄 시작 `SystemExit`만 무시하는 임시 조치이고(RD-009의
     webloop 재보고 억제가 들어오면 제거), `process.on("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
-  - 시험 입력 함정: `1 +`·`foo bar` 같은 EOF 문법 오류는 pyodide 314.0.7에서 `_IncompleteInputError: incomplete
-    input`으로 표시되므로 `SyntaxError`를 기대하면 실패한다(`x = = 1`은 `SyntaxError: invalid syntax`). 한 줄에 `;`로
+  - 시험 입력 함정: `1 +`·`foo bar` 같은 EOF 문법 오류는 pyodide 314.0.7의 `pyconsole.push`가 `_IncompleteInputError:
+    incomplete input`으로 표시한다. `runLine`은 이를 표준 `SyntaxError: invalid syntax`로 정규화해 돌려주므로(`02-console-core.md`
+    5.1) `push`를 직접 부르는 시험만 원문을 기대해야 한다(`x = = 1`은 원문도 `SyntaxError: invalid syntax`). 한 줄에 `;`로
     이은 앞 식문장의 값은 콘솔이 stdout으로 에코해 꼬리를 비우므로, 개행 없는 출력 시험은 값이 없는
     `print(..., end="")`로 만든다.
 
 ## 9.2 jsdom(기본 환경) + 실제 `Readline` + 가짜 터미널 / 가짜 타이머
 `auto-indent.test.ts`, `auto-indent-reader.test.ts`, `tab-reader.test.ts`, `stdin-reader.test.ts`,
-`repl-reader.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
+`repl-reader.test.ts`, `rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
+`worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
+요청 거절 정책을 고정), `index.test.ts`(`createRepl`),
 `history-filter.test.ts`, `paste-tabs.test.ts`, `interrupt-protocol.test.ts`,
 `interrupt-sender.test.ts`(가짜 타이머로 전송·재전송·10회 상한·읽기 순서), `interrupt-watch.test.ts`,
 `App.test.tsx`(배선: 전송·재전송, `readLine`/`readInput` 진입, 세션 리셋, 언마운트).
 - 가짜 터미널(`src/test/fake-terminal.ts`)은 `write` 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다
   (동기만 쓰면 TRP-008을 놓친다). history는 ↑ 재호출로만 관찰한다.
-  `createFakeTerminal({ asyncWrite })`가 `{ term, written, type, paste, keyDown, flush, disposedBufferReads }`를 돌려준다.
-  `Readline`이 읽는 xterm 멤버와 `loadAddon`·`dispose`만 구현하고 화면은 해석하지 않는다(원문 `written`).
+  `createFakeTerminal({ asyncWrite, cols, rows })`가 `{ term, screen, written, type, paste, keyDown, flush, disposedBufferReads }`를 돌려준다.
+  `Readline`이 읽는 xterm 멤버와 `loadAddon`·`dispose`만 구현하고 화면은 해석하지 않는다(원문 `written`). 화면 버퍼를 읽는
+  코드(`rewindTail`)를 위해 `screen`에 시험이 값을 지정하는 최소 모델만 둔다: `buffer.active.{cursorY, baseY, getLine(row)?.isWrapped}`가
+  읽는 `cursorY`·`baseY`·`wrappedRows`이고 VT는 해석하지 않는다. 기본값(커서 0행, 스크롤백 없음, 감긴 행 없음)은 값을 지정하지
+  않는 시험에 영향이 없다. 실제 화면 결과(앞 행 중복 없음)는 9.3의 브라우저가 본다.
   `type()`은 키 하나마다 `onData`를 한 번씩 부르고(이스케이프 시퀀스는 한 키) `paste()`는 한 번에 보낸다. 비동기 모드는 콜백을 `flush()`까지 미룬다.
-  실제 xterm처럼 `dispose()` 뒤에도 write 콜백을 돌리고 그때의 `buffer` 읽기를 `disposedBufferReads`로 센다(TRP-001 유형 관찰).
+  실제 xterm처럼 `dispose()` 뒤에도 write 콜백을 돌리고 그때의 `buffer` 읽기(`cursorY`·`baseY`·`getLine`)를 `disposedBufferReads`로 센다(`docs/traps/TRP-004`).
   실제 xterm `Terminal`은 jsdom에서 `open()`이 `matchMedia` 없음으로 실패해 브라우저(9.3)에서만 쓴다.
+- `index.test.ts`는 worker 역할 rpc(초기화 프레임의 `rpcPort`에 시험이 만든 `createRpc`)가 `readLine`을 요청하고 main이 읽기를
+  시작하는 경로로 줄 편집·이중 요청 거절·dispose·`terminated`를 본다. `startRead(session, prompt)` 도우미가 요청을 보내고 입력
+  상태가 만들어질 때까지 write 콜백을 배출한다. 출력 알림은 빈 문자열 write를 내지 않으므로 빈 문자열 write의 개수가 늘어난 것을
+  "요청이 도착했다"는 신호로 쓴다(`written.length` 증가는 앞선 출력 알림에도 반응한다). 긴 꼬리는 `rewindTail`이 flush를
+  기다리므로 배출을 두 번 한다. 읽기 Promise는 객체 `{ line }`에 담아 돌려준다(`async` 함수가 반환한 Promise를 풀어 Enter까지
+  멈추는 것을 피한다). 응답이 오지 않는 시험(dispose 뒤 요청)은 `observe`로 상태만 본다.
 - 실제 pyodide의 **동기** stdin 콜백 안에서 실제 `Readline`을 기다릴 수 없어, `input()` 통합은 read를
   동기 fake로 대신한다.
 - **변이 검사(mutation)** 를 관행으로 쓴다: 요청 번호와 SIGINT 쓰기 순서 뒤집기, 송신기가 ack를 먼저 읽기,
@@ -72,6 +91,11 @@
 - StrictMode 이중 마운트 거동.
 - 화면 행 텍스트(`.xterm-rows > div`)만 비교하면 출력 끝의 여분 빈 줄이 보이지 않는다. 개행 수는 커서 행 번호로
   단언한다(`docs/traps/TRP-006`).
+- xterm이 키와 출력을 비동기로 그리므로 하니스는 입력이 커서 행에 그려진 것을 확인한 뒤 진행하고, Enter를 친 뒤에는 화면이
+  바뀐 것을 확인하고 나서 새 프롬프트(`>>>`·`... `) 행을 기다린다. 그리기 전에 화면을 읽으면 낡은 프롬프트 행에 통과하고,
+  새 프롬프트가 뜨기 전에 보낸 키는 버려진다(`docs/traps/TRP-005`).
+- "이 로그가 없다"는 확인은 후속 출력에 밀려 뷰포트 밖으로 나간 행을 놓친다. 화면을 지우고(Ctrl+L) 한 번의 동작 직후 행 목록을
+  정확히 단언한다(예: `gc.collect()` 직후 화면이 값 에코 한 줄뿐). 수정을 제거하는 변조로 확인이 실패하는지 봐서 검출력을 확인한다.
 - 미확인으로 남은 것: **프로덕션 빌드, Firefox, Safari, `sync=false` 폴백**, 자동화 E2E(범위 밖).
 
 ## 9.4 측정·비교 기준

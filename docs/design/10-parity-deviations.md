@@ -24,7 +24,7 @@ history·입력:
 10. **붙여넣은/Shift+Enter로 만든/재호출한 블록의 둘째 줄부터 `... ` 접두사가 없다**.
 11. **문법 오류가 즉시 표시된다**(3.14는 다중 줄 입력에서 빈 줄 뒤).
 12. **Backspace dedent 단위 차이**: 웹은 단위 배수까지, 3.14는 이전 줄들의 더 얕은 수준까지. 2칸·4칸 혼용 블록에서 다르다. 탭 들여쓰기는 1글자씩.
-13. **본문 없는 중첩 블록**(`if True:` / `    if True:` / `    pass`)에서 `_IncompleteInputError: incomplete input`(3.14는 `IndentationError`).
+13. **본문 없는 중첩 블록**(`if True:` / `    if True:` / `    pass`)의 문구는 3.14와 같은 `IndentationError`이고 즉시 표시(편차 11)만 남는다. pyodide 콘솔이 내는 `_IncompleteInputError: incomplete input`은 재컴파일로 표준 문구로 바꾼다(`02-console-core.md` 5.1). `1 +`·`foo bar`·블록 안 `1 +`는 3.14.4 pty와 캐럿 위치까지 같다.
 14. **프리필이 있는 동안 ↑가 history를 탐색하지 않는다**. `... ` 입력줄의 ↑는 무동작(3.14는 이전 줄로 커서 이동).
 15. `input()` 대기 중 붙여넣은 여러 줄은 첫 줄만 값으로 쓰인다. 탭은 8칸 폭으로 표시된다.
 
@@ -52,7 +52,11 @@ Ctrl+C·sleep:
 
 읽기 없는 구간:
 
-32. **읽기가 활성이 아닌 동안 친 키는 버려진다**(3.14는 tty가 버퍼링했다가 다음 프롬프트에 보여준다). 벤더 `Readline`은 활성 읽기가 없으면 Ctrl+C·Ctrl+L 외 단일 키를 버리고, Enter로 읽기가 끝난 뒤 다음 읽기의 입력 상태가 만들어지기까지(`term.write("", cb)`의 flush 대기)도 같다. Enter 뒤 `z`를 치기까지의 지연별 측정(Chromium 148 headless, preview 빌드, RD-003 데모의 worker 없는 읽기 루프, N=10): 0ms 0/10, 5ms 2/10, 10ms 2/10, 20ms 이상 10/10 들어옴. worker 왕복(RD-005)과 실행 시간이 더해지면 창이 길어진다. 창 안의 붙여넣기는 낡은 `State`에 그려질 수 있으나 화면 결과는 미확인. 브라우저 하니스는 새 프롬프트가 보인 뒤에 입력한다(`docs/traps/TRP-005`). 입력 버퍼링은 후속 후보로 `.scratch/type-ahead/`에 있다.
+32. **읽기가 활성이 아닌 동안 친 키는 버려진다**(3.14는 tty가 버퍼링했다가 다음 프롬프트에 보여준다). 벤더 `Readline`은 활성 읽기가 없으면 Ctrl+C·Ctrl+L 외 단일 키를 버리고, Enter로 읽기가 끝난 뒤 다음 읽기의 입력 상태가 만들어지기까지(`term.write("", cb)`의 flush 대기)도 같다. Enter 뒤 `z`를 치기까지의 지연별 측정(N=10, `z`가 다음 프롬프트에 들어온 횟수). worker 없는 읽기 루프(Chromium 148 headless, preview 빌드, RD-003 데모): 0ms 0/10, 5ms 2/10, 10ms 2/10, 20ms 이상 10/10. worker 왕복(`readLine` 요청 → `run("")` → 다음 `readLine` 요청)이 더해진 REPL 루프(Chromium 148 headless, Playwright 1.60.0, 빈 줄 Enter): dev 0ms 1/10, 5ms 5/10, 10ms 1/10, 20·50·100·200ms 10/10, preview 0ms 1/10, 5ms 2/10, 10ms 1/10, 20·50·100·200ms 10/10. 창은 여전히 약 20ms 안쪽이라 worker 왕복이 창을 늘리지 않았고, 5·10ms 사이 요동은 N=10 잡음이다. 실행 중에는 활성 읽기가 없으므로 실행 시간만큼 창이 길어진다(`time.sleep(2)` 중 입력, 미측정). 창 안의 붙여넣기는 낡은 `State`에 그려질 수 있으나 화면 결과는 미확인. 브라우저 하니스는 새 프롬프트가 보인 뒤에 입력한다(`docs/traps/TRP-005`). 입력 버퍼링은 후속 후보로 `.scratch/type-ahead/`에 있다.
+
+값 에코:
+
+33. **값 에코가 `sys.displayhook`을 거치지 않는다.** worker가 값의 `repr()` 전체를 만들어 `writeOutput`으로 낸다(`builtins._`는 `repr` 성공 뒤 갱신, 절단 없음). 사용자가 `sys.displayhook`을 바꿔도 반영되지 않는다. `repr()`가 예외를 내면 트레이스백은 `__repr__` 프레임부터 나오고 3.14의 첫 프레임(`File "<console>", line 1, in <module>`)이 없다(값이 이미 반환된 뒤 `repr`를 부르기 때문이다).
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약")
 
