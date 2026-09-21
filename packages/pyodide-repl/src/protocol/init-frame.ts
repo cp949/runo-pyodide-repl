@@ -1,0 +1,75 @@
+/**
+ * 초기화 프레임(01-protocols.md 4절). worker 생성 직후 main이 보내는 단 하나의 네이티브 메시지다. RPC 포트·버퍼·설정을
+ * 담고, 이후 네이티브 `message` 채널은 쓰지 않는다. 설정을 바꾸려면 새 프레임 = 새 worker다.
+ */
+export interface InitFrame {
+  kind: "init";
+  /** 전송(transfer)된다. */
+  rpcPort: MessagePort;
+  /** SharedArrayBuffer 뷰. 구조적 복제로 같은 메모리를 가리킨다. */
+  interruptBuffer: Int32Array;
+  /** stdin 메일박스 제어. */
+  stdinCtrl: Int32Array;
+  /** stdin 메일박스 데이터. */
+  stdinData: Uint8Array;
+  topLevelAwait: boolean;
+  pyodide: { indexURL: string };
+}
+
+function invalidField(field: string, expected: string): never {
+  throw new Error(`초기화 프레임 필드 오류 — ${field}: ${expected} 필요`);
+}
+
+/** SharedArrayBuffer 위의 `constructor` 뷰인지. 비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다. */
+function isSharedView(
+  value: unknown,
+  constructor: typeof Int32Array | typeof Uint8Array,
+): boolean {
+  return (
+    value instanceof constructor && value.buffer instanceof SharedArrayBuffer
+  );
+}
+
+/** worker가 받은 첫 메시지를 검증한다. 잘못됐으면 어느 필드가 왜 틀렸는지 담은 오류를 던진다. */
+export function parseInitFrame(data: unknown): InitFrame {
+  if (typeof data !== "object" || data === null) {
+    throw new Error("첫 메시지가 init 프레임이 아니다: 객체가 아님");
+  }
+  const frame = data as Partial<Record<keyof InitFrame, unknown>>;
+  if (frame.kind !== "init") {
+    throw new Error(
+      `첫 메시지가 init 프레임이 아니다: kind가 ${JSON.stringify(frame.kind)}`,
+    );
+  }
+  if (
+    typeof (frame.rpcPort as { postMessage?: unknown } | undefined)
+      ?.postMessage !== "function"
+  ) {
+    invalidField("rpcPort", "MessagePort");
+  }
+  if (!isSharedView(frame.interruptBuffer, Int32Array))
+    invalidField("interruptBuffer", "SharedArrayBuffer 위의 Int32Array");
+  if (!isSharedView(frame.stdinCtrl, Int32Array))
+    invalidField("stdinCtrl", "SharedArrayBuffer 위의 Int32Array");
+  if (!isSharedView(frame.stdinData, Uint8Array))
+    invalidField("stdinData", "SharedArrayBuffer 위의 Uint8Array");
+  if (typeof frame.topLevelAwait !== "boolean")
+    invalidField("topLevelAwait", "boolean");
+  if (
+    typeof (frame.pyodide as { indexURL?: unknown } | undefined)?.indexURL !==
+    "string"
+  ) {
+    invalidField("pyodide.indexURL", "문자열");
+  }
+  return data as InitFrame;
+}
+
+/** `Worker`·`MessagePort`가 갖는 `postMessage` 시그니처. */
+export interface InitFrameTarget {
+  postMessage(message: unknown, transfer: Transferable[]): void;
+}
+
+/** main이 worker 생성 직후 첫 메시지로 보낸다. `rpcPort`는 복제할 수 없으므로 전송 목록에 담는다. */
+export function postInitFrame(target: InitFrameTarget, frame: InitFrame): void {
+  target.postMessage(frame, [frame.rpcPort]);
+}
