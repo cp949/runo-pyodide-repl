@@ -10,6 +10,7 @@ import {
   createInterruptBuffer,
   discardPendingInterrupt,
   hasProtocolSlots,
+  readRequestSeq,
   signalInterrupt,
 } from "./interrupt-protocol";
 
@@ -71,6 +72,21 @@ describe("signalInterrupt", () => {
     signalInterrupt(buffer);
 
     expect(seqWhenSignalWritten).toEqual([1]);
+  });
+});
+
+// 핸들러가 SIGINT를 받았을 때 이번 눌림의 번호를 읽어 재전송(같은 번호)과 새 눌림을 구분한다. 슬롯 세 개의 값을 모두
+// 다르게 만들어 두어야 SIGINT·ack 슬롯을 잘못 읽는 경우가 드러난다.
+describe("readRequestSeq", () => {
+  it("요청 번호 슬롯 [2]를 읽는다", () => {
+    const buffer = createInterruptBuffer();
+    signalInterrupt(buffer);
+    signalInterrupt(buffer);
+    signalInterrupt(buffer);
+    acknowledgeInterrupt(buffer);
+
+    expect(Array.from(buffer)).toEqual([2, 1, 3, 0]);
+    expect(readRequestSeq(buffer)).toBe(3);
   });
 });
 
@@ -149,6 +165,13 @@ describe("hasProtocolSlots", () => {
     signalInterrupt(buffer);
 
     expect(Array.from(buffer)).toEqual([2]);
+  });
+
+  it("짧은 버퍼에서 요청 번호 읽기는 0이다", () => {
+    const buffer = shortBuffer();
+    signalInterrupt(buffer);
+
+    expect(readRequestSeq(buffer)).toBe(0);
   });
 
   it("짧은 버퍼에서 ack는 아무것도 하지 않는다", () => {

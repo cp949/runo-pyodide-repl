@@ -34,6 +34,11 @@ export function signalInterrupt(buffer: Int32Array): void {
   Atomics.store(buffer, SIGNAL, 2);
 }
 
+/** 현재 요청 번호(슬롯 [2]). 프로토콜 슬롯이 없는 버퍼면 0. 핸들러가 재전송과 새 눌림을 구분할 때 읽는다. */
+export function readRequestSeq(buffer: Int32Array): number {
+  return hasProtocolSlots(buffer) ? Atomics.load(buffer, SEQ) : 0;
+}
+
 /** 눌림이 worker 스레드에 전달됐다고 표시한다. worker 스레드 한 곳에서만 부른다. */
 export function acknowledgeInterrupt(buffer: Int32Array): void {
   if (hasProtocolSlots(buffer)) Atomics.add(buffer, ACK, 1);
