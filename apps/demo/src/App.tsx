@@ -4,16 +4,17 @@ import { createWorker } from "./create-worker";
 const PYODIDE_INDEX_URL = "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/";
 
 /**
- * worker에 보내는 초기화 프레임. RD-001은 worker가 프레임을 받는지만 본다.
- * 실제 프레임(01-protocols.md 4절)은 RD-002의 `init-frame.ts`와 RD-003의 `createRepl`이 만든다.
+ * worker에 보내는 임시 초기화 프레임. `runReplWorker`가 프레임을 검증하므로(RD-002) 모든 필드를 갖춘다.
+ * 실제 프레임(01-protocols.md 4절)은 RD-003의 `createRepl`이 만든다. 버퍼 크기는 검증 대상이 아니어서 형태만 맞춘다.
  */
-function createInitFrame() {
+function createInitFrame(rpcPort: MessagePort) {
+  const shared = () => new SharedArrayBuffer(16);
   return {
     kind: "init",
-    // SharedArrayBuffer는 cross-origin isolated 페이지에서만 있다. 뷰가 worker까지 넘어가는지 함께 본다.
-    interruptBuffer: crossOriginIsolated
-      ? new Int32Array(new SharedArrayBuffer(16))
-      : null,
+    rpcPort,
+    interruptBuffer: new Int32Array(shared()),
+    stdinCtrl: new Int32Array(shared()),
+    stdinData: new Uint8Array(shared()),
     topLevelAwait: false,
     pyodide: { indexURL: PYODIDE_INDEX_URL },
   };
@@ -21,10 +22,17 @@ function createInitFrame() {
 
 export function App() {
   useEffect(() => {
+    // SharedArrayBuffer는 cross-origin isolated 페이지에서만 있다(ADR-0004). 아니면 worker를 만들지 않는다.
+    if (!crossOriginIsolated) return;
     const worker = createWorker();
-    worker.postMessage(createInitFrame());
-    // StrictMode 이중 마운트에서도 worker가 남지 않게 정리한다.
-    return () => worker.terminate();
+    const channel = new MessageChannel();
+    const frame = createInitFrame(channel.port1);
+    worker.postMessage(frame, [frame.rpcPort]);
+    // StrictMode 이중 마운트에서도 worker와 포트가 남지 않게 정리한다.
+    return () => {
+      worker.terminate();
+      channel.port2.close();
+    };
   }, []);
 
   return (
