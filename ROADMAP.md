@@ -175,7 +175,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 
 시나리오: `while True: time.sleep(0.1)` 중 Ctrl+C 한 번 → 200ms 안에 트레이스백과 `>>> `. `time.sleep(5)` 단발도 끊긴다(JSPI 유무 무관). `asyncio.run(main())`·`run_until_complete`·`run_sync`·top-level await 대기 중 Ctrl+C가 사용자 지점에서 중단된다. sleep 중에는 `call_later` 콜백이 돌지 않는다. 프롬프트 대기 중 눌린 낡은 SIGINT가 배경 콜백을 끊지 않고 조용히 버려진다. 정상 중단·`input()` 취소·`exit()`에서 브라우저 `pageerror`가 0이다.
 
-완료 기준(실측. 화면 형식 판정에서 등록된 편차 2셀만 명시 제외하고 나머지는 전부 충족):
+완료 기준(실측. 형식 판정의 2셀 제외는 RD-009a가 해소했다):
 - **브라우저 12조합 × N=20 = 240시행 전부 복귀**, 총 `pageerror` **0**(재보고 포함), 복귀(keydown → 새 프롬프트 행) 중앙값 12/12셀 모두 30ms 이내. dev(`localhost:5173`, Chromium headless), 측정은 페이지 내부 시계(keydown 리스너 + `MutationObserver`)다 — Node↔CDP 왕복으로 재면 문턱 근처에서 5~8ms 과대 측정된다.
 
   | 셀 | 프로그램 | 중앙값(ms) | 최대(ms) | 형식 판정 |
@@ -187,13 +187,13 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
   | `arun5` | `asyncio.run(asyncio.sleep(5))` | 25.47 | 35.04 | 20/20 |
   | `ruc5` | `run_until_complete(asyncio.sleep(5))` | 26.39 | 34.08 | 20/20 |
   | `runsync5` | `run_sync(asyncio.sleep(5))` | 29.98 | 34.27 | 20/20 |
-  | `arun-sleep` | `async def main(): time.sleep(5)` + `asyncio.run(main())` | 26.23 | 34.34 | 0/20(편차 28) |
+  | `arun-sleep` | `async def main(): time.sleep(5)` + `asyncio.run(main())` | 26.23 | 34.34 | 20/20(RD-009a) |
   | `catch3j` | `KeyboardInterrupt`를 잡고 도는 루프에 3회 | 22.19 | 34.21 | 20/20 |
   | `arun-loop` | `async def main():` / `while True: await asyncio.sleep(0.1)` | 23.25 | 38.44 | 20/20 |
-  | `runsync-sleep` | 같은 `main` + `run_sync(main())` | 27.12 | 33.89 | 0/20(편차 28) |
+  | `runsync-sleep` | 같은 `main` + `run_sync(main())` | 27.12 | 33.89 | 20/20(RD-009a) |
   | `sleep-burst` | `while True: time.sleep(0.1)` 중 0ms 연타 5회 | 28.47 | 37.47 | 20/20 |
 
-  형식 판정(시간 기반 중단 = 트레이스백 정확히 1개 + `KeyboardInterrupt` 마지막 줄 + `>>> ` 복귀 + 우리 프레임 0)은 **10/12셀 통과**다. `arun-sleep`·`runsync-sleep` 2셀은 **복귀 자체는 20/20 정상**이고 지연도 문턱 안이지만, 코루틴 프레임 안에서 동기 `time.sleep` 조각을 직접 부르는 조합이라 pyodide가 Task 취소 경로에서 `sys.excepthook`으로 한 번 더 찍는 트레이스백에 우리 파일명(`<sigint-handler>`·`<sleep-slice>`)이 노출된다 — 새 결함이 아니라 **편차 28**(`10-parity-deviations.md`)의 브라우저 실측 확인이고, `runsync-sleep`은 이번에 확인된 같은 편차의 두 번째 사례다(`docs/traps/TRP-021`). 해소는 RD-009a가 맡는다.
+  형식 판정(시간 기반 중단 = 트레이스백 정확히 1개 + `KeyboardInterrupt` 마지막 줄 + `>>> ` 복귀 + 우리 프레임 0)은 지금 **12/12셀 통과**다. RD-009 당시 10/12셀이었고 남은 2셀(`arun-sleep`·`runsync-sleep`, **복귀 자체는 20/20 정상**이고 지연도 문턱 안이지만 코루틴 프레임 안에서 동기 `time.sleep` 조각을 직접 부르는 조합이라 pyodide가 `sys.excepthook`으로 한 번 더 찍는 트레이스백에 우리 파일명이 노출됐다, **편차 28**)은 RD-009a가 해소해 12/12다.
 - 재보고 0(브라우저 재실행 4종, 총 `pageerror`): `repl-check.mjs normal` ⑦ **0**(기준선 RD-005 1건), `ctrl-c-check.mjs` **0**(기준선 RD-007 시행당 2건), `prompt-cancel-check.mjs` 23/23·**0**(기준선 RD-008 4건), `input-cancel-check.mjs` 26/26·**0**(기준선 RD-008 28건).
 - node(JSPI 있음·없음 각 N=30 × 5 프로그램 = 300시행): 전부 30/30 중단, stderr가 표준 트레이스백과 정확 일치 300/300, 추가 stderr 0, 200ms 초과 0. 눌림 → stderr 지연(ms):
 
@@ -227,7 +227,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 
 ### RD-009a — `run_sync` 계열 대기에서 코루틴이 낸 예외의 중복 트레이스백 제거와 코루틴 프레임 보존
 
-상태: 진행중 · 이전: RD-012i · 설계: `03-ctrl-c.md` 2.4(깨우기 세부의 `guard`·`run_sync` 래퍼·`formattraceback`)
+상태: 완료 · 이전: RD-012i · 설계: `03-ctrl-c.md` 2.4(깨우기 세부의 `guard`·`run_sync` 래퍼·`formattraceback`)
 
 RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`runsync-sleep` 2셀(편차 28, `docs/traps/TRP-021`)을 해소한다. 착수 전 실측(2026-09-22 node, pyodide 314.0.7)으로 결함의 범위가 KeyboardInterrupt보다 넓다는 것이 확인됐다: `asyncio.run`·`run_until_complete`·`run_sync`로 들어간 awaitable이 **어떤 예외로든** 끝나면 pyodide가 그 Task를 Promise로 바꾸는 done 콜백(`FutureDoneCallback` → `wrap_exception()`)에서 `PyErr_Print()`로 `sys.excepthook`을 부르고, 콘솔 `runcode` 중에는 `sys.stderr`가 콜백 스트림이라 fd 2만 가로채는 `capture_stderr()`를 우회해 화면에 찍힌다. Task 취소·`guard`와 무관하다(원본 `run_sync`도 두 번 찍는다). 그래서 `async def main(): raise ValueError('boom')`도 지금 트레이스백이 둘이고 첫째에 `<sigint-handler>` `guard` 프레임이 새며, `sys.exit()`도 `guard` 프레임이 든 인쇄 뒤 종료된다. 콘솔이 찍는 둘째 트레이스백은 `<module>`만 남기므로(`run_sync` 래퍼 프레임에서 절단) 사용자가 `main`의 줄 번호를 보는 곳은 중복 인쇄뿐이었다.
 
@@ -235,17 +235,17 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 
 시나리오: `<console>`에서 정의한 `async def main():` / `    time.sleep(5)`를 `asyncio.run(main())`·`run_until_complete(main())`·`run_sync(main())`으로 실행하는 중 Ctrl+C → 트레이스백 정확히 1개(`File "<console>", line 1, in <module>` / `File "<console>", line 2, in main` / `KeyboardInterrupt`) → `>>> `. 화면 어디에도 `<sigint-handler>`·`<sleep-slice>`·`webloop.py` 프레임이 없다. `main` 안의 `try/except KeyboardInterrupt`·`finally`는 그대로 동작한다. `main`이 `raise ValueError('boom')`이면 트레이스백 1개에 `main` 줄과 `ValueError: boom`, `raise KeyboardInterrupt('custom')`이면 `KeyboardInterrupt: custom` 1회, `except ValueError:` 안의 sleep을 끊으면 `During handling of the above exception…` 사슬이 1회, `sys.exit(3)`이면 인쇄 없이 종료.
 
-완료 기준:
-- node: `sigint-handler-idle.test.ts`에 러너 3종 × (sleep 눌림·ValueError·`KeyboardInterrupt('custom')`·컨텍스트 사슬·`except`/`finally`·`sys.exit`·사용자 `CancelledError`·사용자가 잡은 객체의 `__traceback__`에 `guard`·`sleep`·`poll`·`sigint_handler`·`wasm://` 없음·중첩 `helper`·`asyncio.sleep('x')`의 `TypeError`에 `tasks.py` 프레임 잔존). 기존 "time.sleep과 정지한 대기의 조합"은 `endsWith(CONSOLE_TRACEBACK)` → `main` 줄이 든 정확한 문자열 `toBe`(구현 전 RED). 변이 검사: `guard` 예외 분기 제거, 래퍼가 새 `KeyboardInterrupt`를 올림, tb 다듬기 제거, `formattraceback` 규칙 되돌림 — 전부 killed. 취소 깨우기 3종 `toBe(CONSOLE_TRACEBACK)`·연타·`ensure_future` 누출·중첩·무효 인자 문구 시험은 불변.
-- 브라우저: RD-009 `sleep-await-check.mjs`(작업 폴더로 복사)를 `ONLY=arun-sleep,runsync-sleep`으로 돌려 형식 판정 40/40, 복귀 중앙값 30ms 이내(페이지 내부 시계), 총 `pageerror` 0. 나머지 10셀은 N=5 회귀 확인.
-- 문서: 편차 28을 해소로 표시(번호 유지, 기전을 실측대로 정정), 새 편차 한 줄(콘솔 실행 중 JS→Python 콜백 예외의 중복 인쇄 — `run_sync` 밖이라 이 RD 범위 밖), TRP-021 재작성(ACTIVE 유지, 제목·적용 조건·원인·해소·재발 조건), `03-ctrl-c.md` 2.4, RD-009 표의 두 행을 20/20으로, `09-testing.md` 9.3의 "10/12셀" 문구 갱신, `sigint-handler.py` 머리 주석.
-- 루트 4종 통과.
+완료 기준(실측):
+- node: `sigint-handler-idle.test.ts`에 러너 3종 × (sleep 눌림·ValueError·`KeyboardInterrupt('custom')`·컨텍스트 사슬·`except`/`finally`·`sys.exit`·사용자 `CancelledError`·사용자가 잡은 객체의 `__traceback__`에 `guard`·`sleep`·`poll`·`sigint_handler`·`wasm://` 없음·중첩 `helper`·`asyncio.sleep('x')`의 `TypeError`에 `tasks.py` 프레임 잔존) 40건 추가, 5파일(`sigint-handler-idle`·`sigint-handler-sleep-slice`·`sigint-handler`·`sigint-handler-nojspi`·`boot`) 105/105 통과. 변이 검사 6종(DELTA-01 2종 + DELTA-02 4종) 전부 killed. `pnpm --filter @cp949/runo-pyodide-repl test` 32파일 598/598 통과. 취소 깨우기 3종 `toBe(CONSOLE_TRACEBACK)`·연타·`ensure_future` 누출·중첩·무효 인자 문구 시험 불변.
+- 브라우저(dev, Chromium headless, pyodide 314.0.7): `arun-sleep`·`runsync-sleep` N=20 40/40(중앙값 28.42·29.73ms, 최대 34.26·34.16ms), `pageErrors` 0. 나머지 10셀 N=5 50/50, `pageErrors` 0(중앙값 24.68~32.20ms). 화면 원문에 `main` 프레임(`File "<console>", line 1, in main`) 확인.
+- 문서: 편차 28 해소로 표시(번호 유지, 기전을 실측대로 정정), 새 편차 39(콘솔 실행 중 JS→Python 콜백 예외의 중복 인쇄 — `run_sync` 밖이라 이 RD 범위 밖), TRP-021 재작성(ACTIVE 유지, 제목·적용 조건·원인·해소·재발 조건), `03-ctrl-c.md` 2.4, RD-009 표의 두 행을 20/20(RD-009a)으로, `09-testing.md` 9.3의 "10/12셀" 문구를 12/12로, `sigint-handler.py` 머리 주석.
+- 루트 4종(`pnpm check-types`·`pnpm lint`·`pnpm test`·`pnpm build`) 통과.
 
 허용 편차: 사용자가 직접 `traceback.print_exc()`로 찍으면 `run_sync` 래퍼·`webloop.py` 프레임이 남는다(모든 깨우기 경로에서 지금과 같다). 설치 가드에 걸려 래퍼가 없는 pyodide에서는 원본 동작(중복 인쇄, 우리 프레임 없음)으로 돌아간다.
 
 근거(2026-09-22 node 실측, 임시 시험은 삭제): `async def main(): raise ValueError('boom')` + `asyncio.run(main())` → 트레이스백 2개, 첫째 `File "<sigint-handler>", line 133, in guard` / `File "<console>", line 2, in main`. `raise KeyboardInterrupt('custom')`도 2개. `sys.exit(3)` → `guard` 프레임이 든 인쇄 1회 + `exit: true`. `except ValueError: time.sleep(5)` 중 눌림 → `During handling…`이 두 트레이스백 모두에. 사용자가 잡은 객체의 `__traceback__`에 `run_sync`·`guard`·`sleep`·`poll`·`sigint_handler`·`webloop.py`·`wasm://` 19개 전부. 원본 `run_sync`(래퍼 없음)도 2개(첫째는 `main`만). runcode 밖(JS `runPython`, `sys.stderr = StringIO()`)에서는 캡처되어 `PythonError.message`로 들어간다. 앞선 확인(`guard`에 `except KeyboardInterrupt: return WOKEN` 한 분기로 조인 시험 통과, 5파일 91건 불변)은 이 설계의 부분 집합이다. 이전 구현 하니스(`sleep-await.mjs`)는 이 셀에 `allowOurFrames: true`·트레이스백 1~2개 예외를 사용자 결정으로 두고 있었다.
 
-인계(RD-009·RD-018): 이 RD가 끝나면 RD-009 완료 기준의 "편차 2셀만 명시 제외" 문구를 지운다. RD-018은 `sleep-await-check.mjs`를 옮길 때 이 2셀의 판정을 나머지와 같게 둔다.
+인계(RD-018): RD-018은 `sleep-await-check.mjs`를 옮길 때 이 2셀의 판정을 나머지와 같게 둔다.
 
 ## Phase 2 — 세션·제출·편집·완성
 

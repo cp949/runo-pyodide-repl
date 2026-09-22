@@ -24,5 +24,5 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-018](./TRP-018-pkill-f-matches-own-shell.md) | `pkill -f`가 자기 셸 명령줄을 매치해 뒤 단계(원복)를 날린다 | ACTIVE | 한 셸 호출에서 `pkill -9 -f` 뒤에 원복·정리 단계를 이어 붙일 때 |
 | [TRP-019](./TRP-019-residual-sigint-passes-loose-assertion.md) | 잔류 SIGINT가 다음 시험에서 터져 느슨한 단언이 우연히 통과한다 | ACTIVE | 한 파일에서 실제 pyodide + interrupt buffer를 공유하며 취소·중단 시험을 연달아 돌릴 때 |
 | [TRP-020](./TRP-020-non-console-filename-drops-cancel-into-retry-loop.md) | `<console>` 밖 파일명(`runPython`의 `<exec>`)에서 취소하면 핸들러가 버려 읽기 재시도 루프가 된다 | ACTIVE | stdin 취소·실행 중 중단을 node 시험에서 `pyodide.runPython`으로 재현할 때 |
-| [TRP-021](./TRP-021-coroutine-sync-sleep-leaks-our-frames.md) | 코루틴 프레임 안의 동기 `time.sleep` 중단은 우리 파일명이 든 트레이스백을 한 번 더 찍는다 | ACTIVE | `async def` 안에서 동기 `time.sleep`을 부르는 코루틴을 `asyncio.run`·`run_sync`로 돌리는 중 Ctrl+C, 그 화면 형식을 판정할 때 |
+| [TRP-021](./TRP-021-coroutine-sync-sleep-leaks-our-frames.md) | `run_sync`에 들어간 awaitable의 예외가 JS 경계를 넘으면 트레이스백이 두 번 찍히고 끝만 보는 단언은 통과한다 | ACTIVE | `sigint-handler.py`의 `guard`·`run_sync` 래퍼·`formattraceback`을 바꿀 때, 정지한 대기의 화면 형식을 시험·하니스로 판정할 때 |
 | [TRP-022](./TRP-022-node-side-polling-inflates-browser-latency.md) | 브라우저 지연을 Node 쪽 폴링으로 재면 문턱 근처에서 5~8ms 과대 측정된다 | ACTIVE | Playwright 하니스가 키 입력 → 화면 변화 지연을 재고 판정선이 수십 ms일 때 |

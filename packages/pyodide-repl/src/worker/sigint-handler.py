@@ -7,10 +7,12 @@
 #   깨운다. `asyncio.run`·`run_until_complete`·`run_sync` 대기는 JSPI로 사용자 스택이 정지하고, top-level await 대기는
 #   콘솔 task가 멈춰 있어 폴링이 사용자 프레임 없는 콜백에서 일어난다(TRP-020).
 # - 그 밖(트레이스백 생성 중, 다음 문장 컴파일 중, 시작 코드)에는 버린다.
-# - 핸들러 프레임은 예외 트레이스백의 안쪽 끝에 붙는다. `formattraceback`이 가장 바깥의 우리 프레임부터 안쪽 전부를 자른다
-#   (핸들러 실행 중에 또 눌림이 도착하면 핸들러 프레임이 겹치므로 안쪽 하나만 자르면 샌다). 바깥의 내부 프레임(`runcode`
-#   등)은 원본 `formattraceback`이 `<console>` 첫 프레임부터 남긴다. 자른 자리 앞에 낀 `webloop.py` 프레임
-#   (`run_until_complete`)도 함께 뗀다.
+# - `formattraceback`은 가장 안쪽 프레임이 우리 코드일 때만(핸들러·래퍼·조각에서 시작한 예외, 핸들러 실행 중에 또
+#   눌림이 도착하면 핸들러 프레임이 겹치므로 안쪽 하나만 자르면 샌다) 첫 우리 프레임부터 안쪽 전부를 자르고, 자른
+#   자리 바로 바깥에 붙은 `webloop.py` 프레임(`run_until_complete`)도 뗀다. 바깥의 내부 프레임(`runcode` 등)은
+#   원본 `formattraceback`이 `<console>` 첫 프레임부터 남긴다. 그 뒤 남은 프레임 중 우리 프레임 개별(`run_sync`
+#   래퍼 — `guard`가 나른 예외는 `trim`이 이미 다듬었다)과 그 바로 바깥에 붙은 `webloop.py` 프레임을 뗀다(awaitable
+#   안에서 난 `webloop.py` 프레임은 우리 프레임 바깥이 아니라 남는다).
 #
 # - `extra_own_codes`는 다른 모듈이 심은 우리 코드 객체다(`sleep-slice.py`의 `sleep`·`poll`). 절단 규칙은 같으므로
 #   `own_codes`에 합치기만 한다. 설치 순서상 조각 교체가 먼저라 여기서는 이미 만들어진 tuple을 받는다.
@@ -18,8 +20,14 @@
 # 깨우기 세부:
 #   - `run_sync` 래퍼(`pyodide.webloop.run_sync`·`pyodide.ffi.run_sync` 교체): 대기 awaitable을 `guard` 코루틴 Task로
 #     감싼다. 깨울 때 그 Task를 취소해 취소 처리(`finally` 등)를 끝낸 뒤 `guard`가 `CancelledError`를 정상 값 `WOKEN`으로
-#     바꾸고, 래퍼가 사용자 스택(대기 호출 지점)에서 `KeyboardInterrupt`를 올린다. Task를 취소로 끝내면 pyodide가 그
-#     예외를 JS로 옮기며 `sys.excepthook`으로 트레이스백을 한 번 더 찍는다.
+#     바꾸고, 래퍼가 사용자 스택(대기 호출 지점)에서 `KeyboardInterrupt`를 올린다. awaitable이 낸 그 밖의 예외
+#     (`KeyboardInterrupt`·`SystemExit`·사용자 `CancelledError`·일반 예외)도 `guard`가 홀더 `Raised(exc)`에 담아 정상
+#     값으로 끝내고 래퍼가 `raise result.exc`로 그 객체를 사용자 스택에서 올린다(`from None` 없음 — 인자·`__context__`·
+#     `__cause__` 보존). `GeneratorExit`만 재raise한다. Task가 예외로 끝나면 pyodide가 Promise 변환(`FutureDoneCallback`
+#     → `wrap_exception`)에서 `PyErr_Print()`로 `sys.excepthook`을 부르고, 콘솔 실행 중에는 `sys.stderr`가 콜백
+#     스트림이라 그것이 화면에 새기 때문에(TRP-021, 편차 28 해소) 값으로 나른다. 나르기 전 `trim(exc)`으로 트레이스백
+#     머리의 우리 프레임(`guard`)을 떼고 첫 우리 프레임(조각·핸들러)부터 안쪽 전부를 잘라 사용자·라이브러리 프레임만
+#     남긴다.
 #   - `runcode` 래퍼(인스턴스 속성 교체): 실행 중인 콘솔 task를 `active`로 기록한다. top-level await 대기 중에는 그 task를
 #     취소하고 표지 예외 `IdleInterrupt`로 끝낸다. 취소로 끝난 task는 `ConsoleFuture`의 done 콜백이 `fut.exception()`에서
 #     `CancelledError`를 만나 영영 끝나지 않는다(HANG).

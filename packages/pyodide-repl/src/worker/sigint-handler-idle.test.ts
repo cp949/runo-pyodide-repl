@@ -6,6 +6,11 @@
  * 중단하는 것이 여기서 고정하는 규칙이다. JSPI·asyncio 스케줄러·`ConsoleFuture`에 걸쳐 있어 실제 pyodide(node)에서만
  * 재현되므로 mock 없이 로드한다.
  *
+ * RD-009a: `run_sync` 계열로 들어간 awaitable이 예외로 끝나면(취소뿐 아니라 사용자 코드가 낸 어떤 예외로든) `guard`가
+ * 그 예외를 값으로 나르고 래퍼가 사용자 스택에서 다시 올린다 — Task가 예외로 끝나 JS 경계를 넘으며 pyodide가
+ * `sys.excepthook`으로 트레이스백을 한 번 더 찍는 것(TRP-021)을 막는다. `"run_sync 계열 대기에서 코루틴이 낸 예외"`
+ * describe가 이 나르기·프레임 다듬기를 확인한다.
+ *
  * 깨우기는 감시 타이머(DELTA-04)가 부르는 것이 프로덕션 경로이고, 여기서는 `sigint-setup.ts`의 `wakeAfter(ms)`가 그
  * 한 틱을 흉내낸다(`signalInterrupt` → `interruptIdle()` → 깨웠으면 소비·ack). 타이머 없이 핸들러만으로 깨우는 경로는
  * 눌림 스레드(`src/test/roles/interrupt-presser.ts`)가 만든다.

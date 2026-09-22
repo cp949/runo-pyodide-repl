@@ -76,11 +76,17 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 깨우기 세부:
 - `run_sync` 래퍼(`pyodide.webloop.run_sync`, `pyodide.ffi.run_sync` 교체): 대기 awaitable을 `guard`
   코루틴 Task로 감싼다. 깨울 때 Task를 취소해 `finally`를 돌린 뒤 `guard`가 `CancelledError`를 정상 값
-  `WOKEN`으로 바꾸고, 래퍼가 사용자 스택(대기 호출 지점)에서 `KeyboardInterrupt`를 올린다.
+  `WOKEN`으로 바꾸고, 래퍼가 사용자 스택(대기 호출 지점)에서 `KeyboardInterrupt`를 올린다. awaitable이 낸
+  그 밖의 예외(`KeyboardInterrupt`·`SystemExit`·사용자 `CancelledError`·일반 예외)는 `guard`가 `Raised(exc)`에
+  담아 정상 값으로 끝내고 래퍼가 `raise result.exc`로 그 객체를 올린다(인자·`__context__` 보존). Task가
+  예외로 끝나면 pyodide가 Promise 변환에서 `PyErr_Print()`로 `sys.excepthook`을 부르고 콘솔 실행 중에는
+  그것이 화면에 새기 때문이다(편차 28 해소, TRP-021). `GeneratorExit`만 재raise한다(코루틴 `close()` 신호를
+  값으로 바꾸면 `RuntimeError`가 된다). 나르기 전 `trim(exc)`으로 트레이스백 머리의 우리 프레임(`guard`)을
+  떼고 첫 우리 프레임(조각·핸들러)부터 안쪽 전부를 잘라 사용자·라이브러리 프레임만 남긴다.
 - `runcode` 래퍼(인스턴스 속성 교체): 실행 중인 콘솔 task를 `active`로 기록. top-level await 대기 중에는
   그 task를 취소하고 표지 예외 `IdleInterrupt`(`Exception` 계열 — webloop 재던짐 경로를 피함)로 끝낸다.
 - 취소는 `CORO_SUSPENDED` Task에만. 깨울 수 없는 순간(대기 코루틴 실행 중, 재개 직전)에는 `pending`
-  플래그로 표시하고 재개하는 `run_sync` 래퍼가 `KeyboardInterrupt`로 올린다(TRP-021).
+  플래그로 표시하고 재개하는 `run_sync` 래퍼가 `KeyboardInterrupt`로 올린다.
 - **`time.sleep` 20ms 조각**(JSPI 유무와 무관하게 항상 교체): 원본은 `time.sleep.__wrapped__`(pyodide가
   `@wraps`로 남긴 원본 C 함수), 래퍼는 `functools.wraps(원본)`. 위치 인자 하나가 유한 양수 `int`/`float`
   (`bool` 제외) 또는 `__index__` 객체이고 9.2e9초 미만일 때만 조각한다. 그 밖(0·음수·NaN·inf·비수치·
@@ -89,10 +95,15 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   `poll()`을 한 번 한다**(생략하면 지연이 반복 1회 시간의 약 13배까지 늘어난다, TRP-028).
   `poll()`은 `pyodide_js.checkInterrupt()`이고, 그 예외가 `sys.excepthook`으로 stderr에 트레이스백을
   찍으므로(TRP-022) 호출 동안만 `sys.excepthook`을 no-op으로 바꿨다 되돌린다.
-- `formattraceback` 래퍼: 트레이스백에서 **가장 바깥의 우리 프레임(핸들러, `run_sync` 래퍼, `sleep`,
-  `poll`)부터 안쪽 전부**를 자르고 그 앞에 낀 `webloop.py` 프레임(`run_until_complete`)도 뗀다.
-  `IdleInterrupt`는 `KeyboardInterrupt` 한 줄로 만든다. 문자열에서 `File "<sigint-handler>"` 줄을 지우는
-  방식보다 견고하다. 안쪽만 자르는 규칙은 연타에서 우리 프레임이 샜다(2/10 → 0/10).
+- `formattraceback` 래퍼: **가장 안쪽 프레임이 우리 코드일 때만**(예외가 핸들러·래퍼·조각에서 시작)
+  첫 우리 프레임부터 안쪽 전부를 절단하고, 자른 자리 바로 바깥에 붙은 `webloop.py` 프레임
+  (`run_until_complete`)도 뗀다. 그 뒤 남은 프레임 중 **우리 프레임 개별**(`run_sync` 래퍼 등)을 떼고, 그
+  바로 바깥에 붙은 `webloop.py` 프레임도 함께 뗀다(awaitable 안에서 난 `webloop.py` 프레임, 예:
+  `call_later`의 `TypeError` 자리는 남긴다). 예: `[<module>, webloop _run, webloop run_until_complete,
+  run_sync 래퍼, main]` → `[<module>, main]`(래퍼가 나른 예외는 안쪽 끝이 사용자 프레임이라 첫 단계 절단에
+  걸리지 않고, 개별 제거 단계만 적용된다). `IdleInterrupt`는 `KeyboardInterrupt` 한 줄로 만든다. 문자열에서
+  `File "<sigint-handler>"` 줄을 지우는 방식보다 견고하다. 안쪽만 자르는 규칙은 연타에서 우리 프레임이
+  샜다(2/10 → 0/10, RD-009a 전까지의 규칙이 첫 단계만이었을 때의 실측).
 - 설치 가드(pyodide 내부 의존) 5종. 핸들러(`sigint-handler.py`)의 셋: ① `pyodide.webloop.run_sync`
   ② `pyodide.ffi.run_sync` ③ `console.runcode`가 코루틴 함수. 조각(`sleep-slice.py`)의 둘:
   ④ `time.sleep.__wrapped__`가 원본 C 함수(`inspect.isbuiltin`) ⑤ `pyodide_js.checkInterrupt` 호출 가능.

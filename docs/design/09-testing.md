@@ -20,7 +20,8 @@
   정지, 정지한 대기 깨우기, 프롬프트 유휴 폐기). RD-009가 더한 파일: `worker/webloop-reraise.test.ts`(재보고 억제
   4건 + 가드),
   `worker/sigint-handler-sleep-slice.test.ts`(조각·폴링 횟수·무효 인자·가드 2종),
-  `worker/sigint-handler-idle.test.ts`(정지한 대기 깨우기·TLA·`pending`·가드 3종),
+  `worker/sigint-handler-idle.test.ts`(정지한 대기 깨우기·TLA·`pending`·가드 3종. RD-009a가 더한 것:
+  `run_sync` 계열 대기에서 코루틴이 낸 예외의 나르기·프레임 보존),
   `worker/sigint-handler-nojspi.test.ts`(JSPI 없는 경로 5건).
 - 공용 조립은 `src/test/sigint-setup.ts`의 `setupConsoleRunner(pyodide, options)` →
   `{ run, screen, buffer, pyconsole, presser, wakeAfter }`와 `teardownConsoleRunner`다. `wakeAfter(ms)`는 감시
@@ -141,8 +142,8 @@
   RD-009 실측: 12조합 240시행 0, 재실행 4종(`repl-check normal`·`ctrl-c-check`·`prompt-cancel-check`·
   `input-cancel-check`) 전부 0(이전 기준선 1·시행당 2·4·28건).
 - 정지한 실행 12조합의 판정은 복귀 여부 + 복귀 지연 + **화면 형식** + 우리 프레임 0 + `pageerror` 0을 따로 센다.
-  240/240 복귀·지연 중앙값 12/12셀 30ms 이내지만 형식 판정은 10/12셀이다 — `arun-sleep`·`runsync-sleep`은 편차 28
-  (`docs/traps/TRP-021`)이라 형식 판정에서 명시적으로 제외한다. 해소는 RD-009a이고, 그 뒤에는 12/12를 요구한다.
+  240/240 복귀·지연 중앙값 12/12셀 30ms 이내, 형식 판정 12/12셀(RD-009a 뒤. RD-009 당시 `arun-sleep`·
+  `runsync-sleep`은 편차 28(`docs/traps/TRP-021`)로 형식 판정에서 제외했었다).
 - 양성 대조는 "이 확인이 무엇을 잡는가"를 셋으로 나눠 건다(RD-009): 억제 제거 → `pageerror` 총계 0 → 10,
   ≤20ms 폴링 제거 → `sleep-0.01` 중앙값 28.44 → 96.79ms, 감시 타이머 제거 → `arun5` 24.22 → 4010.3ms.
   각각 해당 확인만 실패하고 원복 후 통과해야 한다(변조 → dev 재시작(TRP-007) → 실행 → `git checkout --`).
