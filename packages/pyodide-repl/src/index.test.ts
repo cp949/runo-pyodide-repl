@@ -562,6 +562,118 @@ describe("history 저장", () => {
   });
 });
 
+describe("블록 history(RD-014)", () => {
+  test("취소한 블록은 history에서 첫 줄까지 사라진다", async () => {
+    const session = startSession();
+    const { line: l1 } = await startRead(session);
+    session.fake.type("y = 2\r");
+    await l1;
+
+    const { line: l2 } = await startRead(session);
+    session.fake.type("if True:\r");
+    await l2;
+
+    const { line: l3 } = await startRead(session, "... ", "if True:");
+    session.fake.type("print(1)\r");
+    await expect(l3).resolves.toBe("    print(1)");
+
+    const { line: l4 } = await startRead(
+      session,
+      "... ",
+      "if True:\n    print(1)",
+    );
+    session.fake.type("\x03");
+    await expect(l4).resolves.toBeNull();
+
+    const { line: l5 } = await startRead(session);
+    session.fake.type("\x1b[A\r");
+    await expect(l5).resolves.toBe("y = 2");
+  });
+
+  test("리셋은 입력을 기다리던 블록을 history에서 버린다", async () => {
+    const session = startResettableSession();
+    const { line: l1 } = await startRead(session);
+    session.fake.type("y = 2\r");
+    await l1;
+
+    const { line: l2 } = await startRead(session);
+    session.fake.type("if True:\r");
+    await l2;
+
+    // "... " 읽기(pending "if True:")를 열어 둔 채 리셋한다 — reading이 참인 상태.
+    await startRead(session, "... ", "if True:");
+
+    session.handle.reset();
+    await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "loading");
+
+    const { line: l3 } = await startRead(session);
+    session.fake.type("\x1b[A\r");
+
+    await expect(l3).resolves.toBe("y = 2");
+  });
+
+  test("exit()로 끝난 블록은 리셋 뒤에도 남는다", async () => {
+    const session = startResettableSession();
+    const { line: l1 } = await startRead(session);
+    session.fake.type("if True:\r");
+    await l1;
+
+    const { line: l2 } = await startRead(session, "... ", "if True:");
+    session.fake.type("exit()\r");
+    await l2;
+
+    const { line: l3 } = await startRead(
+      session,
+      "... ",
+      "if True:\n    exit()",
+    );
+    session.fake.type("\r");
+    await l3;
+
+    // exit()가 세션을 끝낸다 — 이 시점에는 대기 중인 읽기가 없다(reading은 이미 false).
+    session.workerRpc.notify("sessionTerminated");
+    await waitFor(
+      () => session.onStatus.mock.calls.at(-1)?.[0] === "terminated",
+    );
+
+    session.handle.reset();
+    await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "loading");
+
+    const { line: l4 } = await startRead(session);
+    session.fake.type("\x1b[A\r");
+
+    await expect(l4).resolves.toBe("if True:\n    exit()");
+  });
+
+  test("실행 중인 블록(읽기 없음)은 리셋해도 남는다", async () => {
+    const session = startResettableSession();
+    const { line: l1 } = await startRead(session);
+    session.fake.type("for i in range(2):\r");
+    await l1;
+
+    const { line: l2 } = await startRead(session, "... ", "for i in range(2):");
+    session.fake.type("print(i)\r");
+    await l2;
+
+    const { line: l3 } = await startRead(
+      session,
+      "... ",
+      "for i in range(2):\n    print(i)",
+    );
+    session.fake.type("\r");
+    await l3;
+    // worker가 실행 중이라 다음 readLine을 보내지 않는다 — reading은 이미 false.
+
+    session.handle.reset();
+    await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "loading");
+
+    const { line: l4 } = await startRead(session);
+    session.fake.type("\x1b[A\r");
+
+    await expect(l4).resolves.toBe("for i in range(2):\n    print(i)");
+  });
+});
+
 describe("격리 페이지의 세션 시작", () => {
   test("worker를 만들고 첫 메시지로 검증을 통과하는 초기화 프레임을 전송 목록과 함께 보낸다", () => {
     const { createWorkerSpy, fakeWorker } = startSession();

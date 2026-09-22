@@ -15,6 +15,7 @@ import {
   createStdinMailbox,
 } from "./protocol/stdin-mailbox";
 import { createAutoIndent } from "./terminal/auto-indent";
+import { createBlockHistory } from "./terminal/block-history";
 import { mergeReadOptions } from "./terminal/read-options";
 import { createReadGuard } from "./terminal/read-guard";
 import { createReplReader } from "./terminal/repl-reader";
@@ -54,8 +55,8 @@ export interface ReplSession {
    */
   endSession(): void;
   /**
-   * 옛 읽기를 끝내고(`readline.cancelRead()`) 세션 자원을 정리한다: `ended=true` → `cancelRead()` →
-   * `endSession()` → `rpc.dispose()` → `worker.terminate()`.
+   * 옛 읽기를 끝내고(`readline.cancelRead()`) 세션 자원을 정리한다: `ended=true` → (REPL 읽기 열림이면
+   * 블록 history 폐기) → `cancelRead()` → `endSession()` → `rpc.dispose()` → `worker.terminate()`.
    */
   terminate(): void;
   /** `terminate()` 뒤 참. */
@@ -101,8 +102,14 @@ export function startSession(options: StartSessionOptions): ReplSession {
   // 세션 소유: lastUsedIndentation은 이 세션 동안 유지되고, reset()이 새 세션(새 객체)을 만들면 4칸으로
   // 돌아간다(08-session.md 8.1, 확정 3).
   const autoIndent = createAutoIndent(readline);
+  // 세션 소유: 기준점·pendingBlock은 세션과 함께 버려진다. 리셋 시 대기 중 블록은 `terminate()`가
+  // 버린다(08-session.md 8.1).
+  const blockHistory = createBlockHistory(readline);
   const replReader = createReplReader(readline, liveTerminal, sinks, (pending) =>
-    mergeReadOptions(autoIndent.readOptions(pending)),
+    mergeReadOptions(
+      blockHistory.readOptions(pending),
+      autoIndent.readOptions(pending),
+    ),
   );
   // stdin 리더도 같은 뷰를 받는다: `rewindTail`의 flush 콜백이 해제된 터미널의 buffer를 읽지 않게(TRP-004).
   const inputReader = createInputReader(readline, liveTerminal, sinks);
@@ -192,7 +199,12 @@ export function startSession(options: StartSessionOptions): ReplSession {
           // 응답이 포트에 올라가기 전에 내린다: worker는 응답을 받는 대로 실행을 재개한다.
           readLinePending = false;
           // 취소 응답 뒤에는 다음 요청이 도착할 때까지 게이트를 닫는다(TRP-009).
-          if (line === null) cancelSettling = true;
+          if (line === null) {
+            cancelSettling = true;
+            // 취소한 블록은 첫 줄까지 history에서 지운다(06-editing.md 6.4). worker 쪽 `run(null)`의
+            // `clearPending()`과 짝.
+            blockHistory.discard();
+          }
           return line;
         },
         (error: unknown) => {
@@ -273,6 +285,9 @@ export function startSession(options: StartSessionOptions): ReplSession {
     endSession,
     terminate() {
       ended = true;
+      // REPL 읽기가 열려 있으면 입력을 기다리던 블록이다 — 버린다. 실행 중·`exit()`로 끝난 블록은
+      // `reading`이 거짓이라 남는다(확정 5). `reading`은 REPL 읽기 전용(`readInput`은 별도).
+      if (reading) blockHistory.discard();
       readline.cancelRead();
       endSession();
       worker.removeEventListener("error", onWorkerError);
