@@ -30,8 +30,8 @@ export type ReplStatus =
   | "crashed";
 
 /**
- * RD-004 시점의 부분 구현이다. 나머지 옵션(`topLevelAwait`는 RD-012, `onCrash`는 RD-010)은 그것을 쓰는 RD가
- * 추가한다(`00-architecture.md` 4.1).
+ * RD-004 시점의 부분 구현이다. 나머지 옵션(`topLevelAwait`)은 그것을 쓰는 RD(RD-012)가 추가한다(`00-architecture.md`
+ * 4.1).
  */
 export interface ReplOptions {
   /** 호출자가 소유하는 xterm `Terminal`. 코어는 줄 편집기를 붙이기만 하고 dispose하지 않는다. */
@@ -42,6 +42,8 @@ export interface ReplOptions {
   pyodide?: { indexURL?: string };
   /** 상태가 바뀔 때 부른다. `loading`은 `createRepl`이 반환하기 전에 동기로 온다. */
   onStatus?: (status: ReplStatus) => void;
+  /** worker `error` 이벤트 또는 `crashed` 알림(첫 신호만) 뒤 `onStatus("crashed")` 다음에 부른다(RD-010). */
+  onCrash?: (message: string) => void;
 }
 
 export interface ReplHandle {
@@ -105,6 +107,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
         createWorker: options.createWorker,
         indexURL,
         onStatus,
+        onCrash: options.onCrash,
       });
     };
     spawnSession();

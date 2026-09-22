@@ -50,6 +50,7 @@ const NOTIFICATIONS = [
   "loadFailed",
   "sessionTerminated",
   "readInput",
+  "crashed",
 ];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -218,6 +219,37 @@ describe("bootReplWorker", () => {
     ]);
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(consoleError.mock.calls[0]?.[0]).toBe("[repl.worker] 루프 오류");
+  }, 30_000);
+
+  test("부팅 시퀀스(루프 포함)의 잡히지 않은 예외는 crashed 알림으로 나가고 이후 readLine 요청은 오지 않는다", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    // writeError 전송 자체가 실패하는(예: 알림 핸들러 예외 재발생) 상황을 흉내 낸다. onError가 이 알림을 그대로 던지면
+    // repl-loop의 run 오류 처리가 삼키지 못하고 boot의 새 catch-all로 샌다(RD-010).
+    const { frame, events, waitFor } = createMainSide([42, "exit()"]);
+    const realPostMessage = frame.rpcPort.postMessage.bind(frame.rpcPort);
+    vi.spyOn(frame.rpcPort, "postMessage").mockImplementation((message) => {
+      const m = message as { kind?: string; name?: string };
+      if (m.kind === "ntf" && m.name === "writeError") {
+        throw new Error("포트 전송 실패");
+      }
+      realPostMessage(message);
+    });
+
+    await bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    await waitFor(() => events.some((e) => e[0] === "crashed"));
+
+    expect(events.find((e) => e[0] === "crashed")).toEqual([
+      "crashed",
+      { message: "Error: 포트 전송 실패" },
+    ]);
+    expect(events.filter((e) => e[0] === "readLine")).toHaveLength(1);
+    expect(events.some((e) => e[0] === "sessionTerminated")).toBe(false);
+    expect(consoleError).toHaveBeenCalledWith(
+      "[repl.worker] 루프 오류",
+      expect.anything(),
+    );
   }, 30_000);
 
   test("로더가 던지면 loadFailed만 오고 ready·배너·readLine 요청은 오지 않는다", async () => {

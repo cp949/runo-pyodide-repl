@@ -35,8 +35,11 @@ type RpcMessage =
 | `ready` | ntf | worker→main | `{ pyodideVersion: string }` | — | 콘솔 생성 뒤 REPL 루프 직전 |
 | `loadFailed` | ntf | worker→main | `message: string` | — | pyodide 로드 실패. worker는 살아 있고 루프에 들어가지 않는다 |
 | `sessionTerminated` | ntf | worker→main | — | — | `exit()`/`quit()`/`SystemExit` |
+| `crashed` | ntf | worker→main | `{ message: string }` | — | 부팅 뒤(REPL 루프)의 잡히지 않은 예외. worker는 살아 있을 수 있으나 루프는 끝났다(RD-010) |
 
 `loadFailed`의 `message`는 worker의 `String(error)`이고 main이 `pyodide 로드 실패: ` 접두사를 붙여 `writeError`로 낸다(빨강 + 개행). pyodide 로드뿐 아니라 콘솔 생성 실패도 같은 알림으로 온다.
+
+`crashed`는 `loadFailed`와 달리 main이 터미널에 아무것도 쓰지 않는다(앱의 Alert가 보여준다, `08-session.md`). main은 worker의 전역 `error` 이벤트(스레드 자체가 죽은 경우)도 같은 경로로 취급한다 — `crashed` 알림은 그 이벤트가 오지 않는 실패(부팅 뒤 잡히지 않은 예외로 루프만 끝난 경우)를 보완한다. 둘 중 먼저 온 신호만 반영한다(`08-session.md`).
 
 main→worker 알림은 없다. 설정은 초기화 프레임(4절)으로만 간다.
 

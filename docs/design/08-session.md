@@ -67,6 +67,22 @@ Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 별개 기능이�
 - 알려진 잔재: `exit()` 뒤·pyodide 로드 실패 뒤에는 읽기도 실행도 없는데 Ctrl+C가 `send()`를 만들어 송신기
   타이머가 리셋/언마운트까지 돈다(정확성 영향 없음).
 
+## 8.4 크래시(RD-010)
+
+worker가 죽거나(전역 `error` 이벤트) 부팅 뒤(REPL 루프)에서 잡히지 않은 예외가 나면(`crashed` 알림,
+`01-protocols.md` 1.2) `session.ts`의 `crash(message)`가 `endSession()`(`alive=false`) →
+`onStatus("crashed")` → `onCrash?.(message)` 순으로 부른다(`00-architecture.md` 3.4). 둘 중 먼저 온
+신호만 반영한다 — 이미 크래시했거나 `terminate()`됐으면 `crash()`는 아무것도 하지 않는다. 터미널에는
+아무것도 쓰지 않는다(앱의 Alert가 보여준다). worker는 terminate하지 않는다(복구는 8.1의 `reset()`뿐).
+
+`error` 리스너는 `startSession()`이 worker 생성 직후 건다. `session.terminate()`(리셋·dispose 양쪽이
+부른다)에서 뗀다 — 안 떼면 다음 세션이 시작된 뒤 옛 worker가 뒤늦게 죽어도(가비지 컬렉션 전) 리스너가
+남아 있지만, `crash()` 자체가 `ended` 가드로 막으므로 관찰 가능한 차이는 없다(리스너 제거는 누수 방지
+목적).
+
+크래시 뒤 `session.pythonRunning()`은 `alive=false`라 거짓이다 — Ctrl+C가 에코도 전송도 하지 않는다
+(`03-ctrl-c.md` 2.7과 같은 게이트).
+
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/04-session-reset.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/ReplTerminal.tsx`,
 `/work/cp949/pyodide-samples/docs/repl/traps/TRP-001-strictmode-readline-dispose-race.md`

@@ -87,7 +87,7 @@ const openPorts: MessagePort[] = [];
 const handles: ReplHandle[] = [];
 const workerRpcs: Rpc[] = [];
 
-/** 아무것도 하지 않는 가짜 worker. postMessage로 받은 프레임을 기록한다. */
+/** 아무것도 하지 않는 가짜 worker. postMessage로 받은 프레임을 기록하고 `error` 리스너를 걸 수 있게 한다. */
 function createFakeWorker() {
   const postMessage = vi.fn<
     (message: unknown, transfer: Transferable[]) => void
@@ -95,17 +95,34 @@ function createFakeWorker() {
     openPorts.push((message as InitFrame).rpcPort);
   });
   const terminate = vi.fn();
+  const errorListeners = new Set<(event: { message?: string }) => void>();
+  const addEventListener = vi.fn(
+    (type: string, listener: (event: { message?: string }) => void) => {
+      if (type === "error") errorListeners.add(listener);
+    },
+  );
+  const removeEventListener = vi.fn(
+    (type: string, listener: (event: { message?: string }) => void) => {
+      if (type === "error") errorListeners.delete(listener);
+    },
+  );
   const worker = {
     postMessage,
     terminate,
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener,
+    removeEventListener,
   } as unknown as Worker;
   return {
     worker,
     postMessage,
     terminate,
+    addEventListener,
+    removeEventListener,
     frame: () => postMessage.mock.calls[0]?.[0] as InitFrame,
+    /** 전역 worker `error` 이벤트를 흉내 낸다(RD-010). */
+    dispatchError(message?: string) {
+      for (const listener of errorListeners) listener({ message });
+    },
   };
 }
 
@@ -1512,5 +1529,83 @@ describe("reset()(RD-010)", () => {
     const { line: next } = await startRead(session);
     session.fake.type("\x1b[A\r"); // ↑로 이전 history를 불러와 그대로 제출
     await expect(next).resolves.toBe("kept");
+  });
+});
+
+describe("크래시 감지(RD-010)", () => {
+  test("worker error 이벤트는 onStatus('crashed') 뒤 onCrash(message)를 순서대로 부른다", () => {
+    const onCrash = vi.fn();
+    const session = startSession({ onCrash });
+
+    session.fakeWorker.dispatchError("boom");
+
+    expect(session.onStatus.mock.calls.at(-1)).toEqual(["crashed"]);
+    expect(onCrash).toHaveBeenCalledWith("boom");
+    const statusOrder = must(session.onStatus.mock.invocationCallOrder.at(-1));
+    const crashOrder = must(onCrash.mock.invocationCallOrder.at(-1));
+    expect(statusOrder).toBeLessThan(crashOrder);
+  });
+
+  test("메시지 없는 error 이벤트는 기본 문구를 쓴다", () => {
+    const onCrash = vi.fn();
+    const session = startSession({ onCrash });
+
+    session.fakeWorker.dispatchError();
+
+    expect(onCrash).toHaveBeenCalledWith("worker가 알 수 없는 이유로 종료됨");
+  });
+
+  test("crashed 알림도 같은 경로로 crashed를 낸다", async () => {
+    const onCrash = vi.fn();
+    const session = startSession({ onCrash });
+
+    session.workerRpc.notify("crashed", { message: "부팅 뒤 잡히지 않은 예외" });
+    await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "crashed");
+
+    expect(onCrash).toHaveBeenCalledWith("부팅 뒤 잡히지 않은 예외");
+  });
+
+  test("크래시는 첫 신호만 반영한다", async () => {
+    const onCrash = vi.fn();
+    const session = startSession({ onCrash });
+    session.onStatus.mockClear();
+
+    session.fakeWorker.dispatchError("첫 신호");
+    session.workerRpc.notify("crashed", { message: "두 번째 신호" });
+    await settle();
+
+    expect(session.onStatus.mock.calls).toEqual([["crashed"]]);
+    expect(onCrash).toHaveBeenCalledTimes(1);
+    expect(onCrash).toHaveBeenCalledWith("첫 신호");
+  });
+
+  test("크래시 뒤 Ctrl+C는 에코도 전송도 하지 않는다", () => {
+    const session = startSession();
+    session.fake.type("\x03");
+    expect(slots(session).seq).toBe(1); // 대조: 크래시 전에는 전송된다
+
+    session.fakeWorker.dispatchError("boom");
+    session.fake.type("\x03");
+
+    expect(slots(session).seq).toBe(1);
+    expect(echoes(session)).toBe(1);
+  });
+
+  test("크래시 뒤 reset은 새 세션을 만들고 옛 error 리스너를 떼어 낸다", () => {
+    const session = startResettableSession();
+    const oldWorker = must(session.workers[0]);
+
+    oldWorker.dispatchError("boom");
+    expect(session.onStatus.mock.calls.at(-1)).toEqual(["crashed"]);
+
+    session.handle.reset();
+
+    expect(session.workers).toHaveLength(2);
+    expect(session.createWorkerSpy).toHaveBeenCalledTimes(2);
+    expect(session.onStatus.mock.calls.at(-1)).toEqual(["loading"]);
+    expect(oldWorker.removeEventListener).toHaveBeenCalledWith(
+      "error",
+      expect.any(Function),
+    );
   });
 });

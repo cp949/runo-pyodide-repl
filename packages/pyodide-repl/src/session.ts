@@ -35,6 +35,8 @@ export interface StartSessionOptions {
   indexURL: string;
   /** 상태가 바뀔 때 부른다. */
   onStatus: (status: ReplStatus) => void;
+  /** worker `error` 이벤트 또는 `crashed` 알림(첫 신호만) 뒤 부른다. */
+  onCrash?: (message: string) => void;
 }
 
 export interface ReplSession {
@@ -65,9 +67,12 @@ export function startSession(options: StartSessionOptions): ReplSession {
     createWorker,
     indexURL,
     onStatus,
+    onCrash,
   } = options;
 
   let ended = false;
+  // 크래시 신호(worker error 이벤트·crashed 알림)는 먼저 온 것만 반영한다(확정 1).
+  let crashed = false;
   // sink 세트는 세션마다 새로 만든다. 새 세션이 이전 꼬리를 물려받지 않게(05-output.md 4.1).
   const sinks = createTerminalSinks(readline);
   // xterm의 write 콜백은 `term.dispose()` 뒤에도 돈다(TRP-004). `rewindTail`이 flush 콜백에서 해제된 터미널의
@@ -126,6 +131,18 @@ export function startSession(options: StartSessionOptions): ReplSession {
   const endSession = () => {
     alive = false;
     interruptSender.cancel();
+  };
+  /**
+   * worker가 죽었거나(전역 `error`) 부팅 뒤 루프가 잡히지 않은 예외로 끝났을 때(`crashed` 알림) 부른다. 첫 신호만
+   * 반영한다(확정 1). 터미널에는 쓰지 않는다 — 앱의 Alert가 보여준다(확정 9). worker는 terminate하지 않는다(복구는
+   * `reset()`).
+   */
+  const crash = (message: string) => {
+    if (ended || crashed) return;
+    crashed = true;
+    endSession();
+    onStatus("crashed");
+    onCrash?.(message);
   };
   const channel = new MessageChannel();
   const mailbox = createStdinMailbox();
@@ -227,8 +244,15 @@ export function startSession(options: StartSessionOptions): ReplSession {
       sinks.writeError(`pyodide 로드 실패: ${message}`);
       onStatus("load-failed");
     },
+    // 부팅 뒤(REPL 루프)의 잡히지 않은 예외(01-protocols.md 1.2). worker는 살아 있을 수 있다.
+    crashed: ({ message }: { message: string }) => crash(message),
   });
   const worker = createWorker();
+  // worker 스레드 자체가 죽은 경우(crashed 알림이 오지 않는 실패)를 보완한다(01-protocols.md 1.2).
+  const onWorkerError = (event: ErrorEvent) => {
+    crash(event.message || "worker가 알 수 없는 이유로 종료됨");
+  };
+  worker.addEventListener("error", onWorkerError);
   postInitFrame(worker, frame);
 
   return {
@@ -241,6 +265,7 @@ export function startSession(options: StartSessionOptions): ReplSession {
       ended = true;
       readline.cancelRead();
       endSession();
+      worker.removeEventListener("error", onWorkerError);
       rpc.dispose();
       worker.terminate();
     },
