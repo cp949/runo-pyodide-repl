@@ -45,7 +45,7 @@ Ctrl+C·sleep:
 25. **동기 XHR 대기 중 Ctrl+C 미반영**(3.1 참고).
 26. **sleep 중 이벤트 루프 정지의 부작용**: `Future`·`js.setTimeout` 콜백·`pyodide.http` 요청도 진행하지 않아 `while not task.done(): time.sleep(0.01)` 같은 루프는 CPython처럼 끝나지 않는다.
 27. **`time.sleep` 대기 중 워커 스레드 한 코어 100% 점유**(JSPI 환경).
-28. **`asyncio.run` 코루틴 안 `KeyboardInterrupt`의 트레이스백 중복**(RD-012i).
+28. **코루틴 프레임 안의 동기 `time.sleep`을 중단하면 트레이스백이 두 번 나오고 첫째에 우리 내부 파일명이 보인다**(RD-012i). 조건은 `async def main(): time.sleep(...)`처럼 코루틴 안에서 동기 `time.sleep`(조각 래퍼)을 직접 부르고 그 코루틴을 `asyncio.run(main())`·`run_sync(main())`으로 돌리는 것이다. 마지막 트레이스백은 콘솔이 만든 표준 3줄이고, 그 앞에 pyodide가 `sys.excepthook`으로 한 번 더 찍는 트레이스백에 `<sigint-handler>`·`<sleep-slice>` 프레임이 남는다(조각의 excepthook 무음 창은 `checkInterrupt()` 호출 동안만이라 이 시점을 덮지 못한다). RD-009 브라우저 실측에서 `arun-sleep`·`runsync-sleep` 두 셀이 N=20 전량(40/40) 이 형태였다 — 복귀·지연·`pageerror`는 정상이다. 같은 코루틴이 `await`로만 기다리면(`arun-loop`) 우리 프레임이 없다. 막으려면 콘솔 실행 전체에서 excepthook을 대체해야 해 사용자 excepthook과 충돌한다(`docs/traps/TRP-021`).
 29. **`<console>` 프레임 없는 콜백 안의 `time.sleep`**(예: `exec("async def …")`로 정의한 코루틴을 `asyncio.run`으로 실행)은 Ctrl+C가 sleep이 끝난 뒤에야 반영된다.
 30. **`warnings` 출력의 파일명**이 `<console>`이다(3.14는 `<python-input-N>`) — 범위 밖.
 31. **확인 범위**: 위 측정은 모두 Chromium(대개 headless, 개발 서버) 한 대 기준이다. Firefox·Safari·`sync=false` 폴백은 미확인.
@@ -67,6 +67,12 @@ stdin 읽기의 끝:
 35. **`input()` 취소의 트레이스백이 입력 줄 아래에서 시작하고 `_pyrepl` 프레임·소스 줄이 없다.** 3.14.4 pty 실측(RD-008 재측정 ⑤): Ctrl+C 응답이 개행 없이 `Traceback (most recent call last):\r\n`부터 시작해 화면에서는 `x: abcTraceback (most recent call last):`처럼 입력 줄에 붙고, 프레임은 `File "<python-input-0>", line 1, in <module>` + 소스 줄 + `_pyrepl/readline.py`(`input`) → `reader.py`(`readline`) → `reader.py`(`handle1`) → `unix_console.py`(`wait`) 4개다. 우리는 `\r\n` 뒤 다음 줄에서 시작하고 `Traceback (most recent call last):` / `  File "<console>", line 1, in <module>` / `KeyboardInterrupt` 3줄뿐이다(소스 줄·`_pyrepl` 프레임 없음). 함수 안 취소는 그 프레임(`File "<string>", line 2, in f`)이 더해진다. 프레임 흉내는 범위 밖이고, 개행은 sink의 println 계약(끝 개행을 sink가 붙인다)과 얽혀 있다.
 36. **`input()` 취소 직후 연타의 두 번째 눌림부터 `^C`가 에코되어 트레이스백 앞에 붙는다.** 취소에는 게이트 항 `cancelSettling`을 세우지 않으므로(`04-stdin-input.md` 3.1) 두 번째 눌림은 `setCtrlCHandler` 경로로 가 `^C`를 꼬리에 남긴다(`^CTraceback (most recent call last):` 형태). RD-008 브라우저 실측(N=20, 중앙값·범위): 0ms 2회 → 1 (1~1), 0ms 5회 → 4 (2~4), 키 반복 20회 → 19 (5~19), 긴 프롬프트 + 5회 → 4 (3~4), 짧은 프롬프트 + 5회 → 4 (1~4). 트레이스백은 모든 셀·모든 시행에서 정확히 1개였다. 3.14도 cooked mode에서 실행 중 `^C`를 에코하므로 "Python이 도는 중" 표시로는 옳다. 방어를 걸면 `except KeyboardInterrupt` 뒤 계산 중 Ctrl+C가 무시되므로(이전 구현 3.0초) 걸지 않는 쪽을 골랐다.
 37. **`... ` 프롬프트 취소 연타는 여러 눌림이 `KeyboardInterrupt` 한 줄로 합쳐진다.** `cancelSettling`이 취소 응답 뒤 구간을 덮어 `^C`도 찍히지 않는다. RD-008 실측(N=20): 0ms 2회·5회·키 반복 20회 모두 `^C` 0, `KeyboardInterrupt` 줄 수 중앙값 1(5회·키 반복에서 드물게 2 — 두 번째 취소가 새 읽기가 열린 뒤에 떨어진 경우). 이전 구현은 1~5ms 간격에서 평균 2·9.65줄이었으므로 합쳐짐이 더 강하다. 3.14는 눌림마다 한 줄을 내므로 줄 수 차이가 남는다.
+
+정지한 실행 중 Ctrl+C:
+
+38. **Task 밖 콜백(`call_later` 등)에서 난 `KeyboardInterrupt`·`SystemExit`은 조용히 버려진다**(RD-009). webloop 재보고 억제(`03-ctrl-c.md` 2.8)가 WebLoop의 `_keyboard_interrupt_handler`·`_system_exit_handler`를 no-op으로 바꾸기 때문이다. 3.14에서는 배경 콜백의 `KeyboardInterrupt`가 프로세스로 올라가 보이지만, 웹에서는 콜백 경계에서 사라진다(콘솔 실행 안에서 난 것은 그대로 화면에 나온다). 이 억제는 정상 중단·`input()` 취소·`exit()`마다 남던 브라우저 `pageerror`(시행당 2·2·1건)를 0으로 만드는 대가이고, 그 재보고에는 화면에 이미 나간 것 말고 새 정보가 없다.
+
+top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 한 줄로 끝나고 `except KeyboardInterrupt`로는 잡히지 않는 것(우리 구현은 콘솔 task를 취소하고 표지 예외 `IdleInterrupt`를 한 줄로 표시한다. `except asyncio.CancelledError`는 잡고 `finally`는 돈다)은 **편차로 등록하지 않는다**. 대기 중 Ctrl+C를 task 취소로 처리하고 한 줄만 내는 것은 3.14의 `python -m asyncio`와 같은 동작이고, 우리 TLA 옵션의 기준이 기본 REPL이 아니라 `python -m asyncio`이기 때문이다(편차 1과 같은 정렬). 2절 "범위 밖"에도 넣지 않는다 — 재현하지 않기로 한 차이가 아니라 차이가 아니다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약"), RD-008 pty 재측정 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/pty/results.md`
 

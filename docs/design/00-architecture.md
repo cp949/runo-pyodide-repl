@@ -48,15 +48,15 @@
 3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `topLevelAwait`, pyodide `indexURL`. worker 스크립트는 첫 `await` 이전에 `message` 리스너를 걸어 이 프레임을 받는다. 프레임은 하나뿐이라 구분자(`instanceof`)가 필요 없다.
 4. worker가 pyodide를 로드하고 콘솔을 만든 뒤 `ready` 알림(또는 `loadFailed`)을 보낸다. 로드 실패는 worker를 죽이지 않는다.
 5. worker가 SIGINT 핸들러 설치 → interrupt buffer 연결 → `setStdin` → 감시 타이머 시작 → 배너 출력 → REPL 루프 진입(`03-ctrl-c.md` 2.6 순서).
-   RD-007 시점에는 감시 타이머만 없다. `createConsole` 뒤에 `connectInterrupts(pyodide, repl.pyconsole, frame.interruptBuffer, { ack, seq, discard })`(설치 → 폐기 → 연결)를 부르고, 그 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). 둘 다 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머는 이 뒤에 RD-009가 끼운다.
+   `createConsole` 직후 `suppressWebLoopReraise(pyodide, { warn })`(WebLoop의 `KeyboardInterrupt`·`SystemExit` 재보고 억제, `03-ctrl-c.md` 2.8)를 한 번 부르고, 이어서 `connectInterrupts(pyodide, repl.pyconsole, frame.interruptBuffer, { ack, seq, discard, warn })`(조각 교체 → 핸들러 설치 → 폐기 → 연결, 반환값은 `InterruptIdle`)를 부른 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). 전부 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머(`startInterruptWatch`)는 `ready`·배너 뒤·REPL 루프 직전에 켜고, 루프가 끝나면 `finally`에서 `stopWatch()`·`interruptIdle.destroy()`로 정리한다.
 
 ### 3.2 REPL 루프(worker)
 
 ```text
 loop:
-  atPrompt = true                                                        # RD-009
+  setAtPrompt(true)                                                      # 감시 타이머의 프롬프트 유휴 폐기가 읽는다
   line = await rpc.call('readLine', prompt, pending, cancelable=true)   # 비동기, 이벤트 루프 살아 있음
-  atPrompt = false                                                       # RD-009
+  setAtPrompt(false)                                                     # 응답(취소 null 포함) 직후, 폐기보다 먼저
   discardPendingInterrupt(buffer)                                       # 대상 코드 없는 SIGINT 폐기 (RD-007 완료)
   result = await runner.run(line)                                        # null이면 취소 처리
   if result.exit: notify('sessionTerminated'); break
@@ -65,7 +65,7 @@ loop:
 
 프롬프트 대기 중 main→worker `complete` 요청에 답한다(RD-015). 실행 중 도착한 요청은 빈 후보로 답한다.
 
-RD-005 시점의 루프(`worker/repl-loop.ts`의 `runReplLoop(deps)`)는 `atPrompt`·`discardPendingInterrupt`(RD-007·RD-009)와 `complete` 응답 없이 `readLine` → `run` → 종료 판정만 한다. `protocol/`을 import하지 않고 `readLine`·`discardPendingInterrupt`(RD-007)·`run`·`onTerminated`·`onError`를 주입받으며 `boot.ts`가 RPC 래퍼를 만든다. 오류 정책: `run`이 `KeyboardInterrupt`가 아닌 오류를 던지면 `onError`(`console.error` + 빨간 `repl 내부 오류: …` + `clearPending()`) 뒤 `>>> `로 계속한다. `readLine` 요청이 reject되면 `rpc disposed`(main의 `dispose()`)일 때는 조용히, 그 밖의 이유면 `console.error`만 남기고 루프를 끝낸다.
+루프(`worker/repl-loop.ts`의 `runReplLoop(deps)`)는 `complete` 응답(RD-015)을 빼면 위 그대로다. `protocol/`을 import하지 않고 `readLine`·`setAtPrompt`(RD-009)·`discardPendingInterrupt`(RD-007)·`run`·`onTerminated`·`onError`를 주입받으며 `boot.ts`가 RPC 래퍼와 `atPrompt` 변수를 만든다. 호출 순서는 시험이 고정한다: `setAtPrompt(true)` → `readLine` → `setAtPrompt(false)` → `discardPendingInterrupt` → `run`. 오류 정책: `run`이 `KeyboardInterrupt`가 아닌 오류를 던지면 `onError`(`console.error` + 빨간 `repl 내부 오류: …` + `clearPending()`) 뒤 `>>> `로 계속한다. `readLine` 요청이 reject되면 `rpc disposed`(main의 `dispose()`)일 때는 조용히, 그 밖의 이유면 `console.error`만 남기고 루프를 끝낸다.
 
 ### 3.3 `input()`(worker, 동기)
 

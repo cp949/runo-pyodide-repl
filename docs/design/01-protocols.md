@@ -156,7 +156,7 @@ interface InitFrame {
 main : Terminal/Readline 생성 → 채널 3종 생성 → createWorker() → postMessage(init, [port]) → onStatus('loading')
        (crossOriginIsolated가 거짓이면 위를 하지 않고 경고 한 줄 + onStatus('not-isolated')로 끝난다)
 worker: init 수신 → loadPyodide → setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(프레임 값)
-      → 핸들러 설치 → 버퍼 연결 → setStdin → 감시 타이머     (RD-004는 앞 다섯 단계까지, 뒤 넷은 후속 RD)
+      → webloop 재보고 억제 → sleep 조각 + 핸들러 설치 → 폐기 → 버퍼 연결 → setStdin → (ready·배너 뒤) 감시 타이머
       → ntf ready → ntf writeOutput(BANNER) → req readLine('>>> ')   (RD-004는 readLine 대신 시험용 스크립트를 runLine으로 실행)
       로드·콘솔 생성 실패 → ntf loadFailed(String(error))만 보내고 돌아온다(worker는 살아 있다)
 main : ready → onStatus('ready') → readLine 핸들러: 꼬리 + '>>> ' 합성 → readline.read()
@@ -185,6 +185,7 @@ main : Tab → req complete(source, pending)   ←  worker: atPrompt이면 계�
 main : 읽기가 살아 있고 버퍼·커서가 같으면 적용
 
 (S6) 종료
-worker: run("exit()") → {exit:true} → 감시 타이머 정지 → ntf sessionTerminated → 루프 종료(더 이상 readLine 없음)
+worker: run("exit()") → {exit:true} → ntf sessionTerminated → 루프 종료(더 이상 readLine 없음)
+      → finally: 감시 타이머 정지(stopWatch) + interruptIdle.destroy()
 main : 안내 표시. 복구는 reset()
 ```

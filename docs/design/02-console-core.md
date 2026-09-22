@@ -100,8 +100,8 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
 - worker 루프는 `result.exit`이면 `sessionTerminated` 알림으로 세션 종료를 main에 알리고(`onTerminated`) 루프를
   `break`한다. 이후 `readLine`을 더 요청하지 않아 실제 인터프리터 종료와 동등해진다. 터미널에는 아무것도 쓰지 않고
   (3.14도 종료 메시지가 없다) worker는 살려 둔다(복구는 세션 리셋). main은 `onStatus('terminated')`만 부르고, 종료 뒤
-  활성 읽기가 없어 키는 버려진다(Ctrl+L만 동작). 감시 타이머를 끄고 `interruptIdle`을 destroy하는 정리는 그것을
-  만드는 RD-009부터 이 분기에 들어간다.
+  활성 읽기가 없어 키는 버려진다(Ctrl+L만 동작). 루프가 `break`한 뒤 `boot.ts`의 `finally`에서 `stopWatch()`·
+  `interruptIdle.destroy()`로 감시 타이머와 깨우기 proxy를 정리한다(`03-ctrl-c.md` 2.5).
 - 여러 줄 제출 중 `exit()`가 나면 나머지 문장은 실행하지 않는다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/01-console-core.md`,

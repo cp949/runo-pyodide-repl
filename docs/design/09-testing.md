@@ -14,9 +14,24 @@
 `complete-source.test.ts`, `import-gate.test.ts`, `tab-completion.test.ts`,
 `tab-completion-flow.test.ts`(main·worker 루프·실제 후보 계산 통합), `auto-indent-parity.test.ts`
 (pyodide에 든 `_pyrepl.readline` 함수와 차분 검증), `rpc.test.ts`(실제 `MessageChannel`).
-- 새 구현의 RD-007 시점 파일: `worker/sigint-handler.test.ts`(요청 번호 확인·ack·`<console>` 프레임 규칙·절단·
-  catch-loop·TLA 켜짐 연타), `worker/interrupt-buffer.test.ts`(`connectInterrupts`의 설치 → 폐기 → 연결 순서),
-  `worker/boot.test.ts`(연결이 `setStdin`·`ready`보다 먼저, 부팅 전 눌림).
+- 새 구현의 Ctrl+C 파일: `worker/sigint-handler.test.ts`(요청 번호 확인·ack·`<console>` 프레임 규칙·절단·
+  catch-loop·TLA 켜짐 연타), `worker/interrupt-buffer.test.ts`(`connectInterrupts`의 조각 → 설치 → 폐기 → 연결
+  순서와 조각 코드 객체 배선), `worker/boot.test.ts`(연결이 `setStdin`·`ready`보다 먼저, 부팅 전 눌림, 감시 타이머
+  정지, 정지한 대기 깨우기, 프롬프트 유휴 폐기). RD-009가 더한 파일: `worker/webloop-reraise.test.ts`(재보고 억제
+  4건 + 가드),
+  `worker/sigint-handler-sleep-slice.test.ts`(조각·폴링 횟수·무효 인자·가드 2종),
+  `worker/sigint-handler-idle.test.ts`(정지한 대기 깨우기·TLA·`pending`·가드 3종),
+  `worker/sigint-handler-nojspi.test.ts`(JSPI 없는 경로 5건).
+- 공용 조립은 `src/test/sigint-setup.ts`의 `setupConsoleRunner(pyodide, options)` →
+  `{ run, screen, buffer, pyconsole, presser, wakeAfter }`와 `teardownConsoleRunner`다. `wakeAfter(ms)`는 감시
+  타이머 대신 시험이 직접 `interruptIdle()`을 부르는 도우미이고(프로덕션 경로는 타이머다) `{ woke, … }`를
+  돌려준다. 해체는 버퍼 해제·`discardPendingInterrupt`·`signal.signal(SIGINT, default_int_handler)`에 더해
+  **`pyodide.ffi.run_sync`·`pyodide.webloop.run_sync` 원복**과 남은 타이머·proxy 정리를 한다 — 설치가 모듈 전역을
+  바꾸므로 한 인스턴스에 두 번 설치하면 래퍼가 겹쌓인다.
+- **JSPI 없는 경로를 만드는 법**: `loadPyodide()` **전에** `WebAssembly.Suspending`·`promising`·`Suspender`를
+  `delete`하고 `afterAll`에서 되돌린다. pyodide는 `"Suspending" in WebAssembly`로 판정하고 Node 24는 기본으로
+  JSPI가 켜져 있다(`--no-experimental-wasm-jspi`는 듣지 않는다). vitest는 파일 격리라 다른 파일에 새지 않는다
+  (같은 실행에서 JSPI 있는 `sigint-handler-idle.test.ts`가 통과하는 것으로 확인한다).
 - 눌림은 눌림 스레드 역할 `src/test/roles/interrupt-presser.ts`가 `node:worker_threads`로 실제 스레드에서 버퍼에
   쓴다. 시나리오 Python은 JS 전역 `started()`로 "실행에 들어갔다"를 알리고, 그 호출을 `try` **본문 안**에 둔다
   (폴링 위상에 따라 호출 직후의 SIGINT가 `try` 진입 전에 처리되면 예외가 `except`를 벗어난다, TRP-012). 무한
@@ -56,9 +71,15 @@
   - 같은 파일의 **취소 변환**(RD-008)은 `runPython`이 아니라 **콘솔 러너 경로**로 돌린다: 핸들러는 스택에 `<console>` 프레임이 있을 때만 `KeyboardInterrupt`를 내므로 `runPython`의 파일명 `<exec>`에서는 취소가 버려지고 CPython이 읽기를 재시도한다. `sigint-handler.test.ts`의 `setup()`과 같은 순서로 `createConsole` → `createInterruptBuffer` → `installSigintHandler` → `setInterruptBuffer` → `createSubmissionRunner`를 만들어 제출하고 `screen.stderr`로 트레이스백 바이트를 단언한다. 보는 것: `input()`·`readline()`·`read()`·`for line in sys.stdin`·함수 프레임의 트레이스백, `try/except/finally/with`, 재시도 없음(`countWaits === 1`), 요청 번호를 올리지 않은 전송은 무시(TRP-035 검출), `checkInterrupt()`가 던지지 않으면 `EOFError` + `console.warn` 1회, 20회 반복 뒤 SIGINT 잔류 0.
   - **취소와 눌림의 경합**(같은 파일)은 눌림 스레드(`src/test/roles/interrupt-presser.ts`)를 띄운다. 읽기가 열린 순간을 기준으로 삼기 위해 `installStdin`에 `onRead` 훅을 두고 그 안에서 시작 표시(`ctl`)를 세운다. 0ms 연타는 취소와 같은 읽기 안에 떨어져 콜백의 `checkInterrupt()`가 함께 소비하고(실측 20라운드 잔류 0), 취소가 끝난 뒤 도착한 눌림은 돌고 있는 Python이 없어 슬롯에 남아 루프의 `discardPendingInterrupt`가 지운다(그 시험이 `SIGNAL === 2`를 단언한다). `except KeyboardInterrupt` 뒤 계산 중 눌림은 시간과 stderr 둘 다 본다(대조 215ms → 눌림 34ms).
   - 부팅의 `input()` 시험(`worker/boot.test.ts`)은 **선전달 기법**을 쓴다. `Atomics.wait(ctrl, STATE, IDLE)`은 STATE가 이미 READY면 즉시 돌아오므로, 각본이 `input()` 줄을 답하기 전에 main 역할이 `deliver`를 해 두고 타임라인(`write("x: ")` → `readInput(true)` → 다음 `readLine`)과 값(`x`의 에코 `'abc'`, `sys.stdin.readline()`의 에코 `'def\n'`)을 단언한다. 스레드는 쓰지 않는다. 메일박스 대기 중 `complete`가 큐잉되는 프로토콜 쪽은 `protocol/thread-scenario.test.ts`의 스레드 시험이 본다.
-  - `exit()`를 실행하면 asyncio가 `SystemExit`을 WebLoop로 다시 던져 vitest가 `Unhandled Rejection`으로 실패 종료한다.
-    `vitest.config.ts`의 `onUnhandledError`가 `PythonError` + 줄 시작 `SystemExit`만 무시하는 임시 조치이고(RD-009의
-    webloop 재보고 억제가 들어오면 제거), `process.on("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
+  - `exit()`·중단·`input()` 취소는 asyncio가 `SystemExit`·`KeyboardInterrupt`를 WebLoop로 다시 던져 vitest를
+    `Unhandled Rejection`으로 실패 종료시킨다. RD-009의 `suppressWebLoopReraise`가 이 재보고를 없앴고
+    **`vitest.config.ts`의 `onUnhandledError` 필터는 제거했다**(억제 없이 필터만 떼면 개별 시험이 다 통과해도
+    `Errors 210` + 종료코드 1이다 — 실측). 실제 pyodide를 직접 로드하는 시험 파일은 `boot.ts`의 배선이 닿지
+    않으므로 **그 파일의 콘솔 조립 지점에서 `suppressWebLoopReraise`를 직접 불러야** 한다. `process.on
+    ("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
+  - `time.sleep`의 무효 인자 문구(`-1`·`'a'`·NaN·inf·키워드·인자 2개·`9.3e9`)를 단정하는 시험의 기준은 **로컬
+    CPython 3.14.4**로 재 둔 문자열이다(번들 pyodide는 3.14.2 — 편차 19). 조각 래퍼는 이 인자들을 원본 C 함수에
+    그대로 넘겨 문구를 보존한다.
   - 시험 입력 함정: `1 +`·`foo bar` 같은 EOF 문법 오류는 pyodide 314.0.7의 `pyconsole.push`가 `_IncompleteInputError:
     incomplete input`으로 표시한다. `runLine`은 이를 표준 `SyntaxError: invalid syntax`로 정규화해 돌려주므로(`02-console-core.md`
     5.1) `push`를 직접 부르는 시험만 원문을 기대해야 한다(`x = = 1`은 원문도 `SyntaxError: invalid syntax`). 한 줄에 `;`로
@@ -69,7 +90,8 @@
 `auto-indent.test.ts`, `auto-indent-reader.test.ts`, `tab-reader.test.ts`, `stdin-reader.test.ts`,
 `repl-reader.test.ts`, `rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
 `worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
-요청 거절 정책을 고정), `index.test.ts`(`createRepl`),
+요청 거절 정책, **`setAtPrompt` 호출 순서**(`true` → `readLine` → `false` → `discardPendingInterrupt` → `run`, 취소
+`null`과 `readLine` reject 경로 포함)를 고정), `index.test.ts`(`createRepl`),
 `history-filter.test.ts`, `paste-tabs.test.ts`, `interrupt-protocol.test.ts`,
 `interrupt-sender.test.ts`(주입 타이머로 전송·재전송·10회 상한·읽기 순서), `interrupt-watch.test.ts`,
 `App.test.tsx`(배선: 전송·재전송, `readLine`/`readInput` 진입, 세션 리셋, 언마운트).
@@ -93,6 +115,12 @@
   동기 fake로 대신한다. 이 저장소는 양쪽을 나눠 본다: main은 jsdom(`index.test.ts`의 `input() 읽기`)에서 `readInput` 알림 뒤 메일박스 상태(`STATE`·데이터 바이트·`FLAG_LAST`)를 동기로 확인하고,
   worker는 node + 실제 pyodide(`boot.test.ts`의 선전달 기법)에서 본다. 실제 `Atomics.wait` 왕복은 RD-002의 스레드 시험이 담당한다.
 - `read-guard.test.ts`는 결과를 시험이 정하는 가짜 읽기(`deferred`)로 순서 규칙을, 실제 `Readline` + 가짜 터미널 + `createReplReader`·`createInputReader`로 "REPL 줄은 REPL 읽기가, 그다음 줄은 stdin 읽기가 받는다"를 본다(가드의 `await`를 빼면 후자가 실패한다). 마이크로태스크 한 번 안에 시작해야 하는 규칙("활성 REPL 읽기가 없으면 기다리지 않는다")은 `tick` 뒤가 아니라 `await Promise.resolve()` 뒤에 단언한다.
+- `interrupt-watch.test.ts`는 가짜 타이머(`vi.useFakeTimers`)와 주입 deps로 감시 타이머 규칙을 본다: SIGINT가 없으면
+  `interruptIdle`을 부르지 않는다, 20ms 간격, 깨웠으면 소비, 못 깨우면 남기고 재시도, 부르는 동안 버퍼가 바뀌면
+  덮어쓰지 않는다, 콜백이 던져도 계속 돌며 `console.error`, 중지, 프롬프트 유휴 폐기(실행 중이면 남긴다·깨웠으면
+  프롬프트여도 소비·상태는 틱마다 재확인·폴링이 먼저 소비했으면 ack 안 함). `interruptIdle()`의 반환값에는 경합이
+  있으므로(`03-ctrl-c.md` 2.5) 실제 pyodide 쪽 시험에서 `woke === true`를 단언하지 않는다 — 깨어남은 경과 시간과
+  화면으로, ack는 슬롯으로 본다.
 - **변이 검사(mutation)** 를 관행으로 쓴다: 요청 번호와 SIGINT 쓰기 순서 뒤집기, 송신기가 ack를 먼저 읽기,
   핸들러 ack 위치 옮기기, 감시 타이머 ack를 비교 교환과 무관하게 올리기, 연결이 무조건 ack하기 등이 각각
   해당 테스트를 실패시키는지 확인했다.
@@ -105,7 +133,22 @@
   `burst-matrix.mjs`·`boot-press.mjs`·`positive-controls.py`(양성 대조 3건), node 통계는 `verify/node/`의
   `press-loss.mjs`(N=3000)·`poll-overhead.mjs`. RD-008의 스크립트: `prompt-cancel-check.mjs`(23개)·
   `input-cancel-check.mjs`(26개)·`input-burst-matrix.mjs`(8셀 × N=20)·`positive-controls.py`(3건)·
-  `pty/pty_cancel.py`(3.14.4 취소 7건).
+  `pty/pty_cancel.py`(3.14.4 취소 7건). RD-009의 스크립트: `sleep-await-check.mjs`(정지한 실행 12조합 × N=20)·
+  `run-browser.sh`·`positive-controls.py`(3건), node 통계는 `verify/node/sleep-stats.mjs`(JSPI 유무 × 5 프로그램
+  × N=30).
+- **`pageerror` 기준선은 총계 0이다**(RD-009부터). webloop 재보고를 억제하기 전에는 확인 스크립트가 재보고를
+  분류해 빼고 셌지만(`isWebLoopReraise`), 이제 정상 중단·`input()` 취소·`exit()` 어디서도 재보고가 나지 않는다.
+  RD-009 실측: 12조합 240시행 0, 재실행 4종(`repl-check normal`·`ctrl-c-check`·`prompt-cancel-check`·
+  `input-cancel-check`) 전부 0(이전 기준선 1·시행당 2·4·28건).
+- 정지한 실행 12조합의 판정은 복귀 여부 + 복귀 지연 + **화면 형식** + 우리 프레임 0 + `pageerror` 0을 따로 센다.
+  240/240 복귀·지연 중앙값 12/12셀 30ms 이내지만 형식 판정은 10/12셀이다 — `arun-sleep`·`runsync-sleep`은 편차 28
+  (`docs/traps/TRP-021`)이라 형식 판정에서 명시적으로 제외한다.
+- 양성 대조는 "이 확인이 무엇을 잡는가"를 셋으로 나눠 건다(RD-009): 억제 제거 → `pageerror` 총계 0 → 10,
+  ≤20ms 폴링 제거 → `sleep-0.01` 중앙값 28.44 → 96.79ms, 감시 타이머 제거 → `arun5` 24.22 → 4010.3ms.
+  각각 해당 확인만 실패하고 원복 후 통과해야 한다(변조 → dev 재시작(TRP-007) → 실행 → `git checkout --`).
+- 지연을 재는 확인은 **눌림 시각과 화면 변화 시각을 둘 다 페이지 안에서** 잡는다(keydown 리스너 +
+  `MutationObserver`). Node 쪽에서 `page.$$eval` 폴링으로 재면 CDP 왕복이 끼어 5~8ms 과대 측정돼 문턱 근처에서
+  가짜 회귀가 난다(`docs/traps/TRP-022`).
 - 연타 화면 판정은 행 감김·스크롤 아웃·프롬프트 재그리기에 깨진다(TRP-016). `while True: pass`·`for …: pass`는
   **한 줄 복합문**이라 빈 줄 Enter가 있어야 실행이 시작된다(3.14와 같다) — 그 단계를 빼면 Ctrl+C가 `... `
   프롬프트의 활성 읽기로 가 벤더 경로에서 `... ^C`만 남는다.
@@ -145,9 +188,11 @@
 6. **TRAP-23 (TRP-024) 폴링 경로에는 JS 코드를 더하지 않는다.** 접근자·Proxy 비용은 폴링 횟수에 비례하고 폴링 밀도가 작업량마다 약 100배 다르다(맨몸 `while` 반복당 0.02~0.04회 대 `str(i)` 반복당 약 2.04회). 3M회 맨몸 루프 +10%만 보면 통과처럼 보이지만 `''.join(str(i) …)`는 2.93배다. 소실은 폴링 쪽이 아니라 눌림 쪽(ack + 재전송)에서 푼다. 폴링 경로를 건드리는 변경은 `str(i)` 루프로도 재고(plain 대비 1.03 이내, 10회 교차), 폴링 횟수는 카운터 래퍼로 센다.
 7. **TRAP-24 (TRP-025) 재전송 횟수를 소실로 세지 않는다.** 폴링이 슬롯을 비운 뒤 핸들러가 ack를 올리기 전 약 40µs 창에 점검이 걸리면 가짜 재전송이 생긴다(5ms 점검에서 발생률 0.8%, 추적 11/11이 이 창). 소실은 `KeyboardInterrupt`가 0인 눌림이나 감시견이 살려야 했던 라운드로 센다. 통과선을 "재전송 0"이 아니라 "미소비 구간(슬롯이 2인 동안)의 재전송 0 + 중단 정확히 1회"로 나눠 잰다.
 8. **TRAP-25 (TRP-028) 지연 측정은 눌림 시각을 무작위로 두고 N≥30의 최대값으로 판정한다.** 폴링을 pyodide 틱 클럭에 맡긴 대기는 최대 지연이 (반복 1회 시간)×12.5~13.1까지 늘어나는데, 눌림 시각 고정 하니스(브라우저 `sleep-0.01` 166ms)와 판정선 1초 단위 시험은 통과한다. 눌림 시각이 고정인 결과는 "위상 하나"임을 적고, 대기 시간 조합을 20ms 경계 근처까지 넓힌다. 시험은 지연 시간이 아니라 폴링 호출 횟수로 가른다.
+   - **재확인 방법**(이 저장소, RD-009): `sleep-slice.py`의 `secs <= SLEEP_SLICE` 분기에서 `poll()` 한 줄을 지우고 `verify/node/sleep-stats.mjs --progs loop002,loop001 --n 30 --mode jspi`를 돌려 배수를 잰다. 실측 `loop002` 중앙값 12.2 → 187.6ms(15.4배)·최대 20.4 → 339.5ms(16.6배), `loop001` 중앙값 6.7 → 66.6ms(9.9배). 브라우저 쪽 같은 변조는 `sleep-0.01` 중앙값 28.44 → 96.79ms. 측정 결과는 실측 파일과 **다른 이름**으로 저장하고(같은 이름이면 정상 실측을 덮어쓴다) 곧바로 `git checkout --`로 원복한다. 판정 항목이 아니라 근거 기록이다.
 9. **TRAP-26 (TRP-029) 블로킹 대기의 눌림은 별도 스레드로 넣는다.** 블로킹 대기 동안 Node 이벤트 루프가 멈춰 `setTimeout` 눌림이 대기가 끝난 뒤 도착하므로 `pressed > 0` 그리고 `sincePress < 1s`가 끊기지 않았는데도 만족된다(`time.sleep(3)`이 3006ms 걸렸는데 통과). `worker_threads` 눌림 스레드와 `process.hrtime.bigint()` 공유 시계를 쓰고, 눌림 뒤 지연뿐 아니라 실행 전체 시간과 `screen.stderr`(트레이스백)도 단언한다. 새 시험은 기준선 코드에서 RED인지 확인한다.
 10. **TRAP-27 (TRP-034) 모듈 완성 후보는 개수·전체 목록을 단정하지 않는다.** `sys.path[0] == ''`라 cwd의 `.py` 파일이 후보가 되고 환경 모듈 집합도 다르다(3.14.4 네이티브 192개, pyodide 178개, 하니스 폴더 pty 196개). 시험·문서는 접두사·포함 여부·삽입 결과·구조(열 우선 배치, 200개 상한)를 단정하고, 후보 리터럴은 네이티브와 pyodide가 같은 케이스에만 쓴다. 문서에 개수를 적을 때는 측정 환경(빈 임시 cwd, 번들 버전)을 함께 적고, pty 측정 하니스는 자식 REPL의 cwd를 빈 임시 폴더로 고정한다.
 11. **TRAP-28 (TRP-035) SIGINT를 심는 프로브는 실제 경로와 같은 순서로 쓰고 ack로 판정한다.** 핸들러가 요청 번호(슬롯 2)가 그대로면 재전송으로 보고 무시하므로, 슬롯 0에만 쓴 프로브는 "영향 없음"으로 오판된다. 프로브도 `Atomics.add(buffer, 2, 1)` 뒤 `Atomics.store(buffer, 0, 2)` 순서로 쓰고, 소비 여부는 슬롯 0이 아니라 ack(슬롯 1) 증가로 본다. "영향 없음" 결론 전에 같은 대상이 실제 Ctrl+C 경로에서는 끊기는지 양성 대조를 둔다.
+12. **(TRP-022, 이 저장소 RD-009) 브라우저 지연은 페이지 안의 한 시계로 잰다.** `keyboard.press` 직전 Node `performance.now()` + `page.$$eval` 폴링으로 재면 폴링마다 CDP 왕복이 최소 2회 껴 평균 5~8ms를 보탠다. 실측에서 이 방식이 12셀 중 8셀을 30ms 문턱 바로 위(31.5~33.9ms)로 밀어 가짜 회귀를 만들었고, 같은 시행을 페이지 내부 keydown 리스너 + `MutationObserver`(같은 `performance.now()` 시계)로 재니 12/12셀이 문턱 안(22.19~29.98ms)이었다. 측정 대상(눌림 → 새 프롬프트가 보인 시각)은 바꾸지 않고 시계만 옮긴다. 문턱에서 5~10ms 안쪽 결과는 다른 시계로 한 번 더 재기 전에 회귀로 보고하지 않는다. 실패한 1차 측정 로그는 판단을 되돌릴 근거이므로 버리지 않는다.
 
 참고: `/work/cp949/pyodide-samples/docs/repl/traps/` 의 TRP-011, TRP-013, TRP-015, TRP-018, TRP-023, TRP-024, TRP-025, TRP-028, TRP-029, TRP-034, TRP-035
 

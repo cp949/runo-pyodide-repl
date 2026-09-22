@@ -43,14 +43,24 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
 - **main 게이트 `pythonRunning`**(RD-007, 2.7): 거짓이면 `send()` 자체를 하지 않는다. 그래서 `exit()`·로드
   실패 뒤의 눌림이 슬롯에 SIGNAL 2를 영원히 남겨 5ms 점검이 무한히 도는 일이 없다(이전 구현 RD-012h(a)).
 
-## 2.4 worker 핸들러(`worker/sigint-handler.ts` 안의 Python 소스)
+## 2.4 worker 핸들러(`worker/sigint-handler.py`, `worker/sleep-slice.py`)
 
-RD-007 시점의 시그니처는 `install(console, ack, seq)`(세 인자 필수, 반환값 없음)이고 아래 ①②④와
-`formattraceback` 절단까지다. ③(깨우기)과 `warn`·`interrupt_idle` 반환·`run_sync`/`runcode` 래퍼·
-`time.sleep` 조각·설치 가드 5종은 RD-009가 더한다.
+Python 소스는 `.py` 파일이고 TS가 `?raw`로 가져와 `runPython(source, { globals, filename })`에 넘긴다. 파일명은
+`<sigint-handler>`·`<sleep-slice>`(트레이스백에 새면 알아보기 위한 이름이고, 절단은 문자열이 아니라 코드
+객체로 한다).
 
-**RD-009 전의 중간 상태**: `<console>` 프레임이 없는 SIGINT는 **사용자 실행 중이라도 버린다**(ack는 한다).
-따라서 `while True: time.sleep(0.1)`·`asyncio.run` 대기 중 Ctrl+C는 무효다(TRP-020).
+- `sigint-handler.py`의 `install(console, ack, seq, warn, extra_own_codes=())` → `interrupt_idle`.
+  아래 규칙 ①~④, `run_sync`/`runcode` 래퍼, `pending`, `formattraceback` 확장, 설치 가드 3종이 여기 있다.
+  `extra_own_codes`는 다른 모듈이 심은 우리 코드 객체 tuple이고 절단 목록(`own_codes`)에 합쳐진다.
+- `sleep-slice.py`의 `install(warn)` → 우리 코드 객체 tuple(`sleep`·`poll`) 또는 건너뛰었으면 `None`.
+  `time.sleep` 20ms 조각과 설치 가드 2종은 이 파일이 가진다. `connectInterrupts`가 핸들러 설치 **전에**
+  불러 돌려받은 tuple을 `installSigintHandler`의 `extraOwnCodes`로 넘긴다 — 그래야 sleep 중 중단 트레이스백에서
+  조각 래퍼 프레임이 잘린다.
+
+TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)`(`deps` = `ack`·`seq`·`warn`)와
+`installSleepSlice(pyodide, { warn })`이고, 둘 다 별도 namespace(빈 dict)에서 실행해 사용자 globals를
+오염시키지 않는다.
+
 1. **진입 첫 줄에서 `seq()` 확인**. `last_seq`와 같으면 ack도 예외도 없이 무시(재전송). 다르면
    `last_seq` 갱신 후 ack. `last_seq` 초기값은 설치 시점의 `buf[SEQ]`(세션 리셋 뒤 같은 버퍼를 재사용해도
    이전 세션의 재전송이 새 세션을 끊지 않는다). `ack`/`seq`가 없으면 번호·ack 없이 동작한다.
@@ -82,15 +92,25 @@ RD-007 시점의 시그니처는 `install(console, ack, seq)`(세 인자 필수,
   `poll`)부터 안쪽 전부**를 자르고 그 앞에 낀 `webloop.py` 프레임(`run_until_complete`)도 뗀다.
   `IdleInterrupt`는 `KeyboardInterrupt` 한 줄로 만든다. 문자열에서 `File "<sigint-handler>"` 줄을 지우는
   방식보다 견고하다. 안쪽만 자르는 규칙은 연타에서 우리 프레임이 샜다(2/10 → 0/10).
-- 설치 가드(pyodide 내부 의존): ① `pyodide.webloop.run_sync` ② `pyodide.ffi.run_sync`
-  ③ `console.runcode`가 코루틴 함수 ④ `time.sleep.__wrapped__`가 원본 C 함수(`inspect.isbuiltin`)
-  ⑤ `pyodide_js.checkInterrupt` 호출 가능. 하나라도 다르면 해당 부분만 건너뛰고 `console.warn`.
-- 핸들러는 별도 namespace에서 `<sigint-handler>` 파일명으로 실행해 사용자 globals를 오염시키지 않는다.
+- 설치 가드(pyodide 내부 의존) 5종. 핸들러(`sigint-handler.py`)의 셋: ① `pyodide.webloop.run_sync`
+  ② `pyodide.ffi.run_sync` ③ `console.runcode`가 코루틴 함수. 조각(`sleep-slice.py`)의 둘:
+  ④ `time.sleep.__wrapped__`가 원본 C 함수(`inspect.isbuiltin`) ⑤ `pyodide_js.checkInterrupt` 호출 가능.
+  하나라도 다르면 **해당 부분만** 건너뛰고 `warn`(boot가 `console.warn`을 넣는다) — 핸들러 가드가 걸려도 바쁜
+  루프 중단과 조각은 살아 있고, 조각 가드가 걸려도 깨우기는 살아 있다.
 
-## 2.5 감시 타이머(`startInterruptWatch(buffer, interruptIdle, { atPrompt, tickMs = 20 })`)
+## 2.5 감시 타이머(`startInterruptWatch(deps)` → 중지 함수)
+- `deps` = `interruptIdle`·`atPrompt`·`hasPending`·`consume`·`discard`·`tickMs = 20`. `worker/`는 `protocol/`을
+  import하지 않으므로 버퍼가 아니라 클로저를 받는다(`boot.ts`가 넣는다): `hasPending` =
+  `hasPendingInterrupt(buffer)`(`Atomics.load(SIGNAL) === 2`), `consume` =
+  `consumeInterrupt(buffer)`(`compareExchange(2 → 0) === 2`이면 ack 후 `true`), `discard` =
+  `discardPendingInterrupt(buffer)`, `atPrompt`는 REPL 루프의 `setAtPrompt`가 갱신하는 값을 읽는다.
 - 이벤트 루프가 비는 구간(정지한 `run_sync`·`asyncio.run` 대기, top-level await 대기)에만 실제로 돈다.
-- 엿보기는 `Atomics.load(buf, SIGNAL) === 2`, 소비는 **깨웠을 때만** `compareExchange(2 → 0)`.
-  깨울 수 없으면 SIGINT를 남겨 재개한 사용자 스택의 폴링이 받게 한다. 소비 성공 시에만 ack.
+- 엿보기는 `hasPending()`, 소비는 **깨웠을 때만** `consume()`. 깨울 수 없으면 SIGINT를 남겨 재개한 사용자 스택의
+  폴링이 받게 한다. 소비 성공 시에만 ack.
+- `interruptIdle()`의 **반환값에는 경합이 있다**: SIGINT를 쓴 직후의 호출은 Python으로 들어가는 그 호출에서 폴링이
+  먼저 일어나 핸들러 규칙 ③이 깨우고, 바깥 호출은 깨울 것이 없어 거짓을 돌려줄 수 있다. 거짓이 "깨우지 못했다"를
+  뜻하지 않는다. 결과는 어느 경로든 같다(깨어나고 ack는 정확히 한 번) — `consume()`의 비교 교환이 중복 ack를
+  막는다. 깨어남은 경과 시간·화면으로, ack는 슬롯으로 본다.
 - **프롬프트 유휴 폐기**: `atPrompt`가 참인데 깨울 것 없이 남은 SIGINT는 대상 코드가 없는 낡은 눌림이라
   그 틱에서 버린다(2를 지웠을 때만 ack). 실행 중(`atPrompt` 거짓) 규칙은 위와 같다.
 - 타이머는 요청 번호를 확인하지 않는다(알려진 한계).
@@ -98,11 +118,13 @@ RD-007 시점의 시그니처는 `install(console, ack, seq)`(세 인자 필수,
 - REPL 루프 직전에 켜고, 루프가 끝나면(`exit()`) 끈다. 세션 리셋은 worker 교체라 함께 사라진다.
 
 ## 2.6 연결 순서와 시작 코드 보호
-- `connectInterrupts(pyodide, pyconsole, buffer, { ack, seq, discard })`가 유일한 진입점이다. `worker/`는
-  `protocol/`을 import하지 않으므로 세 함수는 `boot.ts`가 클로저로 넣는다(`stdin-callback.ts`와 같은 패턴).
-  부팅 순서에서 위치는 `createConsole` 뒤·`setStdin` 앞이고 `try` 안이라 실패하면 `loadFailed`다. **핸들러를 먼저 설치하고 그다음
-  `attachInterruptBuffer`**(= `discardPendingInterrupt` → `setInterruptBuffer`). 폴링은 연결 뒤에야
-  시작하므로 순서가 반대이면 그 사이(Node 3.5~6.6ms)의 눌림을 pyodide 기본 핸들러가 받아 시작 코드가 죽는다.
+- `connectInterrupts(pyodide, pyconsole, buffer, { ack, seq, discard, warn })` → `InterruptIdle`이 유일한
+  진입점이다. `worker/`는 `protocol/`을 import하지 않으므로 네 함수는 `boot.ts`가 클로저로 넣는다
+  (`stdin-callback.ts`와 같은 패턴). 부팅 순서에서 위치는 `createConsole`·`suppressWebLoopReraise` 뒤·`setStdin`
+  앞이고 `try` 안이라 실패하면 `loadFailed`다. 내부 순서는 **`installSleepSlice` → `installSigintHandler`(조각의
+  코드 객체를 `extraOwnCodes`로 넘긴다) → `discard()` → `setInterruptBuffer`**다. 폴링은 연결 뒤에야 시작하므로
+  연결이 먼저이면 그 사이(Node 3.5~6.6ms)의 눌림을 pyodide 기본 핸들러가 받아 시작 코드가 죽는다.
+  돌려주는 `interrupt_idle` proxy는 감시 타이머가 쓰고 세션 끝(`boot.ts`의 `finally`)에 `destroy()`한다.
 - REPL 루프는 `readLine`이 줄을 돌려준 직후, `runner.run` **전에** `discardPendingInterrupt(buffer)`로
   비운다(취소 `null`에도 적용). 읽는 동안이나 Enter 직후 쓴 SIGINT는 대상 코드가 없다(TRP-009).
 - 새 worker를 만들기 직전 main이 `interruptSender.cancel()` → `Atomics.store(buffer, SIGNAL, 0)` 순서로
@@ -135,8 +157,12 @@ RD-007 시점의 시그니처는 `install(console, ack, seq)`(세 인자 필수,
   콜백 안의 `KeyboardInterrupt`·`SystemExit`을 다시 던지지 않게 한다. 정상 중단·`input()` 취소·`exit()`가
   내던 `pageerror`(시행당 2, 2, 1건)가 0이 된다. 화면 트레이스백과 `exit()` 종료는 그대로.
 - pyodide private 속성이라 없으면 건너뛰고 `console.warn`. 세션당 1회.
-- 편차: Task 밖 콜백(`call_later` 등)에서 난 `KeyboardInterrupt`·`SystemExit`은 조용히 버려진다.
-- 이 억제 뒤 vitest의 `onUnhandledError` 필터 두 개는 제거했다(재보고 자체를 없앴으므로).
+- 편차: Task 밖 콜백(`call_later` 등)에서 난 `KeyboardInterrupt`·`SystemExit`은 조용히 버려진다
+  (`10-parity-deviations.md` 38).
+- 이 억제 뒤 `vitest.config.ts`의 `onUnhandledError` 필터(`PythonError` + 줄 시작 `SystemExit|KeyboardInterrupt`)를
+  실제로 제거했다. 억제 없이 필터만 떼면 스위트는 개별 시험이 다 통과해도 `Errors 210` + 종료코드 1이다(실측).
+  억제를 넣으면 `Errors 0`이다. 시험 파일이 자기 pyodide 인스턴스를 만들 때는 그 조립에도
+  `suppressWebLoopReraise`를 불러야 한다(`boot.ts`의 배선은 그 인스턴스에 닿지 않는다).
 
 ## 2.9 텍스트 시퀀스
 ```
@@ -158,9 +184,10 @@ main: 점검에서 ack 증가 확인 → 종료 (재전송 최대 10회)
 
 (C) 정지한 실행(time.sleep 밖의 await 대기)
 main: SEQ+=1 → SIGNAL=2
-worker: Python이 안 돌아 폴링 없음 → 20ms 감시 타이머가 Atomics.load===2 확인
-        interruptIdle() 호출 → 깨우기 성공 → compareExchange(2→0) 성공 → ACK+=1
+worker: Python이 안 돌아 폴링 없음 → 20ms 감시 타이머가 hasPending()(Atomics.load===2) 확인
+        interruptIdle() 호출 → 깨우기 성공 → consume()(compareExchange(2→0) 성공) → ACK+=1
         run_sync 래퍼 또는 콘솔 task 취소로 사용자 지점에서 중단
+        (깨울 것이 없으면 소비하지 않는다. atPrompt()이면 그 틱에서 discard()한다)
 
 (D) 입력줄(REPL 프롬프트) 취소 — 버퍼를 전혀 쓰지 않는다
 main: Ctrl+C → 활성 읽기가 있으므로 setCtrlCHandler는 불리지 않는다

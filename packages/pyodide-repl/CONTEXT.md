@@ -71,8 +71,23 @@ _Avoid_: 취소, 인터럽트(신호 자체를 가리킬 때만)
 사용자 코드가 실행 중이지만 Python이 돌지 않는 상태(`run_sync`·`asyncio.run`·top-level await 대기). SIGINT 폴링이 없어 감시 타이머가 깨운다.
 _Avoid_: idle(프롬프트 유휴와 혼동)
 
+**깨우기**:
+정지한 실행을 취소해 사용자 지점에서 `KeyboardInterrupt`가 나게 하는 것. Python `interrupt_idle()`(TS 타입 `InterruptIdle`)이 진입점이고 감시 타이머와 핸들러 규칙 ③이 부른다. 깨웠으면 참을 돌려주지만 **거짓이 "깨우지 못했다"를 뜻하지는 않는다**(폴링이 먼저 깨운 경우가 있다).
+_Avoid_: 인터럽트, 재개
+
+**`time.sleep` 조각**:
+`time.sleep`을 20ms 조각으로 나누고 조각마다 `checkInterrupt()`를 부르는 래퍼(`worker/sleep-slice.py`). 원본은 `time.sleep.__wrapped__`이고 JSPI 유무와 무관하게 항상 교체한다. 조각이 있으면 sleep 중에도 사용자 스택이 살아 있어 깨우기가 아니라 일반 중단 경로로 끊긴다.
+_Avoid_: 슬라이스 sleep, 청크
+
+**`IdleInterrupt`**:
+top-level await 대기를 깨울 때 콘솔 task를 끝내는 표지 예외(`Exception` 계열이라 webloop 재던짐 경로를 피한다). `formattraceback`이 `KeyboardInterrupt` 한 줄로 바꿔 보여 준다.
+
 **프롬프트 유휴**:
-REPL 읽기를 기다리며 사용자 코드가 없는 상태. 여기서 남은 SIGINT는 폐기한다.
+REPL 읽기를 기다리며 사용자 코드가 없는 상태(`ReplLoopDeps.setAtPrompt(true)` 구간). 여기서 남은 SIGINT는 폐기한다.
+
+**Python 소스**:
+worker가 pyodide에 넣는 Python 코드. TS 문자열이 아니라 `src/worker/*.py` 파일이고 `import SOURCE from "./x.py?raw"`로 가져온다(tsdown `load` 훅 + `src/py-modules.d.ts`). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 **`<…>` 꺾쇠 이름**을 쓴다 — 트레이스백에 새면 알아보기 위한 것이고, 절단은 문자열이 아니라 코드 객체로 한다.
+_Avoid_: 인라인 스크립트, 템플릿 문자열
 
 ### 인터럽트
 
@@ -95,7 +110,7 @@ _Avoid_: seq(코드 상수명으로만), 시퀀스 ID
 _Avoid_: 재시도
 
 **폐기**:
-대상 코드가 없는 SIGINT를 지우고 ack하는 것(실행 직전은 `worker/repl-loop.ts`, 버퍼 연결 직전은 `worker/interrupt-buffer.ts`, 프롬프트 유휴는 RD-009의 감시 타이머). 핸들러의 "`<console>` 프레임 없으면 버린다"도 같은 목적이다.
+대상 코드가 없는 SIGINT를 지우고 ack하는 것(실행 직전은 `worker/repl-loop.ts`, 버퍼 연결 직전은 `worker/interrupt-buffer.ts`, 프롬프트 유휴는 `worker/interrupt-watch.ts`의 감시 타이머). 핸들러의 "`<console>` 프레임 없으면 버린다"도 같은 목적이다.
 
 **송신기**:
 main의 눌림 전송·점검·재전송 상태기계(`protocol/interrupt-sender.ts`).
