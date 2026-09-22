@@ -7,8 +7,9 @@ import { Highlighter, IdentityHighlighter } from "./highlight";
 
 interface ActiveRead {
   prompt: string;
-  resolve: (input: string) => void;
+  resolve: (input: string | null) => void;
   reject: (e: unknown) => void;
+  cancelable: boolean;
 }
 
 type CheckHandler = (text: string) => boolean;
@@ -18,6 +19,11 @@ type PauseHandler = (resume: boolean) => void;
 export interface ReadlineOptions {
   /** false면 history를 localStorage에 저장·복원하지 않는다. 기본값은 true(원본 동작). */
   persist?: boolean;
+}
+
+export interface ReadOptions {
+  /** true면 활성 읽기 중 Ctrl+C가 읽기를 null로 끝낸다(줄 바꿈만, ^C·history 없음). 기본 false = 원본 동작. */
+  cancelable?: boolean;
 }
 
 export class Readline implements ITerminalAddon {
@@ -254,7 +260,20 @@ export class Readline implements ITerminalAddon {
    * @param prompt The prompt to use.
    * @returns A promise to be called when the input has been read.
    */
-  public read(prompt: string): Promise<string> {
+  public read(prompt: string): Promise<string>;
+  /**
+   * 취소 가능한 읽기. options.cancelable이 true면 Ctrl+C가 읽기를 null로 끝낸다.
+   *
+   * @param prompt 프롬프트.
+   * @param options 읽기 옵션.
+   * @returns 입력 한 줄 또는 취소를 뜻하는 null.
+   */
+  public read(prompt: string, options: ReadOptions): Promise<string | null>;
+  public read(
+    prompt: string,
+    options: ReadOptions = {}
+  ): Promise<string | null> {
+    const cancelable = options.cancelable === true;
     return new Promise((resolve, reject) => {
       if (this.term === undefined) {
         reject("addon is not active");
@@ -276,7 +295,7 @@ export class Readline implements ITerminalAddon {
           this.history
         );
         this.state.refresh();
-        this.activeRead = { prompt, resolve, reject };
+        this.activeRead = { prompt, resolve, reject, cancelable };
       });
     });
   }
@@ -359,6 +378,17 @@ export class Readline implements ITerminalAddon {
         }
         break;
       case InputType.CtrlC:
+        if (this.activeRead.cancelable) {
+          // 취소: Enter와 같은 순서로 줄을 확정하되 ^C를 찍지 않고 history에도 넣지 않는다.
+          this.state.moveCursorToEnd();
+          this.state.refreshUnhighlighted();
+          this.term?.write("\r\n");
+          // resolve 콜백이 동기로 다음 read()를 불러도 상태가 꼬이지 않게 먼저 비운다.
+          const cancelled = this.activeRead;
+          this.activeRead = undefined;
+          cancelled.resolve(null);
+          break;
+        }
         this.state.moveCursorToEnd();
         this.term?.write("^C\r\n");
         this.state = new State(

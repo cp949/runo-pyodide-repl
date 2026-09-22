@@ -1,0 +1,238 @@
+/**
+ * 취소 가능한 읽기(`read(prompt, { cancelable: true })`) 시험.
+ * Ctrl+C가 원본처럼 "`^C` + 같은 프롬프트 재그리기"로 끝나지 않고 읽기를 `null`로 끝내야 한다.
+ * 옵션을 주지 않으면 원본 동작이 그대로 남는지도 같이 고정한다.
+ */
+import { describe, expect, test } from "vitest";
+import { Readline } from "./readline";
+import { VTerm } from "./vterm";
+
+/** Readline이 읽는 xterm 멤버만 가진 시험용 터미널. write 콜백을 동기로 돌려 상태를 바로 읽는다. */
+class StubTerminal {
+  public cols: number;
+  public rows: number;
+  public options = { tabStopWidth: 8 } as { tabStopWidth?: number };
+  public buffer = {
+    active: {
+      get cursorY() {
+        return this.parent.vt.cursor()[0];
+      },
+      parent: null as unknown as StubTerminal,
+    },
+  };
+  public vt: VTerm;
+  private onDataHandlers: ((data: string) => void)[] = [];
+
+  constructor(cols: number, rows: number) {
+    this.cols = cols;
+    this.rows = rows;
+    this.vt = new VTerm(cols, rows);
+    this.buffer.active.parent = this;
+  }
+
+  onData(handler: (data: string) => void) {
+    this.onDataHandlers.push(handler);
+    return { dispose: () => {} };
+  }
+
+  onResize(_handler: (size: { cols: number; rows: number }) => void) {
+    return { dispose: () => {} };
+  }
+
+  attachCustomKeyEventHandler(_fn: (event: KeyboardEvent) => boolean) {
+    // 이 시험에서는 쓰지 않는다(Shift+Enter 취소는 코어 시험에서 본다).
+  }
+
+  write(text: string, callback?: () => void) {
+    this.vt.write(text);
+    if (callback) callback();
+  }
+
+  /** 키 입력 한 번을 흘린다. 여러 글자를 한 번에 넣으면 붙여넣기 경로로 가므로 한 글자씩 부른다. */
+  feed(data: string) {
+    for (const handler of this.onDataHandlers) handler(data);
+  }
+
+  /** 문자열을 한 글자씩 타이핑한다. */
+  type(text: string) {
+    for (const ch of text) this.feed(ch);
+  }
+}
+
+type Outcome =
+  | { state: "pending" }
+  | { state: "resolved"; value: unknown }
+  | { state: "rejected"; reason: unknown };
+
+/** promise의 현재 상태를 읽는 함수를 돌려준다. 끝나지 않는 읽기도 시험이 멈추지 않고 잡는다. */
+function observe(promise: Promise<unknown>): () => Outcome {
+  let outcome: Outcome = { state: "pending" };
+  promise.then(
+    (value) => {
+      outcome = { state: "resolved", value };
+    },
+    (reason) => {
+      outcome = { state: "rejected", reason };
+    },
+  );
+  return () => outcome;
+}
+
+/** 대기 중인 마이크로태스크를 지나가게 한다. */
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function createSession(cols = 20, rows = 8) {
+  const term = new StubTerminal(cols, rows);
+  const readline = new Readline({ persist: false });
+  readline.activate(term as unknown as Parameters<Readline["activate"]>[0]);
+  return { term, readline };
+}
+
+const CTRL_C = "\x03";
+const ENTER = "\r";
+const ARROW_UP = "\x1b[A";
+const ARROW_LEFT = "\x1b[D";
+
+describe("cancelable 읽기의 Ctrl+C", () => {
+  test("읽기를 null로 끝내고 커서를 입력 아래 줄로 내리며 ^C를 찍지 않는다", async () => {
+    const { term, readline } = createSession();
+    const outcome = observe(readline.read("> ", { cancelable: true }));
+    term.type("abc");
+
+    term.feed(CTRL_C);
+    await tick();
+
+    expect(outcome()).toEqual({ state: "resolved", value: null });
+    expect(term.vt.screen()).toBe("> abc");
+    expect(term.vt.screen()).not.toContain("^C");
+    expect(term.vt.cursor()).toEqual([1, 0]);
+  });
+
+  test("커서를 입력 중간에 두고 눌러도 개행은 감긴 입력의 끝 뒤에 들어간다", async () => {
+    // cols 8: "> " + "abcdefgh"가 두 행으로 감긴다.
+    const { term, readline } = createSession(8);
+    const outcome = observe(readline.read("> ", { cancelable: true }));
+    term.type("abcdefgh");
+    term.feed(ARROW_LEFT);
+    term.feed(ARROW_LEFT);
+    term.feed(ARROW_LEFT);
+
+    term.feed(CTRL_C);
+    await tick();
+
+    expect(outcome()).toEqual({ state: "resolved", value: null });
+    expect(term.vt.screen()).toBe("> abcdef\ngh");
+    expect(term.vt.cursor()).toEqual([2, 0]);
+  });
+
+  test("취소 뒤 다음 읽기 전의 키는 버려지고 Ctrl+C는 ctrlCHandler로 간다", async () => {
+    const { term, readline } = createSession();
+    let ctrlCCount = 0;
+    readline.setCtrlCHandler(() => {
+      ctrlCCount += 1;
+    });
+    const outcome = observe(readline.read("> ", { cancelable: true }));
+    term.type("abc");
+    term.feed(CTRL_C);
+    await tick();
+    const screenAfterCancel = term.vt.screen();
+
+    term.type("x");
+    term.feed(CTRL_C);
+
+    expect(outcome()).toEqual({ state: "resolved", value: null });
+    expect(term.vt.screen()).toBe(screenAfterCancel);
+    expect(term.vt.screen()).not.toContain("x");
+    expect(ctrlCCount).toBe(1);
+  });
+
+  test("취소한 입력은 history에 남지 않는다", async () => {
+    const { term, readline } = createSession();
+    const outcome = observe(readline.read("> ", { cancelable: true }));
+    term.type("abc");
+    term.feed(CTRL_C);
+    await tick();
+
+    readline.read("> ", { cancelable: true });
+    term.feed(ARROW_UP);
+
+    expect(outcome()).toEqual({ state: "resolved", value: null });
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("Enter로 제출한 줄만 history에 남아 취소한 줄 대신 돌아온다", async () => {
+    const { term, readline } = createSession();
+    const submitted = observe(readline.read("> ", { cancelable: true }));
+    term.type("keep");
+    term.feed(ENTER);
+    await tick();
+    const cancelled = observe(readline.read("> ", { cancelable: true }));
+    term.type("drop");
+    term.feed(CTRL_C);
+    await tick();
+
+    readline.read("> ", { cancelable: true });
+    term.feed(ARROW_UP);
+    const first = readline.getLine();
+    term.feed(ARROW_UP);
+
+    expect(submitted()).toEqual({ state: "resolved", value: "keep" });
+    expect(cancelled()).toEqual({ state: "resolved", value: null });
+    expect(first).toBe("keep");
+    // history에 항목이 하나뿐이라 한 번 더 올라가도 그대로다.
+    expect(readline.getLine()).toBe("keep");
+  });
+
+  test("Enter는 그대로 문자열로 이행한다", async () => {
+    const { term, readline } = createSession();
+    const outcome = observe(readline.read("> ", { cancelable: true }));
+
+    term.type("abc");
+    term.feed(ENTER);
+    await tick();
+
+    expect(outcome()).toEqual({ state: "resolved", value: "abc" });
+  });
+
+  test("취소되지 않은 채 dispose되면 여전히 Error로 reject된다", async () => {
+    const { term, readline } = createSession();
+    const outcome = observe(readline.read("> ", { cancelable: true }));
+    term.type("abc");
+
+    readline.dispose();
+    await tick();
+
+    expect(outcome()).toEqual({ state: "rejected", reason: expect.any(Error) });
+  });
+});
+
+describe.each([
+  { label: "옵션을 주지 않으면", options: undefined },
+  { label: "cancelable: false면", options: { cancelable: false } },
+])("$label 원본 동작이 그대로다", ({ options }) => {
+  test("^C를 찍고 같은 프롬프트를 다시 그리며 읽기는 끝나지 않는다", async () => {
+    const { term, readline } = createSession();
+    const outcome = observe(
+      options === undefined
+        ? readline.read("> ")
+        : readline.read("> ", options),
+    );
+    term.type("abc");
+
+    term.feed(CTRL_C);
+    await tick();
+
+    expect(outcome()).toEqual({ state: "pending" });
+    // screen()은 행 끝 공백을 잘라내므로 다시 그린 프롬프트는 "> "가 아니라 ">"로 보인다.
+    expect(term.vt.screen()).toBe("> abc^C\n>");
+
+    term.type("1");
+    term.feed(ENTER);
+    await tick();
+
+    expect(outcome()).toEqual({ state: "resolved", value: "1" });
+    expect(term.vt.screen()).toBe("> abc^C\n> 1");
+  });
+});
