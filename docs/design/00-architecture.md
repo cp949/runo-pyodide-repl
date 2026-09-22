@@ -133,7 +133,8 @@ main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 �
 
 ```text
 packages/pyodide-repl/src/
-  index.ts                 createRepl (main 쪽 조립)
+  index.ts                 createRepl (main 쪽 조립, readline·interruptBuffer·sender·Ctrl+C 핸들러·dispose만)
+  session.ts               세션 1개의 자원·게이트. reset()(RD-010)이 통째로 교체하는 단위      ← 08-session.md
   worker.ts                runReplWorker (프레임 검증 → CDN 로더를 주입해 boot 호출)
   protocol/
     rpc.ts                 MessagePort 위 요청/응답/알림          ← 01-protocols.md 1절
