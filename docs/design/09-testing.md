@@ -9,7 +9,8 @@
 `sigint-handler.test.ts`, `sigint-handler-idle.test.ts`, `sigint-handler-sleep-slice.test.ts`,
 `sigint-handler-nojspi.test.ts`(Node에서 `WebAssembly.Suspending`을 지워 JSPI 없는 경로),
 `interrupt-buffer.test.ts`, `interrupt-connect.test.ts`, `webloop-reraise.test.ts`,
-`submission-runner.test.ts`, `multiline.test.ts`, `stdin-callback.test.ts`, `top-level-await.test.ts`,
+`submission-runner.test.ts`, `multiline.test.ts`, `stdin-callback.test.ts`,
+`top-level-await.test.ts`(콘솔 플래그 토글 + RD-012 `asyncio.run(main())` TLA 꺼짐/켜짐 둘 다 완료),
 `terminal-sinks.test.ts`(실제 `PyodideConsole`·sink·`Readline`의 터미널 바이트),
 `complete-source.test.ts`, `import-gate.test.ts`, `tab-completion.test.ts`,
 `tab-completion-flow.test.ts`(main·worker 루프·실제 후보 계산 통합), `auto-indent-parity.test.ts`

@@ -145,7 +145,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 
 인계(RD-010): 새 worker를 만들기 직전 `sender.cancel()` → `Atomics.store(buffer, SIGNAL, 0)` 순서로 치운다. `index.ts`의 `interruptBuffer`는 세션마다 새로 만들지 않고 상수로 잡혀 있으므로 리셋이 재사용한다(핸들러의 `last_seq` 초기값이 이전 세션 번호를 이어받아 재전송을 무시한다). `endSession()`이 닫은 게이트(`alive`)를 리셋에서 다시 참으로 만든다.
 
-인계(RD-012): 브라우저 연타 매트릭스에 TLA 켜짐 셀을 더한다(RD-007은 node 시험에서만 봤다). `createRepl({ topLevelAwait })`와 데모 토글이 들어온 뒤다.
+인계(RD-012, 완료): 브라우저 연타 매트릭스에 TLA 켜짐 셀을 더한다(RD-007은 node 시험에서만 봤다). `createRepl({ topLevelAwait })`와 데모 토글이 들어온 뒤다 — RD-012가 `tla-burst`(0ms 30회)로 채웠다(20/20, `sleep-await-check.mjs` `burst` 판정).
 
 인계(RD-015): Tab 취소도 `sender.send()`를 쓴다.
 
@@ -221,7 +221,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 
 인계(RD-010): 세션 리셋은 worker 교체이므로 감시 타이머(`setInterval`)와 `interruptIdle` proxy는 worker와 함께 사라진다 — 리셋 경로에 별도 정리를 넣을 필요가 없다(`boot.ts`의 `finally`는 `exit()`로 루프가 끝나는 경우를 위한 것이다). 리셋 순서는 그대로 `sender.cancel()` → `Atomics.store(buffer, SIGNAL, 0)` → `terminate()`를 유지한다: 감시 타이머가 죽은 뒤 남은 SIGINT 2는 새 worker의 연결 단계가 폐기한다.
 
-인계(RD-012): 브라우저 TLA 3셀(`await5`·`awaitloop`·`tla-sleep-0.1`)은 데모에 TLA 스위치가 없어 node 시험(`sigint-handler-idle.test.ts`의 TLA 4건, `createConsole(..., { topLevelAwait: true })`)으로 **대체 완료**했고, 브라우저 12조합은 비TLA 9셀 + 대체 3셀(`arun-loop`·`runsync-sleep`·`sleep-burst`)로 채웠다. 데모에 TLA 스위치가 생기면 `sleep-await-check.mjs`에 TLA 셀을 추가해 같은 판정으로 돌린다.
+인계(RD-012, 완료): 브라우저 TLA 3셀(`await5`·`awaitloop`·`tla-sleep-0.1`)은 데모에 TLA 스위치가 없어 node 시험(`sigint-handler-idle.test.ts`의 TLA 4건, `createConsole(..., { topLevelAwait: true })`)으로 **대체 완료**했고, 브라우저 12조합은 비TLA 9셀 + 대체 3셀(`arun-loop`·`runsync-sleep`·`sleep-burst`)로 채웠다. 데모에 TLA 스위치가 생기면 `sleep-await-check.mjs`에 TLA 셀을 추가해 같은 판정으로 돌린다 — RD-012가 `tla: true` 셀 4개(`await5`·`awaitloop`·`tla-sleep-0.1`·`tla-burst`, 각 N=20 전부 통과)로 채웠다.
 
 인계(RD-018): RD-009 검증 스크립트는 `_works/_completed/20260922-09-rd-009-idle-ctrl-c/verify/`에 있다 — `lib.mjs`(RD-008 하니스 + `finish()`의 `ok` 판정을 **전체** `pageErrors` 0으로), `sleep-await-check.mjs`(12조합 × N=20, `ONLY=<셀,…>`, 페이지 내부 시계 측정), `run-browser.sh`, `positive-controls.py`(3건), `mutate-safe.mjs`, node 통계는 `verify/node/`의 `sleep-stats.mjs`·`run-n30.sh`·`py-raw-hook.mjs`. 결과는 같은 폴더 `verify/results/`(`sleep-await-dev.json`이 canonical, `node-sleep-{jspi,nojspi}.json`, 재실행 4종 로그, `positive-control-{1,2,3}.log`, preview 2종). **기준선 문구 갱신**: 이전 항목들이 쓰던 "대상 `pageerror`(재보고 제외) 0"은 더 이상 맞지 않다 — 재보고 자체가 없어졌으므로 모든 브라우저 확인의 기준선은 **총 `pageerror` 0**이다. 브라우저 지연을 재는 확인은 Node 쪽 DOM 폴링이 아니라 페이지 내부 시계를 쓴다(`sleep-await-check.mjs` 참고, `docs/traps/TRP-022`).
 
@@ -345,22 +345,26 @@ PyCF_ONLY_AST)`)로 top-level 문장 경계를 구하고 얻은 AST를 2차 `com
 
 ### RD-012 — top-level await 옵션(기본 꺼짐)
 
-상태: 대기 · 이전: RD-018 · 설계: `02-console-core.md` 5.4
+상태: 완료 · 이전: RD-018 · 설계: `02-console-core.md` 5.4
 
 시나리오: 기본 상태에서 `await asyncio.sleep(1)`은 `SyntaxError: 'await' outside function`. 스위치를 켜면 세션이 리셋되고 바로 실행된다. 새로고침하면 꺼짐.
 
-완료 기준: 위 시나리오. `setTopLevelAwait`가 TLA 비트만 토글하고(`0x6200` 확인) 콘솔 생성 직후 한 번만 적용된다(node + 실제 pyodide) — (RD-004에서 완료: `worker/top-level-await.ts`가 초기화 프레임의 `topLevelAwait`를 적용한다. 프레임 값은 아직 항상 `false`). 이 RD에 남는 범위는 `createRepl`의 `topLevelAwait` 옵션, 데모 스위치, 리셋 시 새 프레임에 값을 싣는 연동이다. 꺼짐/켜짐 모두 `asyncio.run(main())` 동작. 한 줄/블록/`input()`/Ctrl+C 기존 동작 유지.
+완료 기준: 위 시나리오. `setTopLevelAwait`가 TLA 비트만 토글하고(`0x6200` 확인) 콘솔 생성 직후 한 번만 적용된다(node + 실제 pyodide) — (RD-004에서 완료: `worker/top-level-await.ts`가 초기화 프레임의 `topLevelAwait`를 적용한다). `createRepl`의 `topLevelAwait` 옵션, 데모 스위치, 리셋 시 새 프레임에 값을 싣는 연동. 꺼짐/켜짐 모두 `asyncio.run(main())` 동작. 한 줄/블록/`input()`/Ctrl+C 기존 동작 유지.
 
-브라우저 TLA 셀(RD-007·RD-009가 node 시험으로 대체하고 이 RD에 넘긴 것. node 결과와 브라우저 결과를 따로 표기한다): RD-009 `sleep-await-check.mjs`에 `tla: true` 셀 4개를 더해 각 N=20, 복귀 중앙값 30ms 이내(페이지 내부 시계, TRP-022), 총 `pageerror` 0.
+결과: `ReplOptions.topLevelAwait?`·`reset(options?: { topLevelAwait? })`(sticky, boolean 명시 때만 바꿈) + `index.test.ts` 6건(①③④ 구현 전 RED 확인) + `top-level-await.test.ts`의 `asyncio.run(main())` 꺼짐/켜짐 node 시험 2건. 데모에 `<label><input type="checkbox" data-testid="top-level-await" />top-level await</label>` 추가, 변경 시 양방향 즉시 `reset({ topLevelAwait })`. 브라우저 절 5개(`tla-check.mjs` `scenario`·`smoke`·`arun`·`toggle-off`·`sticky`, `not-isolated`는 비격리 서버 구성 비용 대비 이 RD 범위에 비해 커서 생략) dev 16/16 + preview(`scenario`만) 4/4, 총 `pageerror` 0(`sticky` 절의 의도적 `forced` 1건은 별도 판정). 양성 대조 2건. 루트 4종 통과.
 
-| 셀 | 프로그램(TLA 켜짐) | 판정 형식 |
-| --- | --- | --- |
-| `await5` | `await asyncio.sleep(5)` | `line`: 트레이스백 0 + `KeyboardInterrupt` 한 줄(콘솔 task 취소, `10-parity-deviations.md` 1절 끝 "편차 아님" 문단) |
-| `awaitloop` | `while True: await asyncio.sleep(0.1)` | `either`: 눌림이 await 중이면 `line`, 사이의 동기 구간이면 `tb1` |
-| `tla-sleep-0.1` | `while True: time.sleep(0.1)` | `tb1`: 트레이스백 1개 + 우리 프레임 0 |
-| `tla-burst` | `while True: pass` 0ms 30회 연타 | RD-007 `burst-matrix.mjs` 규칙(프롬프트 복귀, `pageerror` 0) |
+브라우저 TLA 셀(RD-007·RD-009가 node 시험으로 대체하고 이 RD에 넘긴 것. node 결과와 브라우저 결과를 병기한다): `sleep-await-check.mjs`(RD-009 사본)에 `tla: true` 셀 4개를 더해 각 N=20 전부 통과, 총 `pageerror` 0.
 
-`sleep-await-check.mjs`에는 `tb1`·`catch3`·`burst` 판정만 있으므로 `line`·`either`를 추가한다. 코루틴 안 동기 `time.sleep`(편차 28)은 이 셀들과 무관하다(RD-009a).
+| 셀 | 프로그램(TLA 켜짐) | 판정 형식 | node(RD-009 대체) | 브라우저(RD-012, N=20) |
+| --- | --- | --- | --- | --- |
+| `await5` | `await asyncio.sleep(5)` | `line`: 트레이스백 0 + `KeyboardInterrupt` 한 줄(콘솔 task 취소, `10-parity-deviations.md` 1절 끝 "편차 아님" 문단) | `sigint-handler-idle.test.ts` TLA 4건 중 1건 | 20/20, 중앙값 27.28ms |
+| `awaitloop` | `while True: await asyncio.sleep(0.1)` | `either`: `line` 규칙 또는 `tb1` 규칙 중 하나(가지 비율은 판정 안 함, 기록만) | 〃 | 20/20(전부 `line` 가지), 중앙값 25.03ms |
+| `tla-sleep-0.1` | `while True: time.sleep(0.1)` | `tb1`: 트레이스백 1개 + 우리 프레임 0 | 〃 | 20/20, 중앙값 24.58ms |
+| `tla-burst` | `while True: pass` 0ms 30회 연타 | `burst`(`sleep-await-check.mjs` 판정): 트레이스백 정확히 1개 + `print('ok')` 복귀(`pageerror` 0) — RD-007 `burst-matrix.mjs`의 프롬프트 복귀 판정(`CRASH>HANG>DIRTY>OK`)보다 엄격하다 | (해당 없음, 브라우저 전용 신규 셀) | 20/20, 중앙값 57.88ms(허용 편차 — 30회 연타라 RD-009 `sleep-burst`의 5회 연타 30.23ms보다 "첫 눌림 기준" 측정 구간이 길다, 사용자 확인) |
+
+`sleep-await-check.mjs`에는 `tb1`·`catch3`·`burst` 판정만 있었으므로 이 RD가 `line`·`either`를 추가했다. 코루틴 안 동기 `time.sleep`(편차 28)은 이 셀들과 무관하다(RD-009a).
+
+인계(RD-018): 확인 스크립트는 `_works/_completed/20260923-13-rd-012-top-level-await/verify/`에 있다 — `tla-check.mjs`(`scenario`·`smoke`·`arun`·`toggle-off`·`sticky` 절, `not-isolated`는 생략), `sleep-await-check.mjs`(RD-009 사본 + TLA 셀 4개), `results/`(`tla-dev.json`·`sleep-await-dev.json`), `positive-controls.md`(2건). `apps/demo/e2e/lib.mjs`의 `waitStatus`·`setTopLevelAwait`는 이미 저장소에 있어 추가 이관이 필요 없다.
 
 ### RD-013 — 자동 들여쓰기
 

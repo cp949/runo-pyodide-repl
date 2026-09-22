@@ -136,6 +136,11 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
   `_IncompleteInputError`가 나고 buffer가 비워진다). `=== true`일 때만 ON으로 취급한다.
 - ON은 컴파일 플래그만 켠다. `asyncio` 선주입·배너 변경 등 `python -m asyncio`의 나머지는 흉내내지 않는다.
   설정은 저장하지 않아 페이지를 다시 열면 OFF다.
+- **main 쪽 연동**(RD-012, `00-architecture.md` 4.1): `createRepl({ topLevelAwait })`와 `reset({ topLevelAwait })`가
+  이 값을 초기화 프레임에 싣는다. `reset()`은 `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면
+  마지막으로 적용한 값을 그대로 유지한다(sticky, 핸들이 보관 — 값을 바꾸면 워커를 새로 만들어야 하므로 위 "적용
+  시점" 제약과 같은 이유다). 데모(`ReplView.tsx`)의 top-level await 체크박스는 바뀔 때마다 즉시 무조건
+  `reset({ topLevelAwait })`를 부른다(양방향, "스위치 변경 = 세션 리셋"). 터미널·배너에는 표시하지 않는다.
 
 ## 5.5 `exit()`/`quit()` 감지
 - `await_fut`가 `SystemExit`을 잡아 구분값으로 돌려주고 `run()`이 `{ exit: true }`로 전한다.
