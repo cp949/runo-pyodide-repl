@@ -15,3 +15,8 @@
   (`apps/demo/eslint.config.js`의 `ignores: ["e2e/**"]`, `tsconfig.json`의 `include`가 `src`뿐).
 - `_works/<yyyyMMdd>-NN-<작업>/verify/*.mjs`: RD별 확인 스크립트. 저장소에 커밋되지 않는다
   (`_works/`는 `.gitignore` 대상).
+
+## 도우미(RD-012)
+
+- `waitStatus(values, label, timeout)`: `[data-testid=status]` 텍스트가 `values` 중 하나가 될 때까지 기다린다.
+- `setTopLevelAwait(on)`: top-level await 체크박스를 `on`에 맞춘다(같으면 무동작, 다르면 클릭 뒤 리셋 완료까지 기다린다).

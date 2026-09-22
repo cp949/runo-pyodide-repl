@@ -161,6 +161,17 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     );
   }
 
+  /** `[data-testid=status]` 텍스트. */
+  const statusText = () => page.locator('[data-testid="status"]').textContent();
+  /** `statusText()`가 `values` 중 하나가 될 때까지 기다린다(RD-012). */
+  async function waitStatus(values, label, timeoutMs = 30000) {
+    await waitFor(
+      async () => values.includes(await statusText()),
+      label ?? `status가 ${show(values)} 중 하나`,
+      timeoutMs,
+    );
+  }
+
   const focus = () => page.evaluate(() => document.querySelector(".xterm-helper-textarea")?.focus());
   /**
    * 텍스트를 입력하고 커서 행이 그 끝 글자로 끝나도록 그려질 때까지 기다린다. xterm은 키를 비동기로 그려서, 그리기 전에
@@ -243,6 +254,24 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     await press("Control+l");
     await waitFor(async () => (await rows())[0] === ">>>" && (await cursorRow()) === 0, "Ctrl+L 뒤 첫 행의 >>>", 5000);
   }
+  /**
+   * top-level await 체크박스를 `on`에 맞춘다(RD-012). 이미 같으면 무동작. 다르면 클릭 → `reset()`이 동기로
+   * 발행하는 `loading` → `ready`/`load-failed` → 새 프롬프트까지 기다린다. 클릭이 xterm의 숨은 textarea에서
+   * 포커스를 가져가므로 끝에 되돌린다. `load-failed`면 던진다.
+   */
+  async function setTopLevelAwait(on) {
+    const checked = await page.locator('[data-testid="top-level-await"]').isChecked();
+    if (checked === on) return;
+    await page.click('[data-testid="top-level-await"]');
+    await waitStatus(["loading"], "top-level await 전환: loading 상태");
+    await waitStatus(["ready", "load-failed"], "top-level await 전환: ready/load-failed 상태");
+    await focus();
+    if ((await statusText()) === "load-failed") {
+      throw new Error("top-level await 전환 뒤 load-failed");
+    }
+    await waitPrompt(">>>", 30000);
+  }
+
   /** 빈 Enter로 프롬프트를 `>>>`로 되돌린다(꼬리가 든 `t>>>` 뒤 다음 시나리오가 깨끗하게 시작하게 한다). */
   async function resetPrompt() {
     await enter();
@@ -451,6 +480,9 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     waitFor,
     waitPrompt,
     waitLastEndsWith,
+    statusText,
+    waitStatus,
+    setTopLevelAwait,
     waitPromptTail,
     startBlockLine,
     ctrlC,

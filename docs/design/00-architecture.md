@@ -196,6 +196,7 @@ RD-010 시점의 데모(`ReplView.tsx`)는 `createRepl({ terminal, createWorker,
 
 - `<output data-testid="status">`: 상태 텍스트, 상시.
 - `<button data-testid="reset" disabled={!isolated}>`: `handle.reset()`을 부른다. `isolated`는 `globalThis.crossOriginIsolated === true`(모듈 최상위 상수, RD-010 확정 8). 상시 렌더한다.
+- `<label><input type="checkbox" data-testid="top-level-await" disabled={!isolated} /> top-level await</label>`(RD-012): React state(`useState(false)`, 저장 없음, 새로고침하면 항상 꺼짐)가 소유하고 `onChange`가 즉시 `handle.reset({ topLevelAwait: checked })`를 부른다(양방향 모두, 규칙은 "스위치 변경 = 세션 리셋"). 터미널·배너에는 표시하지 않는다. 리셋 버튼·크래시 재시작은 무인자라 코어가 보관한 마지막 값을 그대로 유지한다(sticky).
 - `status === "terminated"` → `<div role="alert" data-testid="terminated">Python session terminated. "세션 리셋" 버튼으로 새 세션을 시작하세요.</div>`.
 - `status === "crashed"` → `<div role="alert" data-testid="crashed">worker가 예기치 않게 종료됐습니다: {crashMessage} <button data-testid="restart">재시작</button></div>`. `restart`는 `reset()`을 부르고 `crashMessage` state를 비운다 — 리셋이 `loading`을 동기 발행하므로 Alert는 상태 전이로 자연히 사라진다.
 - 터미널(`<div data-testid="terminal">`)은 `crashed` 중에도 계속 렌더한다(이전 구현과 다른 선택: 화면에 남은 출력이 단서가 된다).

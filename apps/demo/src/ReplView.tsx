@@ -13,13 +13,16 @@ const isolated = globalThis.crossOriginIsolated === true;
  * 크기는 xterm 기본값(80×24)으로 고정한다(FitAddon 없음). 세션 상태는 코어의 `onStatus`를 그대로 보여준다.
  * `exit()`로 세션이 끝나면(`terminated`) 종료 Alert가 뜬다. worker가 죽으면(`crashed`) 크래시 Alert와
  * 재시작 버튼이 뜬다. 리셋 버튼은 상시 있고 `reset()`을 부른다(RD-010). 터미널은 크래시 중에도 렌더한다 —
- * 화면의 출력이 단서다.
+ * 화면의 출력이 단서다. top-level await 체크박스는 바뀔 때마다 즉시 `reset({ topLevelAwait })`를 부른다
+ * (RD-012). 저장하지 않으므로 새로고침하면 항상 꺼짐이다. 리셋 버튼·크래시 재시작은 무인자라 마지막
+ * 값을 유지한다(sticky, 코어가 보관).
  */
 export function ReplView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const replRef = useRef<ReplHandle | null>(null);
   const [status, setStatus] = useState<ReplStatus>("loading");
   const [crashMessage, setCrashMessage] = useState<string | null>(null);
+  const [topLevelAwait, setTopLevelAwait] = useState(false);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -57,6 +60,20 @@ export function ReplView() {
       >
         세션 리셋
       </button>
+      <label>
+        <input
+          type="checkbox"
+          data-testid="top-level-await"
+          checked={topLevelAwait}
+          disabled={!isolated}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setTopLevelAwait(on);
+            replRef.current?.reset({ topLevelAwait: on });
+          }}
+        />{" "}
+        top-level await
+      </label>
       {status === "terminated" && (
         <div role="alert" data-testid="terminated">
           Python session terminated. "세션 리셋" 버튼으로 새 세션을 시작하세요.
