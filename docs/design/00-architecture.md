@@ -188,7 +188,17 @@ Python 소스는 별도 `.py` 파일이 아니라 같은 이름 `.ts` 안의 템
 
 ### 4.3 apps/demo
 
-React 19 + Vite 8. `ReplView` 컴포넌트가 `createRepl`을 마운트 시 1회 호출하고, 상태(`crossOriginIsolated` Chip, `ready` Chip, 세션 리셋 버튼, top-level await 스위치, 종료·크래시 Alert)만 React state로 둔다. StrictMode 이중 마운트에서 `dispose()`가 두 번 불려도 안전해야 한다(`08-session.md` 8.2). UI 라이브러리는 정하지 않았다(이전 구현은 MUI v9였고, 이 데모에는 필수가 아니다). RD-005 시점의 데모는 `createRepl({ terminal, createWorker, onStatus })`를 부르고 상태를 `<output data-testid="status">` 텍스트로 보여 준다. 상태가 `terminated`이면 그 아래에 `<p data-testid="terminated">Python session terminated.</p>`를 보이고 터미널에는 아무것도 쓰지 않는다(Chip·버튼·스위치·Alert는 후속 RD).
+React 19 + Vite 8. `ReplView` 컴포넌트가 `createRepl`을 마운트 시 1회 호출하고, 상태(`crossOriginIsolated` Chip, `ready` Chip, 세션 리셋 버튼, top-level await 스위치, 종료·크래시 Alert)만 React state로 둔다. StrictMode 이중 마운트에서 `dispose()`가 두 번 불려도 안전해야 한다(`08-session.md` 8.2). UI 라이브러리는 정하지 않았다(이전 구현은 MUI v9였고, 이 데모에는 필수가 아니다).
+
+RD-010 시점의 데모(`ReplView.tsx`)는 `createRepl({ terminal, createWorker, onStatus: setStatus, onCrash: setCrashMessage })`를 부르고 핸들을 `useRef`에 보관한다. plain 요소만 쓴다(라이브러리 없음):
+
+- `<output data-testid="status">`: 상태 텍스트, 상시.
+- `<button data-testid="reset" disabled={!isolated}>`: `handle.reset()`을 부른다. `isolated`는 `globalThis.crossOriginIsolated === true`(모듈 최상위 상수, RD-010 확정 8). 상시 렌더한다.
+- `status === "terminated"` → `<div role="alert" data-testid="terminated">Python session terminated. "세션 리셋" 버튼으로 새 세션을 시작하세요.</div>`.
+- `status === "crashed"` → `<div role="alert" data-testid="crashed">worker가 예기치 않게 종료됐습니다: {crashMessage} <button data-testid="restart">재시작</button></div>`. `restart`는 `reset()`을 부르고 `crashMessage` state를 비운다 — 리셋이 `loading`을 동기 발행하므로 Alert는 상태 전이로 자연히 사라진다.
+- 터미널(`<div data-testid="terminal">`)은 `crashed` 중에도 계속 렌더한다(이전 구현과 다른 선택: 화면에 남은 출력이 단서가 된다).
+
+RD-005 시점에는 `onStatus`만 있었고 `terminated`도 `<p data-testid="terminated">Python session terminated.</p>`(버튼 없음)였다 — 위가 RD-010이 대체한 최종 형태다.
 
 ### 4.4 워크스페이스 빌드 규칙
 

@@ -251,7 +251,7 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 
 ### RD-010 — 세션 리셋, 종료 정책, 크래시 재시작 UI
 
-상태: 대기 · 이전: RD-014, RD-009(재시작), RD-008(Chip) · 설계: `08-session.md`, `00-architecture.md` 3.4·4.3
+상태: 완료 · 이전: RD-014, RD-009(재시작), RD-008(Chip) · 설계: `08-session.md`, `00-architecture.md` 3.4·4.3
 
 시나리오: `세션 리셋` 버튼 → 변수·import가 사라지고 화면 스크롤은 유지, 안내 줄(청록) 뒤 새 배너. `exit()` 뒤 Alert가 뜨고 리셋으로 복구. worker가 죽으면(강제 `throw`) 재시작 버튼이 뜬다. Ctrl+L은 화면만 지우고 Python 상태는 그대로다. 리셋 직전 눌린 Ctrl+C가 새 세션의 시작 코드를 죽이지 않는다.
 
@@ -264,6 +264,46 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 인계(RD-006): 세션 리셋 뒤 프롬프트가 이전 꼬리를 물려받지 않는 성질은 `stdin-reader.test.ts`의 "새 sink 세트는 빈 프롬프트로 시작한다"(단위)까지만 본다. 브라우저 확인은 RD-006b의 J1·J2·J3(J1·J2는 취소도 필요해 RD-008 뒤)·AC1이다. 리셋은 세션마다 `createStdinMailbox`·sink 세트·`createInputReader`·`createReadGuard`를 새로 만들어야 옛 세션의 stdin 읽기·가드 추적이 새 세션에 끼어들지 않는다. `readInput` 핸들러의 `disposed`는 핸들 단위라 리셋이 핸들을 유지하면 옛 worker가 죽었다는 세션 단위 신호가 필요하다(죽은 worker에 대한 `mailbox.fail()`의 `untilIdle`은 영영 안 풀린다).
 
 인계(RD-008): 취소가 들어왔으니 세션 리셋 뒤 취소 4건(RD-012b J1·J2, RD-012c J1·J2)을 이 RD가 브라우저로 본다 — 스크립트는 `prompt-cancel-check.mjs`·`input-cancel-check.mjs`에 확인을 추가하면 된다(`skipped-ids.md` 3절). **게이트 항 `cancelSettling`을 리셋에서 `false`로 초기화해야 한다**: 옛 세션의 취소 응답으로 참이 된 값이 남으면 새 세션의 첫 Ctrl+C가 에코도 전송도 되지 않는다. `alive`·`readLinePending`·`inputReadsPending`과 같은 자리에서 초기화한다. 새 리더·가드에도 `cancelable` 전달을 유지한다(`read(prompt, cancelable)`·`read(cancelable)`).
+
+결과: 브라우저(dev) 25/25 PASS — `reset`(안내 줄·배너·프롬프트 순서, 안내 줄 청록, 스크롤 유지, 변수·import
+소실) · `cursor`(TRP-006 두 분기 중 `cursorX!==0`만 브라우저로 확인, `cursorX===0`은 `index.test.ts` 단위
+시험 전용 — 아래 "멈추는 지점 해소" 참고) · `ctrll` · `carry`(이월 6건: RD-012b J1·J2, RD-012c J1·J2,
+RD-006b J3·AC1) · `ccreset`(리셋 직전 Ctrl+C 경합 N=10) · `exit`(종료 뒤 완전 무응답 — 계획의 "에코만"은
+실측으로 정정, 에코도 없다) · `crash`(강제 유발·재시작 복구) · `strict`(worker 1개, `.xterm` 1개, 콘솔 경고
+0). preview(빌드 산출물) `reset`·`exit`·`crash` 3/3 PASS. `pageerror` 총계는 `crash` 절이 유발한 `forced`
+1건만(그 밖 0). 양성 대조 2건(안내 문구 변조 → `reset` 실패, `restart`가 `reset()`을 안 부르게 변조 →
+`crash` 실패) 확인 뒤 원복. 루트 4종 통과. 확인 스크립트는
+`_works/_completed/20260922-11-rd-010-session-reset/verify/session-reset-check.mjs`(`apps/demo/e2e/lib.mjs`
+import, `ONLY=<절,…>`로 8절 분리 실행)이고 이월 6건 표기는 RD-006·007·008 `skipped-ids.md`에 "RD-010
+복원"으로 남겼다(`_works/`라 커밋 대상 아님, 파일은 그대로 남아 있다).
+
+멈추는 지점 해소: 계획 17(강제 크래시)은 `pyodide.code.run_js("setTimeout(() => { throw new Error('forced')
+}, 0)")`가 실측대로 worker `error` 이벤트를 냈다 — 대안이 필요 없었다. `reset-cursor`의 `cursorX===0` 분기
+(개행 직후 아무것도 안 그린 채 리셋)는 idle 프롬프트가 항상 `>>> `까지 그려진 뒤에야 관찰 가능해(그 시점
+cursorX=4) 실사용 경로로는 재현되지 않았다(Enter와 리셋 클릭을 경합시켜도 4회 전부 프롬프트가 먼저 그려짐)
+— `index.test.ts`의 단위 시험(`cursorX`를 직접 0으로 둠)으로만 고정하고 브라우저 확인에서는 뺐다(checklist
+완료 조건을 약화하지 않는다 — 원래 "커서 행 처리 브라우저 확인"이 요구하는 건 TRP-006의 두 분기를 실제
+관찰 가능한 만큼 보는 것이었고, 관찰 불가능한 분기는 단위 시험이 대신 고정한다).
+
+함정 2건 발견·승격: `docs/traps/TRP-023`(하니스 알림 이름 목록에 새 ntf를 안 넣으면 조용히 버려진다, DELTA-04)
+· `docs/traps/TRP-024`(안내 줄 개수로 "다시 준비됐다"를 판정하면 여러 번 반복한 뒤 무한 대기한다 — xterm
+뷰포트 밖으로 스크롤된 행이 DOM에서 사라지기 때문, DELTA-06). `session-reset-check.mjs`의 `resetAndWait()`는
+그래서 화면 행이 아니라 `data-testid=status`의 상태 전이로 판정한다.
+
+인계(RD-012): `reset({ topLevelAwait? })` 옵션과 프레임 연동은 이 RD가 넣는다(RD-010 범위 제외). `reset()`은
+지금 무인자(`reset(): void`)다 — 옵션을 추가하면 `00-architecture.md` 4.1의 시그니처 주석과
+`session-reset-check.mjs`의 `resetAndWait()` 호출부(옵션 없이 부르는 곳들)를 함께 확인한다.
+
+인계(RD-013): 리셋 순서(확정 12, `08-session.md` 8.1)의 맨 앞에 "자동 들여쓰기 단위 초기화"를 끼워 넣을
+자리가 이미 마련돼 있다(`session.ts`의 `resetSession`/`spawnSession` 앞). RD-013이 `autoIndent`류 상태를
+핸들에 두면 그 초기화를 여기서 부른다.
+
+인계(RD-018): 확인 스크립트는
+`_works/_completed/20260922-11-rd-010-session-reset/verify/session-reset-check.mjs`(+
+`positive-controls.md`, `results/dev-and-preview.log`)에 있다. `apps/demo/e2e/lib.mjs`는 이 RD의 DELTA-00이
+이미 저장소로 옮겨 둬 추가 이관이 필요 없다 — RD-018은 스크립트 파일 자체의 이동(`_works/_completed/*` →
+`apps/demo/e2e/`)과 `pnpm --filter demo e2e:*` 스크립트만 남았다. RD-006·007·008 `skipped-ids.md`의 이월
+6건 행에 "RD-010 복원" 표기를 남겨 뒀다 — 74개 복원 표를 만들 때 그대로 반영한다.
 
 ### RD-011 — 여러 줄 입력 제출(붙여넣기·Shift+Enter·히스토리 재호출)
 

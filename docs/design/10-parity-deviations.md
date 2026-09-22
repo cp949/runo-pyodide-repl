@@ -73,6 +73,12 @@ stdin 읽기의 끝:
 38. **Task 밖 콜백(`call_later` 등)에서 난 `KeyboardInterrupt`·`SystemExit`은 조용히 버려진다**(RD-009). webloop 재보고 억제(`03-ctrl-c.md` 2.8)가 WebLoop의 `_keyboard_interrupt_handler`·`_system_exit_handler`를 no-op으로 바꾸기 때문이다. 3.14에서는 배경 콜백의 `KeyboardInterrupt`가 프로세스로 올라가 보이지만, 웹에서는 콜백 경계에서 사라진다(콘솔 실행 안에서 난 것은 그대로 화면에 나온다). 이 억제는 정상 중단·`input()` 취소·`exit()`마다 남던 브라우저 `pageerror`(시행당 2·2·1건)를 0으로 만드는 대가이고, 그 재보고에는 화면에 이미 나간 것 말고 새 정보가 없다.
 39. **콘솔 실행 중 JS→Python 콜백이 낸 예외는 트레이스백이 두 번 찍힌다**. `js.Array.of(1).map(lambda *a: 1/0)`처럼 JS가 부른 Python 콜백의 예외를 pyodide가 JS Error로 바꾸며 `PyErr_Print()`로 한 번 찍고(28번과 같은 기전), 콘솔이 다시 찍는다. 우리 프레임은 없다. `run_sync` 래퍼 밖이라 RD-009a가 다루지 않고, `sys.excepthook`을 콘솔 실행 전체에 바꾸는 안은 사용자가 바꾼 훅과 충돌해 쓰지 않는다. 3.14에는 대응 경로가 없다.
 
+세션 리셋:
+
+40. **실행 중 Ctrl+L 뒤 꼬리는 다음 프롬프트에 합성된다**(pty는 리셋 대응이 없어 기준 없음). Ctrl+L(화면 지우기)은
+    벤더 `Readline` 동작 그대로이고 코어는 손대지 않는다(RD-010 확정 15) — 세션 리셋(Python 상태 초기화)과는
+    별개 기능이다(`08-session.md` 8.1).
+
 top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 한 줄로 끝나고 `except KeyboardInterrupt`로는 잡히지 않는 것(우리 구현은 콘솔 task를 취소하고 표지 예외 `IdleInterrupt`를 한 줄로 표시한다. `except asyncio.CancelledError`는 잡고 `finally`는 돈다)은 **편차로 등록하지 않는다**. 대기 중 Ctrl+C를 task 취소로 처리하고 한 줄만 내는 것은 3.14의 `python -m asyncio`와 같은 동작이고, 우리 TLA 옵션의 기준이 기본 REPL이 아니라 `python -m asyncio`이기 때문이다(편차 1과 같은 정렬). 2절 "범위 밖"에도 넣지 않는다 — 재현하지 않기로 한 차이가 아니라 차이가 아니다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약"), RD-008 pty 재측정 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/pty/results.md`

@@ -191,4 +191,17 @@ main : 읽기가 살아 있고 버퍼·커서가 같으면 적용
 worker: run("exit()") → {exit:true} → ntf sessionTerminated → 루프 종료(더 이상 readLine 없음)
       → finally: 감시 타이머 정지(stopWatch) + interruptIdle.destroy()
 main : 안내 표시. 복구는 reset()
+
+(S7) 세션 리셋(RD-010, `08-session.md` 8.1)
+main : reset() 호출 → readline.cancelRead()(옛 활성 읽기를 ReadCancelledError로, 화면·history 불변)
+       → session.endSession()(alive=false, interruptSender.cancel()) → rpc.dispose() → worker.terminate()
+       → Atomics.store(interruptBuffer, SIGNAL, 0) → (cursorX!==0이면 개행) → writeNotice(RESET_NOTICE, "info")
+       → onStatus('loading') → 새 worker로 (S1)을 다시 탄다(같은 interruptBuffer, 새 채널·메일박스·프레임)
+worker: (새 worker) init 수신부터 (S1)과 동일
+
+(S8) 크래시(RD-010, `08-session.md` 8.4)
+worker: 전역 error 이벤트(스레드 자체가 죽음)                    | 부팅 뒤(REPL 루프) 잡히지 않은 예외
+main   : worker.addEventListener('error', …) → crash(msg)        | ntf crashed({message}) → crash(message)
+main   : crash(message): 첫 신호만(ended·crashedOnce 가드) → endSession()(alive=false) → onStatus('crashed')
+       → onCrash?.(message). worker는 terminate하지 않는다(복구는 (S7) reset()뿐). 터미널에는 쓰지 않는다.
 ```

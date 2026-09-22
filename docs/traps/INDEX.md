@@ -26,3 +26,5 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-020](./TRP-020-non-console-filename-drops-cancel-into-retry-loop.md) | `<console>` 밖 파일명(`runPython`의 `<exec>`)에서 취소하면 핸들러가 버려 읽기 재시도 루프가 된다 | ACTIVE | stdin 취소·실행 중 중단을 node 시험에서 `pyodide.runPython`으로 재현할 때 |
 | [TRP-021](./TRP-021-coroutine-sync-sleep-leaks-our-frames.md) | `run_sync`에 들어간 awaitable의 예외가 JS 경계를 넘으면 트레이스백이 두 번 찍히고 끝만 보는 단언은 통과한다 | ACTIVE | `sigint-handler.py`의 `guard`·`run_sync` 래퍼·`formattraceback`을 바꿀 때, 정지한 대기의 화면 형식을 시험·하니스로 판정할 때 |
 | [TRP-022](./TRP-022-node-side-polling-inflates-browser-latency.md) | 브라우저 지연을 Node 쪽 폴링으로 재면 문턱 근처에서 5~8ms 과대 측정된다 | ACTIVE | Playwright 하니스가 키 입력 → 화면 변화 지연을 재고 판정선이 수십 ms일 때 |
+| [TRP-023](./TRP-023-new-notification-name-missing-from-harness-list-is-dropped.md) | 하니스의 알림 이름 목록에 새 ntf를 안 넣으면 조용히 버려진다 | ACTIVE | `worker/boot.test.ts` 스타일 하니스에 새 RPC 알림을 추가할 때, 실제 배선은 고쳤는데 하니스 이름 목록은 안 고쳤을 때 |
+| [TRP-024](./TRP-024-notice-row-count-check-hangs-after-repeated-resets.md) | 안내 줄 개수로 "다시 준비됐다"를 판정하면 여러 번 반복한 뒤 무한 대기한다 | ACTIVE | 세션 리셋처럼 같은 문구가 반복 찍히는 동작을 여러 번(N≥4) 거치며 "문구 개수 증가"로 완료를 판정하는 브라우저 하니스 |

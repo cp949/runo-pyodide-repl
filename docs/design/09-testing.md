@@ -167,6 +167,8 @@
 - "이 로그가 없다"는 확인은 후속 출력에 밀려 뷰포트 밖으로 나간 행을 놓친다. 화면을 지우고(Ctrl+L) 한 번의 동작 직후 행 목록을
   정확히 단언한다(예: `gc.collect()` 직후 화면이 값 에코 한 줄뿐). 수정을 제거하는 변조로 확인이 실패하는지 봐서 검출력을 확인한다.
 - 미확인으로 남은 것: **프로덕션 빌드, Firefox, Safari, `sync=false` 폴백**, 자동화 E2E(범위 밖).
+- **세션 리셋·크래시(RD-010)**: worker 교체(`session-reset-check.mjs`, `_works/_completed/20260922-11-rd-010-session-reset/verify/`)는 `data-testid=status`의 상태 전이(`loading`→`ready`/`load-failed`)로 "리셋이 끝났다"를 기다린다 — 화면 행(안내 줄) 개수로 판정하면 xterm 뷰포트(기본 24행) 밖으로 밀려난 옛 행이 DOM에서 사라져 여러 번 반복한 뒤(실측 4번째부터) 무한 대기한다(`docs/traps/TRP-024`). 리셋 직전 Ctrl+C 경합(`Promise.all([ctrlC(), 리셋 클릭])`)도 N=10을 상태 전이 기준으로 돌려야 안정적이다. 취소 트레이스백 직후 곧바로 타이핑하면 첫 글자가 드물게 드롭된다(`docs/traps/TRP-005`류) — `h.settled()`로 화면이 멈춘 뒤 입력한다. `crashed` 유발은 `pyodide.code.run_js("setTimeout(() => { throw new Error('forced') }, 0)")`(동기 throw는 `JsException`이 되어 worker를 안 죽이므로 타이머 경로가 필요, RD-010 확정 17)이고 `pageerror` 기준선은 이 유발 1건만 허용(그 밖은 0).
+- `cursorX===0`(개행 직후 아무것도 안 그린 상태에서 리셋) 분기는 idle 프롬프트가 항상 `>>> `까지 그려진 뒤에야 관찰 가능해(cursorX=4) 브라우저에서 실사용 경로로 재현되지 않는다(Enter와 리셋 클릭을 경합시켜도 매번 프롬프트가 먼저 그려짐, 4회 확인). `index.test.ts`가 `cursorX`를 직접 0으로 둔 단위 시험으로만 고정한다 — 모든 분기가 브라우저로 확인 가능한 것은 아니다.
 
 ## 9.4 측정·비교 기준
 - 동등성 기준은 CPython 3.14.4를 pty(24×80, `TERM=xterm`)로 구동한 실측이다. 화면 비교는 pyte로 읽는다.
@@ -235,3 +237,19 @@
 - 프로덕션 빌드(`vite build`)는 worker의 top-level `await`를 Vite가 기본 `iife`로 번들링하려다 실패한다 — 실행 환경을 로컬 dev로 한정했기 때문에 고치지 않았다. 새 구현에서 배포를 원하면 초기에 포맷을 정해야 한다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/src/`, `/work/cp949/pyodide-samples/_works/_completed/`
+
+### 9.6.5 이 저장소의 브라우저 하니스(RD-010부터)
+
+공유 라이브러리 `apps/demo/e2e/lib.mjs`(저장소 devDependency, RD-010 DELTA-00에서 RD-009 하니스를 이관)가
+`open(url)`을 export한다 — Playwright로 페이지를 열고 화면 행 읽기(`rows`·`tail`·`rowClasses`·`cursorRow`),
+타이핑·Enter·대기(`type`·`enter`·`submit`·`waitPrompt`·`waitFor`·`typeWhenReading`·`cancelWhenReading`),
+Ctrl+C 계열(`ctrlC`·`holdCtrlC`·`ctrlCBurst`), 확인 기록(`step`·`checks`·`notes`·`finish`)을 돌려준다. 각
+RD의 확인 스크립트는 이 파일을 **복사하지 않고 import**하며 `_works/<작업>/verify/`에 둔다(저장소 코드가
+아니다, `.gitignore` 대상). `ONLY=<이름,…>` 환경변수로 `step` 이름이 그 접두어로 시작하는 것만 골라 돈다.
+
+RD-010의 `session-reset-check.mjs`(`_works/_completed/20260922-11-rd-010-session-reset/verify/`)가 이
+구조의 첫 사례다: dev 서버(5173)에 대해 절 8개(`reset`·`cursor`·`ctrll`·`carry`·`ccreset`·`exit`·`crash`·
+`strict`)를 순서대로 돌리고, `pnpm --filter demo build && pnpm --filter demo preview`(4173)에 대해
+`reset`·`exit`·`crash` 3절을 재실행한다. 양성 대조는 소스를 변조(`git status --short`가 비어 있는 상태에서
+시작해 원복 뒤 다시 비어 있는지 확인)한 뒤 dev 서버가 HMR로 반영하길 기다렸다 재실행하는 방식으로
+했다(`verify/positive-controls.md`).
