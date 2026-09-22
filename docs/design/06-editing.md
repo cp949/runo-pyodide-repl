@@ -9,7 +9,7 @@
 - 벤더링 뒤 수정 방침: 아래 6.2 표의 우회 중 **TRP-006(`readPaste` 탭 보존)·TRP-016/TRP-004(재그리기 전제)·TRP-030(`moveCursorBack` 단위)은 소스에서 직접 고치고**, `read()`의 write 콜백 타이밍(TRP-008)은 공개 훅(`onInputReady` 콜백 또는 `read()`가 입력 상태 생성 뒤 resolve되는 `ready` Promise)으로 계약을 명시한다. `InputType`은 export해 상수 복제를 없앤다. `History`에 `replaceFrom(snapshot)`/`truncate(n)` 같은 삭제 API를 추가해 블록 히스토리의 "진행형 교체" 스냅샷 우회를 단순화할 수 있다(선택, RD 항목에서 결정).
 - `History`의 `localStorage` 자동 저장/복원은 옵션으로 끈다(벤더링했으므로 no-op 덮어쓰기 대신 생성자 옵션 `persist: false`).
 - `Readline.dispose()`는 리스너를 해제하고 `term`을 비우며 대기 중인 읽기(write 콜백 대기 중이라 `activeRead`가 없는 것 포함)를 `Error("readline disposed")`로 reject한다. 두 번째 호출은 무동작이다(RD-003). `term.dispose()`가 로드된 addon을 다시 dispose하므로 멱등이 필수다. dispose 뒤 `read()`는 reject하고 `println`·`print`는 터미널에 쓰지 않는다. 실제 xterm 6은 `term.dispose()` 뒤에도 write 콜백을 돌리고 그 안의 `term.buffer` 읽기는 `DisposableStore` 경고를 낸다.
-- `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다.
+- `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다. 코어가 필요로 하는 진입점은 벤더에 **공개 훅**으로 추가한다: 입력 준비 알림(프리필, 6.3 — RD-013), 키 가로채기(Tab, `07-tab-completion.md` 7.1 — RD-015). 붙여넣기 탭 보존(TRP-006)은 훅이 아니라 `readPaste` 소스 수정이다(RD-011).
 - RD-008이 소스에 더한 공개 API: `read(prompt: string): Promise<string>` / `read(prompt: string, options: ReadOptions): Promise<string | null>` 오버로드와 `ReadOptions = { cancelable?: boolean }`(기본 `false` = 원본 `^C` + 같은 프롬프트 재그리기). `cancelable`이면 활성 읽기 중 Ctrl+C가 읽기를 `null`로 끝낸다(6.3). 오버로드라 기존 `read(prompt)` 호출부의 반환형은 `Promise<string>`으로 남는다. `ReadOptions`도 export한다.
 - 업스트림 추적: 원격을 연결하지 않는다(runo-coincident와 같은 방식). 업스트림 변경을 가져올 때는 `CHANGELOG.md`의 버전 기준으로 수동 diff한다.
 

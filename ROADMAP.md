@@ -253,6 +253,8 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 
 완료 기준: 위 시나리오(브라우저). 리셋 순서(들여쓰기 단위 초기화 → 송신기 취소 → `SIGNAL=0` → terminate → 새 worker·새 메일박스·새 sink 세트)가 시험으로 고정된다. StrictMode 이중 마운트에서 경고·중복 worker가 없다. `dispose()`가 두 번 불려도 안전하다.
 
+선행(DELTA-00, 동작 불변, RD-018에서 앞당김): Playwright를 `apps/demo` devDependency로 추가하고(`pnpm exec playwright install chromium`) RD-009 `verify/lib.mjs`를 `apps/demo/e2e/lib.mjs`로 옮긴다 — 외부 경로(`/work/scratch/paper-ts/node_modules/playwright`) import 제거, `sleep-await-check.mjs`의 페이지 내부 시계 도우미(keydown 리스너 + `MutationObserver`, TRP-022)를 `lib.mjs`로 승격. 이 RD부터 브라우저 확인 스크립트는 `_works/<작업>/verify/`에 두되 `lib.mjs`는 `apps/demo/e2e/`에서 import한다(복사하지 않는다). 루트 4종 통과. 스크립트·기준 데이터의 저장소 이관과 기준선 통합은 RD-018 그대로다.
+
 인계(RD-005): `exit()`(`terminated`) 뒤 worker는 살아 있고 터미널·입력은 무응답이다. 복구는 이 RD의 리셋과 Alert다(데모의 `Python session terminated.` 한 줄을 Alert로 교체). `createRepl`의 `liveTerminal` 뷰가 쓰는 `disposed`는 핸들 단위이므로 리셋이 핸들을 유지한 채 세션만 바꾸면 세션 단위 해제 신호가 필요하다(이전 세션의 `rewindTail` flush 콜백이 새 세션 읽기에 끼어들 수 있다). 건너뛴 이전 시나리오: RD-006b의 AC1·J2(세션 리셋 뒤 꼬리·`input()` 취소).
 
 인계(RD-006): 세션 리셋 뒤 프롬프트가 이전 꼬리를 물려받지 않는 성질은 `stdin-reader.test.ts`의 "새 sink 세트는 빈 프롬프트로 시작한다"(단위)까지만 본다. 브라우저 확인은 RD-006b의 J1·J2·J3(J1·J2는 취소도 필요해 RD-008 뒤)·AC1이다. 리셋은 세션마다 `createStdinMailbox`·sink 세트·`createInputReader`·`createReadGuard`를 새로 만들어야 옛 세션의 stdin 읽기·가드 추적이 새 세션에 끼어들지 않는다. `readInput` 핸들러의 `disposed`는 핸들 단위라 리셋이 핸들을 유지하면 옛 worker가 죽었다는 세션 단위 신호가 필요하다(죽은 worker에 대한 `mailbox.fail()`의 `untilIdle`은 영영 안 풀린다).
@@ -265,7 +267,7 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 
 시나리오: `def add(a, b):\n    return a + b\n\nprint(add(1, 2))`를 붙여넣고 Enter 한 번 → `3`, SyntaxError 없음. 클래스 메서드 사이 빈 줄이 블록을 끊지 않는다. 붙여넣은 탭이 보존된다. `1\n2\n3` → `3`만 에코. 파싱 오류가 있으면 아무 문장도 실행하지 않는다.
 
-완료 기준: 위 시나리오 + `split_paste` 코퍼스 27개 전부 일치(node + 실제 pyodide). 블록 입력 중(`... `) 붙여넣기는 한 줄씩 흘려 넣는다. 예외·`exit()` 뒤 나머지 문장 미실행. 한 줄 입력·빈 줄·`input()` 기존 동작 유지.
+완료 기준: 위 시나리오 + `split_paste` 코퍼스 27개 전부 일치(node + 실제 pyodide). 블록 입력 중(`... `) 붙여넣기는 한 줄씩 흘려 넣는다. 예외·`exit()` 뒤 나머지 문장 미실행. 한 줄 입력·빈 줄·`input()` 기존 동작 유지. 붙여넣은 탭 보존은 벤더 `packages/xterm-readline`의 `readPaste` 소스에서 고친다(`06-editing.md` 6.1·6.2 TRP-006 — 현재 벤더 원본은 Text가 아닌 입력을 `readKey`로 넘겨 `\t`를 버린다). 코어에서 `readPaste`를 감싸지 않는다. 벤더 시험에 붙여넣기 `\t` 보존 케이스를 추가한다(RED 확인).
 
 인계(RD-005): RD-005의 러너(`submission-runner.run`)에는 개행 분기가 없다. 이 RD가 `/[\r\n]/` 분기·`replayLines`·`multiline.py`·`.py` raw import 관례를 추가한다. 그 전까지 개행이 든 붙여넣기·Shift+Enter 제출은 통째로 `push`되어 대개 SyntaxError다. 건너뛴 이전 시나리오: RD-011a의 S03·S07(붙여넣기 분할).
 
@@ -277,13 +279,24 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 
 완료 기준: 위 시나리오. `setTopLevelAwait`가 TLA 비트만 토글하고(`0x6200` 확인) 콘솔 생성 직후 한 번만 적용된다(node + 실제 pyodide) — (RD-004에서 완료: `worker/top-level-await.ts`가 초기화 프레임의 `topLevelAwait`를 적용한다. 프레임 값은 아직 항상 `false`). 이 RD에 남는 범위는 `createRepl`의 `topLevelAwait` 옵션, 데모 스위치, 리셋 시 새 프레임에 값을 싣는 연동이다. 꺼짐/켜짐 모두 `asyncio.run(main())` 동작. 한 줄/블록/`input()`/Ctrl+C 기존 동작 유지.
 
+브라우저 TLA 셀(RD-007·RD-009가 node 시험으로 대체하고 이 RD에 넘긴 것. node 결과와 브라우저 결과를 따로 표기한다): RD-009 `sleep-await-check.mjs`에 `tla: true` 셀 4개를 더해 각 N=20, 복귀 중앙값 30ms 이내(페이지 내부 시계, TRP-022), 총 `pageerror` 0.
+
+| 셀 | 프로그램(TLA 켜짐) | 판정 형식 |
+| --- | --- | --- |
+| `await5` | `await asyncio.sleep(5)` | `line`: 트레이스백 0 + `KeyboardInterrupt` 한 줄(콘솔 task 취소, `10-parity-deviations.md` 1절 끝 "편차 아님" 문단) |
+| `awaitloop` | `while True: await asyncio.sleep(0.1)` | `either`: 눌림이 await 중이면 `line`, 사이의 동기 구간이면 `tb1` |
+| `tla-sleep-0.1` | `while True: time.sleep(0.1)` | `tb1`: 트레이스백 1개 + 우리 프레임 0 |
+| `tla-burst` | `while True: pass` 0ms 30회 연타 | RD-007 `burst-matrix.mjs` 규칙(프롬프트 복귀, `pageerror` 0) |
+
+`sleep-await-check.mjs`에는 `tb1`·`catch3`·`burst` 판정만 있으므로 `line`·`either`를 추가한다. 코루틴 안 동기 `time.sleep`(편차 28)은 이 셀들과 무관하다(RD-009a).
+
 ### RD-013 — 자동 들여쓰기
 
 상태: 대기 · 이전: RD-019 · 설계: `06-editing.md` 6.3
 
 시나리오: `for i in range(2):` Enter → `... ` 다음 줄에 4칸. `    print(i)` Enter 뒤에도 4칸 유지. 공백뿐인 줄 Enter로 블록 종료. Backspace가 단위 배수까지 지운다. 2칸으로 쓴 블록 뒤 새 블록은 2칸, 세션 리셋 뒤 4칸.
 
-완료 기준: 위 규칙 전부 + Shift+Enter/Alt+Enter 프리필, 일반 Enter·붙여넣기·`input()`에는 프리필 없음, 채워진 공백뿐인 줄은 history에 없음, 본문 없이 Enter 반복 시 블록이 끝나지 않음. `auto-indent.ts`가 pyodide에 든 `_pyrepl.readline` 함수와 차분 검증된다(`auto-indent-parity`). 프리필은 벤더링 readline의 공개 훅(`06-editing.md` 6.1)으로 넣는다.
+완료 기준: 위 규칙 전부 + Shift+Enter/Alt+Enter 프리필, 일반 Enter·붙여넣기·`input()`에는 프리필 없음, 채워진 공백뿐인 줄은 history에 없음, 본문 없이 Enter 반복 시 블록이 끝나지 않음. `auto-indent.ts`가 pyodide에 든 `_pyrepl.readline` 함수와 차분 검증된다(`auto-indent-parity`). 프리필은 벤더링 readline의 공개 훅으로 넣는다. **그 훅은 이 RD가 벤더 소스에 추가한다**(`read()`가 입력 상태를 만든 뒤 알리는 `onInputReady` 콜백 또는 `ready` Promise, `06-editing.md` 6.1) — 코어는 private 멤버(`state`·`activeRead`)에 손대지 않는다. 훅의 완료 조건: 훅 시점의 `updateLine`·커서 복원이 사라지지 않는다(TRP-008 재현 시험이 훅 없이 RED, 훅으로 GREEN).
 
 인계(RD-008): 건너뛴 이전 시나리오는 RD-012b G1(2칸 블록을 취소해도 다음 블록 프리필이 2칸)이다 — 취소가 `lastUsedIndentation`을 지우지 않아야 한다. 프리필이 없어서 RD-008이 이식할 때 기대값을 고친 확인이 셋 더 있다: RD-012b C1(블록 본문을 `    print(2)`로 직접 쳐야 한다)과 D1·D2·D3(Shift+Enter 둘째 행이 `print(3)`이다). 프리필이 들어오면 옛 기대(`... ` 다음 줄 4칸, `    print(3)`)로 되돌린다(`_works/_completed/…-rd-008-…/verify/skipped-ids.md` 4절). auto-indent 래퍼는 벤더 `Readline.read(prompt, { cancelable })`를 감싸고 취소 분기(`^C`·history 없이 `null`)는 바꾸지 않는다. `createRepl`의 `readLine` 핸들러는 이미 `(prompt, pending, cancelable)`를 받으며 `pending`만 무시하고 있다.
 
@@ -307,7 +320,11 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 
 시나리오: `a.` 뒤 Tab → 후보 하나면 삽입, 여럿이면 공통 접두사. 같은 자리 두 번째 Tab → 열 우선 목록(셀 폭 = 최장 + 2, 200개 상한). 빈 스템은 `4 - (열 % 4)`칸 공백을 왕복 없이. `important = ` 뒤 Tab 8연타(0ms) → 32칸. `__getattr__`가 무한 루프인 객체에서 `a.x` Tab 뒤 Ctrl+C → 세션 리셋 없이 `>>> `.
 
-완료 기준: 이전 RD-016 브라우저 58개 시나리오와 같은 결과(3.14 pty 목록 화면 행 일치 포함), 경합 Tab→Enter·Tab→Ctrl+C 각 20회 정지 0, `input()` 중 Tab 무동작, 세션 리셋·`exit()` 뒤 동작, 왕복 지연 중앙값 30ms 이내. 코드포인트↔UTF-16 변환 시험(서로게이트 쌍). 완성 중 취소 단위 시험(RED + 변이 검사).
+완료 기준: 이전 RD-016 브라우저 58개 시나리오와 같은 결과(3.14 pty 목록 화면 행 일치 포함), 경합 Tab→Enter·Tab→Ctrl+C 각 20회 정지 0, `input()` 중 Tab 무동작, 세션 리셋·`exit()` 뒤 동작. 코드포인트↔UTF-16 변환 시험(서로게이트 쌍). 완성 중 취소 단위 시험(RED + 변이 검사).
+
+왕복 지연 측정 계약: keydown(Tab) → 후보 삽입 또는 목록이 화면에 반영된 시각. 페이지 내부 시계(TRP-022), dev Chromium headless, 웜(세션 첫 Tab 제외), 대표 입력 3종(`a.` 속성 후보 다수, 빈 스템 공백 삽입, `import os.pa`는 RD-016 뒤) × N=20. **필수**는 정지 0과 200ms 이내(RD-009 시나리오와 같은 판정선)이고, 30ms는 참고치로 기록한다(출처 없는 수치라 필수에서 뺐다. RD-009 Ctrl+C 복귀 중앙값 22~30ms와 같은 자릿수인지 본다). 결과를 본 뒤 기준을 재해석하지 않는다.
+
+Tab 가로채기는 벤더 `readKey`(private)를 감싸지 않는다. **키 가로채기 공개 훅을 이 RD가 벤더 소스에 추가한다**(예: `Input`을 받아 소비했으면 `true`를 돌려주는 핸들러 등록, `06-editing.md` 6.1) — `createTabReader`는 그 훅과 `getLine`·`updateLine`·`tty()` 같은 공개 API만 쓴다. `07-tab-completion.md` 7.1은 이에 맞게 고쳤다.
 
 인계(RD-006): "main이 `input()` 읽기 중 Tab을 요청하지 않는다"는 성질(메일박스 대기 중 worker는 `complete`에 답하지 못한다)은 Tab 리더가 들어올 때 시험으로 고정한다. 프로토콜 쪽(메일박스 대기 중 보낸 `complete`는 `deliver` 전 응답 없음, 뒤 응답, 유실 없음)은 RD-006이 `protocol/thread-scenario.test.ts`에 넣었다. `input()` 안 Tab 무동작은 편차 17이다.
 
@@ -333,9 +350,9 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 
 상태: 대기 · 이전: 없음(이전에는 `_works/` 스크립트) · 설계: `09-testing.md` 9.5·9.6
 
-이전 구현의 Playwright 스크립트(`browser-check*.mjs`, 프로브 4종, `run-harness.sh`)와 pty 기준 데이터(기대 행 파일)를 `apps/demo/e2e/`로 옮겨 수동 실행 가능하게 한다. CI 상시 실행은 범위 밖이다.
+각 RD의 확인 스크립트(`_works/_completed/*/verify/`)와 pty 기준 데이터(기대 행 파일)를 `apps/demo/e2e/`로 옮겨 수동 실행 가능하게 한다. 공용 하니스 `lib.mjs`와 Playwright devDependency는 RD-010 선행 DELTA가 먼저 둔다(RD-010 참고). CI 상시 실행은 범위 밖이다.
 
-완료 기준: `pnpm --filter demo e2e:<이름>`으로 기준선 5종이 재현된다(RD-016 58/58, RD-016a 129/129, RD-012b 22/24, RD-012c 20/24, RD-006b 74/74)과 `boot-press` N=30. 기준 인터프리터(3.14.4)와 pyodide 번들(3.14.2) 차이를 README에 적는다.
+완료 기준: `pnpm --filter demo e2e:<이름>`으로 기준선이 재현된다. 기준선은 이전 통과 건수가 아니라 **시나리오 ID별 현재 기대 결과**다 — (1) RD-005~017 각 인계의 이식 세트가 실패 0, (2) 각 RD의 `skipped-ids.md`가 담당 RD로 넘긴 건너뜀 항목이 그 RD 완료 뒤 복원되어 실패 0(담당 RD 미완료면 "미실행 + 담당 RD"로 표기하고 실패와 구분한다), (3) `boot-press` N=30 정상, (4) 모든 확인에서 총 `pageerror` 0(RD-009 기준선). 이전 구현 수치(RD-016 58/58, RD-016a 129/129, RD-012b 22/24, RD-012c 20/24, RD-006b 74/74)는 이력이며 합격 조건이 아니다 — RD-012b·012c는 RD-008이 낡은 기대값 8건을 현재 설계로 고쳐 이식 세트 실패 0이다(아래 인계(RD-008)). 기준 인터프리터(3.14.4)와 pyodide 번들(3.14.2) 차이를 README에 적는다.
 
 인계(RD-005): RD-005 검증 스크립트(`lib.mjs` 하니스, `repl-check.mjs`(normal·cdn-blocked·not-isolated), `prompt-join-check.mjs`(RD-006b 이식 20개), `trailing-newline-check.mjs`(RD-011a 이식 12개), `carryover-check.mjs`, `keys-after-enter-probe.mjs`, `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있다. 이 RD가 `apps/demo/e2e/`로 옮길 때 각 RD가 넘긴 "건너뛴 시나리오"를 되살려 기준선 5종을 채운다. `ONLY=<이름 접두어,…>` 환경변수로 확인을 분리해 돌릴 수 있다. 400토큰(25행, 스크롤백) 꼬리 관찰은 새 데모에 `window.__term`이 없어 옮기지 않았다. 함정: `docs/traps/TRP-005`·`TRP-007`·`TRP-008`.
 

@@ -9,8 +9,10 @@
   `source`는 커서 앞 텍스트(`buf.slice(0, pos)`), `pending`은 `... ` 블록의 이전 줄들(`\n`으로 이음).
 - worker 핸들러는 **프롬프트를 기다리는 동안(`atPrompt`)에만** 실제로 계산하고, 실행 중에 늦게 도착한
   요청은 `{ completions: [], start: 0 }`로 돌려 사용자 코드와 겹쳐 돌지 않게 한다.
-- main(`createTabReader`)이 `readKey` 래퍼로 Tab(`UNSUPPORTED_CONTROL_CHAR = 21`, `data: ['\t']`)을
-  가로챈다. 응답은 **읽기가 살아 있고 버퍼·커서가 요청 때와 같을 때만** 적용한다. 읽기가 그 사이 끝났으면
+- main(`createTabReader`)이 벤더 readline의 **키 가로채기 공개 훅**으로 Tab(`UNSUPPORTED_CONTROL_CHAR = 21`,
+  `data: ['\t']`)을 가로챈다(이전 구현은 private `readKey`를 런타임 래핑했다. 벤더링 뒤에는 `06-editing.md` 6.1
+  규칙대로 private 멤버를 쓰지 않으며, 훅은 RD-015가 벤더 소스에 추가한다). 응답은 **읽기가 살아 있고 버퍼·커서가
+  요청 때와 같을 때만** 적용한다. 읽기가 그 사이 끝났으면
   (Enter, Ctrl+C) 완성을 버린다. 요청이 reject되면 무동작이고 입력은 그대로다.
 - 왕복 중 들어온 Tab은 **버리지 않고 큐에 두었다가** 끝난 뒤 그 읽기에 이어 처리한다(`requesting`,
   `queuedTabs`). 목록 재그리기 중 들어온 키도 큐에 두고 순서대로 처리한다(`redrawing`, `queuedKeys`,
