@@ -9,6 +9,7 @@ import {
   acknowledgeInterrupt,
   discardPendingInterrupt,
   readRequestSeq,
+  signalInterrupt,
 } from "../protocol/interrupt-protocol";
 import { createRpc } from "../protocol/rpc";
 import { createMailboxReader } from "../protocol/stdin-mailbox";
@@ -62,6 +63,9 @@ export async function bootReplWorker(
       stdin: createStdinCallback({
         requestInput: (cancelable) => rpc.notify("readInput", cancelable),
         wait: () => mailbox.wait(),
+        // 취소 변환의 두 단계. `connectInterrupts` 뒤라 버퍼가 연결돼 있어 `checkInterrupt()`가 EINTR를 던진다.
+        signalInterrupt: () => signalInterrupt(interruptBuffer),
+        checkInterrupt: () => pyodide.checkInterrupt(),
       }),
     });
     rpc.notify("ready", { pyodideVersion: pyodide.version });

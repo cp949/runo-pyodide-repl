@@ -302,6 +302,42 @@ describe("bootReplWorker", () => {
     expect(Object.keys(setStdinSpy!.mock.calls[0]![0]!)).toEqual(["stdin"]);
   }, 30_000);
 
+  test("메일박스 취소 표식은 `input()` 호출 지점의 KeyboardInterrupt가 되고 다음 프롬프트로 이어진다", async () => {
+    const { frame, events, waitFor, writer } = createMainSide([
+      // 선전달: `input()`이 정지하기 전에 취소 표식을 써 둔다(STATE가 CANCELLED면 `Atomics.wait`가 즉시 돌아온다).
+      () => {
+        void writer.cancel();
+        return 'x = input("x: ")';
+      },
+      "exit()",
+    ]);
+
+    await bootReplWorker(frame, {
+      loadPyodide: async () => {
+        const instance = await loadPyodide();
+        // 배선이 빠진 회귀에서 node의 실제 stdin을 동기로 읽으면 스위트가 멈춘다. 즉시 오류로 바꿔 둔다(부팅이 덮어쓴다).
+        instance.setStdin({ error: true });
+        return instance;
+      },
+    });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    // 프롬프트 출력 → readInput 알림 → 취소 트레이스백 → 다음 프롬프트. `EOFError`도 `OSError`도 아니다.
+    expect(events.slice(2)).toEqual([
+      PROMPT_REQUEST,
+      ["write", "x: "],
+      ["readInput", true],
+      [
+        "writeError",
+        'Traceback (most recent call last):\n  File "<console>", line 1, in <module>\nKeyboardInterrupt',
+      ],
+      PROMPT_REQUEST,
+      ["sessionTerminated"],
+    ]);
+    // 콜백이 쓴 SIGINT는 그 자리에서 소비됐고 ack·요청 번호가 하나씩 올랐다.
+    expect([...frame.interruptBuffer]).toEqual([0, 1, 1, 0]);
+  }, 30_000);
+
   test("setStdin이 던지면 loadFailed만 오고 ready·배너·readLine 요청은 오지 않는다(setStdin은 ready 전에 건다)", async () => {
     const { frame, events, waitFor } = createMainSide(["1 + 1"]);
     vi.spyOn(pyodide, "setStdin").mockImplementation(() => {

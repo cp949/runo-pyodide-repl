@@ -6,8 +6,11 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ACK,
   acknowledgeInterrupt,
   createInterruptBuffer,
+  SIGNAL,
+  signalInterrupt,
 } from "./interrupt-protocol";
 import { createInterruptSender } from "./interrupt-sender";
 
@@ -294,6 +297,28 @@ describe("읽기 순서", () => {
     timer.tick();
 
     expect(buffer[0]).toBe(0);
+    expect(timer.pending).toBe(0);
+  });
+});
+
+// worker의 stdin 취소 콜백도 같은 버퍼에 SIGINT를 쓴다(RD-008): 요청 번호를 올려 쓰고 `checkInterrupt()`가 그 자리에서
+// 소비해 핸들러가 ack한다. main 송신기가 점검을 예약해 둔 사이에 그 일이 끼어들 수 있다.
+describe("취소 콜백과의 동시 쓰기", () => {
+  it("콜백이 쓴 눌림이 소비돼 ack가 오르면 송신기는 재전송하지 않고 끝난다", () => {
+    const { buffer, timer, sender } = setup();
+    sender.send();
+
+    signalInterrupt(buffer);
+    deliver(buffer);
+
+    timer.tick();
+
+    // 송신기의 눌림과 콜백의 눌림이 따로 소비되지 않았어도 ack 하나가 스냅샷을 벗어나게 해 점검은 전달로 끝난다.
+    // 의도된 동작이다: 이 구간의 재전송은 이미 중단된 Python에 SIGINT를 남기는 것뿐이고, 그 잔류는 worker 루프의
+    // `discardPendingInterrupt`가 지운다.
+    expect(Atomics.load(buffer, SIGNAL)).toBe(0);
+    expect(Atomics.load(buffer, ACK)).toBe(1);
+    expect(buffer[2]).toBe(2);
     expect(timer.pending).toBe(0);
   });
 });
