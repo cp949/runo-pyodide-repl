@@ -37,4 +37,4 @@ KeyboardInterrupt
 - 화면 형식 판정에 **우리 프레임 부재를 별도 단언으로** 넣는다: 화면 전체에 `<sigint-handler>`·`<sleep-slice>`·`<webloop-reraise>`·`webloop.py`가 없다. `endsWith(CONSOLE_TRACEBACK)`만으로는 잡히지 않는다.
 - 트레이스백 **개수**를 센다(시간 기반 중단은 정확히 1개).
 - 이 조합은 알려진 편차다(`docs/design/10-parity-deviations.md` 28). 새 확인을 짤 때 "전부 통과"를 기대값으로 쓰지 말고 해당 셀을 편차로 표시한다 — 실측에서 `arun-sleep`·`runsync-sleep` 두 셀이 N=20 전량(40/40) 이 형태다.
-- 막으려면 `poll()` 창이 아니라 콘솔 실행 전체에서 excepthook을 대체해야 하는데 사용자가 바꾼 excepthook과 충돌한다. 그래서 지금은 등록된 편차로 두고, 판정에서만 명시적으로 제외한다.
+- excepthook을 대체하지 않고 막는 길이 있다: `guard` 코루틴이 `KeyboardInterrupt`를 `CancelledError`처럼 정상 값으로 바꾸고 `run_sync` 래퍼가 사용자 스택에서 올리면, 예외가 Task 결과로 JS 경계를 넘지 않아 excepthook 경로를 타지 않는다(node 확인 2026-09-22, `ROADMAP.md` RD-009a). 그 전까지는 등록된 편차로 두고 판정에서만 명시적으로 제외한다. `poll()` 창을 콘솔 실행 전체로 넓히는 안은 사용자가 바꾼 excepthook과 충돌하므로 쓰지 않는다.

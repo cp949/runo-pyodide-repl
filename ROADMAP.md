@@ -193,7 +193,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
   | `runsync-sleep` | 같은 `main` + `run_sync(main())` | 27.12 | 33.89 | 0/20(편차 28) |
   | `sleep-burst` | `while True: time.sleep(0.1)` 중 0ms 연타 5회 | 28.47 | 37.47 | 20/20 |
 
-  형식 판정(시간 기반 중단 = 트레이스백 정확히 1개 + `KeyboardInterrupt` 마지막 줄 + `>>> ` 복귀 + 우리 프레임 0)은 **10/12셀 통과**다. `arun-sleep`·`runsync-sleep` 2셀은 **복귀 자체는 20/20 정상**이고 지연도 문턱 안이지만, 코루틴 프레임 안에서 동기 `time.sleep` 조각을 직접 부르는 조합이라 pyodide가 Task 취소 경로에서 `sys.excepthook`으로 한 번 더 찍는 트레이스백에 우리 파일명(`<sigint-handler>`·`<sleep-slice>`)이 노출된다 — 새 결함이 아니라 **편차 28**(`10-parity-deviations.md`)의 브라우저 실측 확인이고, `runsync-sleep`은 이번에 확인된 같은 편차의 두 번째 사례다(`docs/traps/TRP-021`).
+  형식 판정(시간 기반 중단 = 트레이스백 정확히 1개 + `KeyboardInterrupt` 마지막 줄 + `>>> ` 복귀 + 우리 프레임 0)은 **10/12셀 통과**다. `arun-sleep`·`runsync-sleep` 2셀은 **복귀 자체는 20/20 정상**이고 지연도 문턱 안이지만, 코루틴 프레임 안에서 동기 `time.sleep` 조각을 직접 부르는 조합이라 pyodide가 Task 취소 경로에서 `sys.excepthook`으로 한 번 더 찍는 트레이스백에 우리 파일명(`<sigint-handler>`·`<sleep-slice>`)이 노출된다 — 새 결함이 아니라 **편차 28**(`10-parity-deviations.md`)의 브라우저 실측 확인이고, `runsync-sleep`은 이번에 확인된 같은 편차의 두 번째 사례다(`docs/traps/TRP-021`). 해소는 RD-009a가 맡는다.
 - 재보고 0(브라우저 재실행 4종, 총 `pageerror`): `repl-check.mjs normal` ⑦ **0**(기준선 RD-005 1건), `ctrl-c-check.mjs` **0**(기준선 RD-007 시행당 2건), `prompt-cancel-check.mjs` 23/23·**0**(기준선 RD-008 4건), `input-cancel-check.mjs` 26/26·**0**(기준선 RD-008 28건).
 - node(JSPI 있음·없음 각 N=30 × 5 프로그램 = 300시행): 전부 30/30 중단, stderr가 표준 트레이스백과 정확 일치 300/300, 추가 stderr 0, 200ms 초과 0. 눌림 → stderr 지연(ms):
 
@@ -224,6 +224,24 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 인계(RD-012): 브라우저 TLA 3셀(`await5`·`awaitloop`·`tla-sleep-0.1`)은 데모에 TLA 스위치가 없어 node 시험(`sigint-handler-idle.test.ts`의 TLA 4건, `createConsole(..., { topLevelAwait: true })`)으로 **대체 완료**했고, 브라우저 12조합은 비TLA 9셀 + 대체 3셀(`arun-loop`·`runsync-sleep`·`sleep-burst`)로 채웠다. 데모에 TLA 스위치가 생기면 `sleep-await-check.mjs`에 TLA 셀을 추가해 같은 판정으로 돌린다.
 
 인계(RD-018): RD-009 검증 스크립트는 `_works/_completed/20260922-09-rd-009-idle-ctrl-c/verify/`에 있다 — `lib.mjs`(RD-008 하니스 + `finish()`의 `ok` 판정을 **전체** `pageErrors` 0으로), `sleep-await-check.mjs`(12조합 × N=20, `ONLY=<셀,…>`, 페이지 내부 시계 측정), `run-browser.sh`, `positive-controls.py`(3건), `mutate-safe.mjs`, node 통계는 `verify/node/`의 `sleep-stats.mjs`·`run-n30.sh`·`py-raw-hook.mjs`. 결과는 같은 폴더 `verify/results/`(`sleep-await-dev.json`이 canonical, `node-sleep-{jspi,nojspi}.json`, 재실행 4종 로그, `positive-control-{1,2,3}.log`, preview 2종). **기준선 문구 갱신**: 이전 항목들이 쓰던 "대상 `pageerror`(재보고 제외) 0"은 더 이상 맞지 않다 — 재보고 자체가 없어졌으므로 모든 브라우저 확인의 기준선은 **총 `pageerror` 0**이다. 브라우저 지연을 재는 확인은 Node 쪽 DOM 폴링이 아니라 페이지 내부 시계를 쓴다(`sleep-await-check.mjs` 참고, `docs/traps/TRP-022`).
+
+### RD-009a — 코루틴 프레임 안 동기 `time.sleep` 중단의 중복 트레이스백 제거
+
+상태: 대기 · 이전: RD-012i · 설계: `03-ctrl-c.md` 2.4(깨우기 세부의 `guard`·`run_sync` 래퍼)
+
+RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`runsync-sleep` 2셀(편차 28, `docs/traps/TRP-021`)을 해소한다. `guard` 코루틴이 `KeyboardInterrupt`를 `CancelledError`와 같은 방식으로 정상 값(`WOKEN` 또는 별도 표지)으로 바꾸고 `run_sync` 래퍼가 사용자 스택에서 올린다. 예외가 Task 결과로 JS 경계를 넘지 않으므로 pyodide가 `sys.excepthook`으로 한 번 더 찍는 경로를 타지 않는다. excepthook은 건드리지 않는다.
+
+시나리오: `<console>`에서 정의한 `async def main(): time.sleep(5)`를 `asyncio.run(main())` 또는 `run_sync(main())`으로 실행하는 중 Ctrl+C → 트레이스백 정확히 1개(`File "<console>", line 1, in <module>` / `KeyboardInterrupt`) → `>>> `. 화면 어디에도 `<sigint-handler>`·`<sleep-slice>` 프레임이 없다. `main` 안의 `try/except KeyboardInterrupt`·`finally`는 그대로 동작한다.
+
+완료 기준:
+- node: `sigint-handler-idle.test.ts` "time.sleep과 정지한 대기의 조합"의 단언을 `endsWith(CONSOLE_TRACEBACK)` → `toBe(CONSOLE_TRACEBACK)`로 조인다(구현 전 RED 확인). `run_sync(main())` 변형과 `main` 안 `except KeyboardInterrupt`·`finally` 시험을 추가한다. 변이 검사: `guard`의 `except KeyboardInterrupt` 분기 제거 → 조인 시험이 실패한다.
+- 브라우저: RD-009 `sleep-await-check.mjs`를 `ONLY=arun-sleep,runsync-sleep`으로 돌려 형식 판정 40/40, 복귀 중앙값 30ms 이내, 총 `pageerror` 0. 나머지 10셀은 N=5 회귀 확인.
+- 문서: 편차 28을 해소로 표시(번호 유지), TRP-021 상태 갱신, RD-009 표의 두 행을 20/20으로, `09-testing.md` 9.3의 "10/12셀" 문구 갱신, `sigint-handler.py` 머리 주석의 깨우기 세부에 한 줄.
+- 루트 4종 통과.
+
+근거(2026-09-22 node 확인, 소스는 원복했다): `guard`에 `except KeyboardInterrupt: return WOKEN` 분기 하나를 넣자 위 시험이 `toBe(CONSOLE_TRACEBACK)`로 통과했고(그 전에는 첫 트레이스백에 `<sigint-handler>` `guard`·`<sleep-slice>` `sleep`/`poll`·`checkInterrupt`·`sigint_handler` 프레임이 있어 실패), `sigint-handler-idle`·`sigint-handler-sleep-slice`·`sigint-handler`·`sigint-handler-nojspi`·`boot` 5파일 91건이 그대로 통과했다. 이전 구현 하니스(`sleep-await.mjs`)는 이 셀에 `allowOurFrames: true`·트레이스백 1~2개 예외를 사용자 결정으로 두고 있었다.
+
+인계(RD-009·RD-018): 이 RD가 끝나면 RD-009 완료 기준의 "편차 2셀만 명시 제외" 문구를 지운다. RD-018은 `sleep-await-check.mjs`를 옮길 때 이 2셀의 판정을 나머지와 같게 둔다.
 
 ## Phase 2 — 세션·제출·편집·완성
 
@@ -334,7 +352,6 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 | 항목 | 이전 | 사유 |
 | --- | --- | --- |
 | `input()` 안 Tab 완성 | RD-016b | `input()`은 메일박스 대기라 worker가 멈춰 있어 worker 완성이 불가. main 쪽 완성이나 별도 배선이 필요 |
-| `asyncio.run` 코루틴 안 `KeyboardInterrupt`의 중복 트레이스백 | RD-012i | 후보 안(`guard`가 값으로 반환)만 있고 완료 기준 미확정 |
 | `time.sleep` 대기 중 워커 CPU 점유 | RD-012j | 정확성 영향 없음. 재측정 비용이 이득보다 큼 |
 | 후보 선택 UI(popover) | RD-016d | 3.14 동등 밖 UI 기능 |
 | "Python 정지" 플래그(송신기 잔류 제거) | RD-012h(a) | 정확성 영향 없음 |
