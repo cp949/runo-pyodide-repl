@@ -17,6 +17,7 @@ import {
   signalInterrupt,
 } from "../protocol/interrupt-protocol";
 import { createConsole, type PyodideConsoleProxy } from "../worker/console";
+import { loadSplitPaste } from "../worker/multiline";
 import {
   type InterruptIdle,
   installSigintHandler,
@@ -182,14 +183,19 @@ export function setupConsoleRunner(
   pyodide.setInterruptBuffer(buffer);
 
   // 실제 sink(readline.println)처럼 writeOutput/writeError가 끝에 개행을 붙인다.
-  const { run } = createSubmissionRunner(pyodide, repl, {
-    writeOutput: (text) => {
-      screen.stdout += `${text}\n`;
+  const { run } = createSubmissionRunner(
+    pyodide,
+    repl,
+    {
+      writeOutput: (text) => {
+        screen.stdout += `${text}\n`;
+      },
+      writeError: (text) => {
+        screen.stderr += `${text}\n`;
+      },
     },
-    writeError: (text) => {
-      screen.stderr += `${text}\n`;
-    },
-  });
+    { splitPaste: loadSplitPaste(pyodide) },
+  );
 
   // 실행 중인 Python에서 부르는 JS 콜백. `press`는 main이 Ctrl+C마다 쓰는 것, `resend`는 main의 재전송(같은 요청 번호로
   // SIGINT 슬롯만 다시 쓴다)이다.

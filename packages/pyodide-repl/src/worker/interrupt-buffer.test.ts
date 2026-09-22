@@ -22,6 +22,7 @@ import { CONSOLE_TRACEBACK } from "../test/sigint-setup";
 import { spawnRole } from "../test/thread";
 import { createConsole } from "./console";
 import { connectInterrupts } from "./interrupt-buffer";
+import { loadSplitPaste } from "./multiline";
 import { SLEEP_SLICE_FILENAME } from "./sleep-slice";
 import { createSubmissionRunner } from "./submission-runner";
 import { suppressWebLoopReraise } from "./webloop-reraise";
@@ -174,14 +175,19 @@ describe("connectInterrupts", () => {
       discard: () => discardPendingInterrupt(buffer),
       warn: (message) => console.warn(message),
     });
-    const { run } = createSubmissionRunner(pyodide, repl, {
-      writeOutput: (text) => {
-        screen.stdout += `${text}\n`;
+    const { run } = createSubmissionRunner(
+      pyodide,
+      repl,
+      {
+        writeOutput: (text) => {
+          screen.stdout += `${text}\n`;
+        },
+        writeError: (text) => {
+          screen.stderr += `${text}\n`;
+        },
       },
-      writeError: (text) => {
-        screen.stderr += `${text}\n`;
-      },
-    });
+      { splitPaste: loadSplitPaste(pyodide) },
+    );
     // 눌림 스레드가 Python이 sleep에 들어간 뒤에 쓰도록 시작 표시를 둔다. 같은 스레드 `press()`는 pyodide 폴링이
     // sleep 진입 전에 소비할 수 있어(약 50 바이트코드마다) 중단 지점이 흔들린다.
     const ctl = new Int32Array(new SharedArrayBuffer(4));

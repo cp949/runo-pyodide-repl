@@ -1,20 +1,26 @@
 // @vitest-environment node
 /**
  * 제출 러너(`createSubmissionRunner`) 시험(02-console-core.md 5.2, 05-output.md 4.1).
- * 실제 pyodide(node)의 실제 `ReplConsole`을 러너에 물려 한 줄 제출·값 에코·오류 표시·끝 개행·`exit`·`null` 취소를 확인한다.
+ * 실제 pyodide(node)의 실제 `ReplConsole` + 실제 `splitPaste`를 러너에 물려 한 줄 제출·값 에코·오류 표시·끝 개행·`exit`·
+ * `null` 취소·여러 줄 분할(붙여넣기)·줄 단위 흘림(블록 입력 중)·코퍼스 차등 검증을 확인한다. 가짜 분할기는 배선
+ * 시험 1건에만 쓴다.
  * 실행 밖에서 새는 `KeyboardInterrupt` 안전망은 실제 SIGINT 없이 `runLine`·`clearPending`을 `KeyboardInterrupt`를 던지는
- * Python 함수로 바꿔 끼워 재현한다. 여러 줄 제출은 RD-011 범위라 다루지 않는다.
+ * Python 함수로 바꿔 끼워 재현한다.
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { createConsole, type ReplConsole } from "./console";
+import corpus from "./multiline-corpus.json";
+import { loadSplitPaste, type SplitPaste } from "./multiline";
 import { createSubmissionRunner } from "./submission-runner";
 import { suppressWebLoopReraise } from "./webloop-reraise";
 
 let pyodide: PyodideInterface;
+let splitPaste: SplitPaste;
 
 beforeAll(async () => {
   pyodide = await loadPyodide();
+  splitPaste = loadSplitPaste(pyodide);
 }, 60_000);
 
 /**
@@ -48,14 +54,26 @@ function setup() {
   const hooks: {
     runLine?: ReplConsole["runLine"];
     clearPending?: ReplConsole["clearPending"];
+    splitPaste?: SplitPaste;
   } = {};
-  const seen: Pick<ReplConsole, "runLine" | "pending" | "clearPending"> = {
-    runLine: (source) => (hooks.runLine ?? repl.runLine)(source),
+  const seen: Pick<
+    ReplConsole,
+    "runLine" | "pending" | "clearPending" | "compilerFlags"
+  > = {
+    runLine: (source, options) =>
+      (hooks.runLine ?? repl.runLine)(source, options),
     pending: () => repl.pending(),
     clearPending: () => (hooks.clearPending ?? repl.clearPending)(),
+    compilerFlags: () => repl.compilerFlags(),
   };
-  const { run } = createSubmissionRunner(pyodide, seen, io);
-  return { run, io, screen, hooks };
+  const splitPasteSpy = vi.fn(
+    (source: string, flags: number) =>
+      (hooks.splitPaste ?? splitPaste)(source, flags),
+  );
+  const { run } = createSubmissionRunner(pyodide, seen, io, {
+    splitPaste: splitPasteSpy,
+  });
+  return { run, io, screen, hooks, splitPasteSpy };
 }
 
 const READY = { prompt: ">>> ", exit: false };
@@ -360,4 +378,212 @@ describe("실행 밖에서 새는 KeyboardInterrupt(안전망)", () => {
 
     await expect(run("1")).rejects.toThrow("runLine 실패");
   });
+});
+
+describe("여러 줄 제출: 문장 단위 분할(붙여넣기)", () => {
+  test("`1\\n2\\n3`은 마지막 값만 에코한다(S03)", async () => {
+    const { run, screen } = setup();
+
+    const result = await run("1\n2\n3");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("3\n");
+  });
+
+  test("함수 정의와 호출을 나눠 실행한다", async () => {
+    const { run, screen } = setup();
+
+    const result = await run(
+      "def add(a, b):\n    return a + b\n\nprint(add(1, 2))",
+    );
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("3\n");
+  });
+
+  test("클래스 메서드 사이 빈 줄이 블록을 끊지 않는다", async () => {
+    const { run, screen } = setup();
+    const source =
+      "class A:\n    def f(self): return 1\n\n    def g(self): return 2\n\nprint(A().g())";
+
+    const result = await run(source);
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("2\n");
+  });
+
+  test("붙여넣은 탭 들여쓰기를 그대로 실행한다", async () => {
+    const { run, screen } = setup();
+
+    const result = await run("def f():\n\treturn 1\nprint(f())");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("1\n");
+  });
+});
+
+describe("여러 줄 제출: 파싱·컴파일 오류는 아무 문장도 실행하지 않는다", () => {
+  test("문법 오류 뒤 이어진 이름 참조는 NameError다(S07)", async () => {
+    const { run, screen } = setup();
+
+    const first = await run("a = 1\nb = = 2");
+    expect(first).toStrictEqual(READY);
+    expect(screen.stderr).toContain("SyntaxError");
+    expect(screen.stdout).toBe("");
+
+    const second = await run("a");
+    expect(second).toStrictEqual(READY);
+    expect(screen.stderr).toContain("NameError");
+  });
+
+  test("함수 밖 return은 2차 compile 오류로 아무 문장도 실행하지 않는다", async () => {
+    const { run, screen } = setup();
+
+    const result = await run("print(1)\nreturn 2");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("");
+    expect(screen.stderr).toContain("'return' outside function");
+  });
+});
+
+describe("여러 줄 제출: 예외·exit() 뒤 나머지 문장 미실행", () => {
+  test("런타임 예외 뒤 나머지 문장은 실행하지 않는다", async () => {
+    const { run, screen } = setup();
+
+    const result = await run("print(1)\n1/0\nprint(2)");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("1\n");
+    expect(screen.stderr).toContain("ZeroDivisionError");
+  });
+
+  test("`exit()` 뒤 나머지 문장은 실행하지 않는다", async () => {
+    const { run, screen } = setup();
+
+    const result = await run("print(1)\nexit()\nprint(2)");
+
+    expect(result).toStrictEqual({ prompt: ">>> ", exit: true });
+    expect(screen.stdout).toBe("1\n");
+  });
+});
+
+describe("여러 줄 제출: 무동작 입력", () => {
+  test.each([{ source: "# a\n\n# b" }, { source: "\n\n" }])(
+    "`$source`는 push 없이 `>>> `로 돌아온다",
+    async ({ source }) => {
+      const { run, hooks, screen } = setup();
+      let calls = 0;
+      hooks.runLine = () => {
+        calls++;
+        throw new Error("빈 chunk는 runLine을 부르면 안 된다");
+      };
+
+      const result = await run(source);
+
+      expect(result).toStrictEqual(READY);
+      expect(calls).toBe(0);
+      expect(screen.stdout + screen.stderr).toBe("");
+    },
+  );
+});
+
+describe("여러 줄 제출: `builtins._`는 마지막(에코한) 문장에서만 갱신된다", () => {
+  test("에코하지 않은 중간 문장은 `_`를 갱신하지 않는다", async () => {
+    const { run, screen } = setup();
+    await run("42");
+
+    await run("1\n2\nprint()");
+    const result = await run("_");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout.endsWith("42\n")).toBe(true);
+  });
+
+  test("마지막 문장이 값이면 `_`가 그 값으로 갱신된다", async () => {
+    const { run, screen } = setup();
+
+    await run("1\n2\n3");
+    const result = await run("_");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("3\n3\n");
+  });
+});
+
+describe("줄 단위 흘림(블록 입력 중 붙여넣기)", () => {
+  test("블록 시작 뒤 본문+빈 줄+다음 문장을 흘려 넣으면 순서대로 실행된다", async () => {
+    const { run, screen } = setup();
+    await run("for i in range(2):");
+
+    const result = await run("    print(i)\n\nprint('done')");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stdout).toBe("0\n1\ndone\n");
+  });
+
+  test("본문 줄까지만 흘려 넣으면 여전히 `... `와 합쳐진 pending이다", async () => {
+    const { run } = setup();
+    await run("def f():");
+
+    const result = await run("    a = 1\n    b = 2");
+
+    expect(result).toStrictEqual({
+      prompt: "... ",
+      exit: false,
+      pending: "def f():\n    a = 1\n    b = 2",
+    });
+  });
+
+  test("흘림 중 오류가 나면 나머지 줄은 실행하지 않는다", async () => {
+    const { run, screen } = setup();
+    await run("if True:");
+
+    const result = await run("    x = = 1\n    print('after')");
+
+    expect(result).toStrictEqual(READY);
+    expect(screen.stderr).toContain("SyntaxError");
+    expect(screen.stdout).not.toContain("after");
+  });
+});
+
+describe("배선: `deps.splitPaste`는 (line, compilerFlags())로 호출된다", () => {
+  test("여러 줄 제출은 splitPaste에 원문과 compilerFlags()를 넘긴다", async () => {
+    const { run, splitPasteSpy } = setup();
+
+    await run("1\n2");
+
+    expect(splitPasteSpy).toHaveBeenCalledWith("1\n2", 0);
+  });
+});
+
+/** 코퍼스 소스를 exec로 통째 실행했을 때 `sys.stdout`에 쌓이는 문자열(기대값). */
+async function execStdout(source: string): Promise<string> {
+  return pyodide.runPythonAsync(
+    [
+      "import io, contextlib",
+      "_buf = io.StringIO()",
+      '_g = {"__name__": "__main__"}',
+      "with contextlib.redirect_stdout(_buf):",
+      '    exec(compile(SRC, "<x>", "exec"), _g)',
+      "_buf.getvalue()",
+    ].join("\n"),
+    { globals: pyodide.toPy({ SRC: source }) },
+  ) as Promise<string>;
+}
+
+describe("코퍼스 27: 러너 stdout이 exec 통째 실행 stdout과 일치한다", () => {
+  test.each(corpus as { name: string; source: string }[])(
+    "$name",
+    async ({ name, source }) => {
+      const expected = await execStdout(source);
+      const { run, screen } = setup();
+
+      const result = await run(source);
+
+      expect(screen.stdout, name).toBe(expected);
+      expect(screen.stderr, name).toBe("");
+      expect(result.exit, name).toBe(false);
+    },
+  );
 });

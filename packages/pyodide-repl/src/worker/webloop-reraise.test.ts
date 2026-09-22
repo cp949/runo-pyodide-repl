@@ -9,6 +9,7 @@ import { loadPyodide, type PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
 import { afterEach, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { createConsole } from "./console";
+import { loadSplitPaste } from "./multiline";
 import { createSubmissionRunner } from "./submission-runner";
 import { suppressWebLoopReraise } from "./webloop-reraise";
 
@@ -93,14 +94,19 @@ function setup() {
   suppressWebLoopReraise(pyodide, {
     warn: (message) => console.warn(message),
   });
-  const { run } = createSubmissionRunner(pyodide, repl, {
-    writeOutput: (text) => {
-      screen.stdout += `${text}\n`;
+  const { run } = createSubmissionRunner(
+    pyodide,
+    repl,
+    {
+      writeOutput: (text) => {
+        screen.stdout += `${text}\n`;
+      },
+      writeError: (text) => {
+        screen.stderr += `${text}\n`;
+      },
     },
-    writeError: (text) => {
-      screen.stderr += `${text}\n`;
-    },
-  });
+    { splitPaste: loadSplitPaste(pyodide) },
+  );
   return { run, screen };
 }
 

@@ -95,12 +95,22 @@ async function runWaking(
  * 복합문(블록)을 제출한다. 콘솔은 빈 줄을 받아야 블록을 실행하므로 실제 대기는 그 빈 줄 push에서 시작한다.
  * 깨우기를 그 직전에 건다.
  */
+/**
+ * 블록 본문 줄들을 실제 타이핑처럼 한 줄씩 push한다(RD-011: 개행이 든 한 번의 `run()`은 `split_paste`로 즉시
+ * 실행되므로, 이 시험처럼 마지막 빈 줄 전에 깨우기를 걸려면 줄 단위로 나눠 보내야 한다).
+ */
+async function submitBlockLines(runner: Runner, block: string): Promise<void> {
+  for (const line of block.split("\n")) {
+    expect((await runner.run(line)).prompt).toBe(PS2);
+  }
+}
+
 async function runBlockWaking(
   runner: Runner,
   block: string,
   wakeAt = WAKE_AT_MS,
 ): Promise<Outcome> {
-  expect((await runner.run(block)).prompt).toBe(PS2);
+  await submitBlockLines(runner, block);
   return runWaking(runner, "", wakeAt);
 }
 
@@ -247,7 +257,7 @@ asyncio.ensure_future = _leaky_ensure_future
       "    except KeyboardInterrupt:",
       "        n += 1",
     ].join("\n");
-    expect((await runner.run(block)).prompt).toBe(PS2);
+    await submitBlockLines(runner, block);
     const wakes = [
       runner.wakeAfter(100),
       runner.wakeAfter(400),

@@ -18,6 +18,7 @@ import { createMailboxReader } from "../protocol/stdin-mailbox";
 import { createConsole, type ConsoleSinks, type ReplConsole } from "./console";
 import { connectInterrupts } from "./interrupt-buffer";
 import { startInterruptWatch } from "./interrupt-watch";
+import { loadSplitPaste } from "./multiline";
 import { runReplLoop } from "./repl-loop";
 import type { InterruptIdle } from "./sigint-handler";
 import { createStdinCallback } from "./stdin-callback";
@@ -101,10 +102,16 @@ export async function bootReplWorker(
   try {
     // sink(println)가 개행을 붙이므로 배너에 개행을 더하지 않는다(TRAP-29).
     rpc.notify("writeOutput", repl.banner);
-    const runner = createSubmissionRunner(pyodide, repl, {
-      writeOutput: (text) => rpc.notify("writeOutput", text),
-      writeError: (text) => rpc.notify("writeError", text),
-    });
+    const splitPaste = loadSplitPaste(pyodide);
+    const runner = createSubmissionRunner(
+      pyodide,
+      repl,
+      {
+        writeOutput: (text) => rpc.notify("writeOutput", text),
+        writeError: (text) => rpc.notify("writeError", text),
+      },
+      { splitPaste },
+    );
     // 루프의 readLine 대기 중(atPrompt=true)인지를 감시 타이머의 프롬프트 유휴 폐기가 읽는다(03-ctrl-c.md 2.5).
     let atPrompt = false;
     const stopWatch = startInterruptWatch({

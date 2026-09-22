@@ -3,14 +3,16 @@ from pyodide.ffi import to_js
 
 # ConsoleFuture를 JS에서 직접 await하지 않는다(TRAP-02, worker/console.ts가 이 함수로만 await한다).
 # 결과는 [echo, exited, error] 세 값이다(None은 JS의 undefined). SystemExit은 [None, True, None]으로
-# 돌려 exit()/quit()를 구분한다. 값이 None이 아니면 repr() 전체를 echo로 만들고 성공한 뒤에만
-# builtins._를 갱신한다. repr가 예외를 내면 error에 트레이스백을 담고 _는 건드리지 않는다.
-async def await_fut(fut):
+# 돌려 exit()/quit()를 구분한다. echo가 거짓이면(분할 재생의 마지막 아닌 문장) repr()·builtins._ 갱신을
+# 건너뛰고 [None, exited, None]만 돌려준다(RD-011 확정 15, 에코하지 않은 문장은 `_`를 건드리지 않는다).
+# echo가 참이고 값이 None이 아니면 repr() 전체를 echo로 만들고 성공한 뒤에만 builtins._를 갱신한다.
+# repr가 예외를 내면 error에 트레이스백을 담고 _는 건드리지 않는다(echo일 때만 해당).
+async def await_fut(fut, echo=True):
     try:
         res = await fut
     except SystemExit:
         return to_js([None, True, None], depth=1)
-    if res is None:
+    if not echo or res is None:
         return to_js([None, False, None], depth=1)
     try:
         text = repr(res)

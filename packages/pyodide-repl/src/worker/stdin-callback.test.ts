@@ -30,6 +30,7 @@ import type {
 } from "../test/roles/interrupt-presser";
 import { spawnRole } from "../test/thread";
 import { createConsole } from "./console";
+import { loadSplitPaste } from "./multiline";
 import { installSigintHandler } from "./sigint-handler";
 import { createSinkWriter } from "./sink-writer";
 import { createStdinCallback } from "./stdin-callback";
@@ -293,14 +294,19 @@ function setupConsole() {
   pyodide.setInterruptBuffer(buffer);
   connected = buffer;
   // 실제 sink(readline.println)처럼 writeOutput/writeError가 끝에 개행을 붙인다.
-  const { run } = createSubmissionRunner(pyodide, repl, {
-    writeOutput: (text) => {
-      screen.stdout += `${text}\n`;
+  const { run } = createSubmissionRunner(
+    pyodide,
+    repl,
+    {
+      writeOutput: (text) => {
+        screen.stdout += `${text}\n`;
+      },
+      writeError: (text) => {
+        screen.stderr += `${text}\n`;
+      },
     },
-    writeError: (text) => {
-      screen.stderr += `${text}\n`;
-    },
-  });
+    { splitPaste: loadSplitPaste(pyodide) },
+  );
   // 실행 중 눌림(main의 Ctrl+C)을 Python 안에서 만드는 콜백. TRP-035 시험이 핸들러의 last_seq를 올려 두는 데 쓴다.
   pyodide.globals.set("press", () => signalInterrupt(buffer));
 

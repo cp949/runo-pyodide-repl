@@ -1,7 +1,8 @@
 /**
  * REPL 한 세션의 제어 흐름(00-architecture.md 3.2).
  * 통신·프로토콜 구현은 import하지 않고 `readLine`·`setAtPrompt`·`discardPendingInterrupt`만 주입받는다. 따라서 RPC
- * 종료·브라우저 worker·node 시험이 같은 프롬프트 갱신 규칙을 쓴다. 여러 줄 분할은 후속 RD의 책임이다.
+ * 종료·브라우저 worker·node 시험이 같은 프롬프트 갱신 규칙을 쓴다. 여러 줄 분할(붙여넣기·Shift+Enter·히스토리
+ * 재호출)은 `submission-runner.ts`의 `run()`이 처리하고 이 루프는 결과의 `prompt`·`pending`만 그대로 옮긴다.
  */
 import { PS1, type SubmissionResult } from "./submission-runner";
 

@@ -53,8 +53,11 @@ export interface ReplConsole {
   /** `pyodide.console.BANNER`. 끝 개행 없음. `writeOutput`으로 낸다(sink가 개행을 붙인다, TRAP-29). */
   readonly banner: string;
   readonly pyconsole: PyodideConsoleProxy;
-  /** 한 줄을 push하고 결과를 기다린다. `ConsoleFuture`는 Python `await_fut`로만 await한다. */
-  runLine(source: string): Promise<RunLineResult>;
+  /**
+   * 한 줄을 push하고 결과를 기다린다. `ConsoleFuture`는 Python `await_fut`로만 await한다.
+   * `options.echo`(기본 `true`)가 거짓이면 값 `repr()`·`builtins._` 갱신을 건너뛴다(분할 재생 중 에코하지 않는 문장).
+   */
+  runLine(source: string, options?: { echo?: boolean }): Promise<RunLineResult>;
   /** 블록 입력 중이면 콘솔 buffer의 줄들을 `\n`으로 이은 텍스트, 아니면 undefined. */
   pending(): string | undefined;
   /** 미완성 블록을 버린다(`buffer.clear()`). 블록이 없어도 안전하다. */
@@ -111,6 +114,7 @@ export function createConsole(
   });
   const awaitFut = namespace.get("await_fut") as (
     fut: ConsoleFutureProxy,
+    echo: boolean,
   ) => Promise<AwaitFutResult>;
   const formatSyntaxError = namespace.get("format_syntax_error") as (
     source: string,
@@ -170,7 +174,8 @@ export function createConsole(
     compilerFlags() {
       return pyconsole._compile.compiler.flags & ~INCOMPLETE_INPUT_FLAGS;
     },
-    async runLine(source) {
+    async runLine(source, options) {
+      const shouldEcho = options?.echo ?? true;
       const pendingBefore = pending();
       const fut = pyconsole.push(source);
       try {
@@ -187,7 +192,7 @@ export function createConsole(
           };
         }
         try {
-          const [echo, exited, error] = await awaitFut(fut);
+          const [echo, exited, error] = await awaitFut(fut, shouldEcho);
           if (error !== undefined)
             return { kind: "error", formattedError: error };
           return { kind: "complete", echo: echo ?? null, exited };
