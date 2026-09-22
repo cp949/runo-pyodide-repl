@@ -40,6 +40,16 @@ import pyodide.webloop as webloop
 WOKEN = object()
 
 
+class Raised:
+    """guard가 나르는 예외. run_sync 래퍼가 사용자 스택에서 그 객체를 다시 올린다.
+    Task 결과(정상 값)로 JS 경계를 넘으므로 pyodide가 excepthook으로 트레이스백을 찍지 않는다."""
+
+    __slots__ = ('exc',)
+
+    def __init__(self, exc):
+        self.exc = exc
+
+
 class IdleInterrupt(Exception):
     """정지한 콘솔 task를 취소해 중단했다는 표지. formattraceback이 KeyboardInterrupt 한 줄로 바꾼다.
     KeyboardInterrupt를 쓰지 않는 것은 Task가 KeyboardInterrupt로 끝나면 webloop가 다시 던지기 때문이다."""
@@ -131,12 +141,20 @@ def install(console, ack, seq, warn, extra_own_codes=()):
         async def guard(awaitable):
             try:
                 return await awaitable
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
                 # 우리가 깨운 취소는 정상 값으로 끝낸다. 취소는 awaitable 안으로 전달돼 finally 등의 취소 처리가 끝난
-                # 뒤에야 여기에 도착한다.
+                # 뒤에야 여기에 도착한다. 사용자 코드가 낸 CancelledError는 다른 예외와 같이 나른다.
                 if asyncio.current_task() in woken:
                     return WOKEN
+                return Raised(exc)
+            except GeneratorExit:
+                # 코루틴 close()의 신호다. 값으로 바꾸면 RuntimeError("coroutine ignored GeneratorExit")가 된다.
                 raise
+            except BaseException as exc:
+                # KeyboardInterrupt(조각 폴링·바쁜 루프의 핸들러가 코루틴 프레임에서 올린 것, 사용자가 직접 올린 것)·
+                # SystemExit·일반 예외 전부. 예외로 끝난 Task는 pyodide가 Promise로 바꾸며 sys.excepthook으로 한 번 더
+                # 찍고 콘솔 실행 중에는 그것이 화면에 새므로(TRP-021) 값으로 나른다.
+                return Raised(exc)
 
         def run_sync(awaitable):
             nonlocal pending
@@ -147,6 +165,10 @@ def install(console, ack, seq, warn, extra_own_codes=()):
             finally:
                 waiters.discard(fut)
                 woken.discard(fut)
+            if isinstance(result, Raised):
+                # awaitable이 낸 예외를 그 객체 그대로 올린다(from None 없음 — __context__·__cause__ 보존). pending은
+                # 건드리지 않는다: 예외로 끝난 실행의 표시는 runcode 경계가 지운다.
+                raise result.exc
             if result is WOKEN or pending:
                 # 깨운 대기와 깨울 수 없는 순간에 소비된 SIGINT는 사용자 스택(대기 호출 지점)에서 KeyboardInterrupt로 올린다.
                 pending = False
@@ -177,6 +199,7 @@ def install(console, ack, seq, warn, extra_own_codes=()):
         pyodide.ffi.run_sync = run_sync
         console.runcode = runcode
         own_codes.add(run_sync.__code__)
+        own_codes.add(guard.__code__)
 
     format_traceback = console.formattraceback
 

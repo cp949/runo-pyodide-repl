@@ -289,7 +289,7 @@ asyncio.ensure_future = _leaky_ensure_future
     expect(await runner.run(execSource(program))).toEqual(READY);
 
     expect(runner.screen.stdout).toBe("user-cancel\n");
-    expect(runner.screen.stderr).not.toContain("KeyboardInterrupt");
+    expect(runner.screen.stderr).toBe("");
   }, 20_000);
 
   it("실행 중이 아니면 interruptIdle()은 아무것도 깨우지 않는다", async () => {
@@ -599,9 +599,145 @@ describe("time.sleep과 정지한 대기의 조합", () => {
     expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
     // 콘솔이 만드는 마지막 트레이스백에는 `pyodide/webloop.py`의 `_run`·`run_until_complete` 프레임이 없다. 그 앞에
     // pyodide가 코루틴의 KeyboardInterrupt를 sys.stderr에 한 번 더 찍는 것(TRP-022 계열)은 이 작업 범위 밖이라
-    // `endsWith`로 본다.
+    // `endsWith`로 본다(DELTA-02가 `toBe`로 조인다).
     expect(runner.screen.stderr.endsWith(CONSOLE_TRACEBACK)).toBe(true);
     expect(runner.screen.stderr).not.toContain("webloop.py");
+    // DELTA-01: 코루틴이 낸 예외가 값으로 나르므로 트레이스백은 한 번뿐이고 우리 프레임도 없다.
+    expect(
+      runner.screen.stderr.match(/Traceback \(most recent call last\):/g),
+    ).toHaveLength(1);
+    expect(runner.screen.stderr).not.toContain("<sleep-slice>");
+    expect(runner.screen.stderr).not.toContain(SIGINT_HANDLER_FILENAME);
     await presser.done();
+  }, 20_000);
+});
+
+// RD-009a: run_sync 계열 대기 안 코루틴이 예외로 끝났을 때 excepthook 이중 인쇄를 없앤다(guard가 값으로 나른다).
+describe("run_sync 계열 대기에서 코루틴이 낸 예외", () => {
+  const RUNNERS: [string, (coroutineExpr: string) => string][] = [
+    ["asyncio.run", (c) => `asyncio.run(${c})`],
+    [
+      "run_until_complete",
+      (c) => `asyncio.get_event_loop().run_until_complete(${c})`,
+    ],
+    ["run_sync", (c) => `run_sync(${c})`],
+  ];
+
+  it.each(RUNNERS)(
+    "%s: 코루틴이 낸 ValueError는 트레이스백이 한 번만 찍히고 우리 프레임이 없다",
+    async (_title, wrap) => {
+      const runner = await setup();
+      pyodide.runPython("async def main():\n    raise ValueError('boom')\n", {
+        globals: pyodide.globals,
+        filename: "<console>",
+      });
+
+      expect(await runner.run(wrap("main()"))).toEqual(READY);
+
+      expect(
+        runner.screen.stderr.match(/Traceback \(most recent call last\):/g),
+      ).toHaveLength(1);
+      expect(runner.screen.stderr).not.toContain(SIGINT_HANDLER_FILENAME);
+      expect(runner.screen.stderr).toMatch(/ValueError: boom\n$/);
+    },
+    20_000,
+  );
+
+  it.each(RUNNERS)(
+    "%s: 코루틴이 낸 KeyboardInterrupt는 인자가 보존되고 한 번만 찍힌다",
+    async (_title, wrap) => {
+      const runner = await setup();
+      pyodide.runPython(
+        "async def main():\n    raise KeyboardInterrupt('custom')\n",
+        { globals: pyodide.globals, filename: "<console>" },
+      );
+
+      expect(await runner.run(wrap("main()"))).toEqual(READY);
+
+      expect(
+        runner.screen.stderr.match(/Traceback \(most recent call last\):/g),
+      ).toHaveLength(1);
+      expect(
+        runner.screen.stderr.match(/KeyboardInterrupt: custom/g),
+      ).toHaveLength(1);
+      expect(runner.screen.stderr).not.toContain(SIGINT_HANDLER_FILENAME);
+    },
+    20_000,
+  );
+
+  it("except 안에서 눌린 time.sleep도 컨텍스트 연쇄 문구가 한 번만 찍힌다", async () => {
+    const runner = await setup();
+    pyodide.runPython(
+      `import time
+
+async def main():
+    started()
+    try:
+        raise ValueError('inner')
+    except ValueError:
+        time.sleep(5)
+`,
+      { globals: pyodide.globals, filename: "<console>" },
+    );
+    const presser = runner.presser();
+    presser.press({ offsets: [300] });
+    const startedAt = performance.now();
+
+    expect(await runner.run("asyncio.run(main())")).toEqual(READY);
+
+    expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
+    expect(
+      runner.screen.stderr.match(
+        /During handling of the above exception, another exception occurred:/g,
+      ),
+    ).toHaveLength(1);
+    expect(runner.screen.stderr).not.toContain(SIGINT_HANDLER_FILENAME);
+    expect(runner.screen.stderr).not.toContain("<sleep-slice>");
+    expect(runner.screen.stderr).toMatch(/KeyboardInterrupt\n$/);
+    expect(runner.screen.stderr.match(/ValueError: inner/g)).toHaveLength(1);
+    await presser.done();
+  }, 20_000);
+
+  it("코루틴 안에서 KeyboardInterrupt를 잡고 finally도 실행된다", async () => {
+    const runner = await setup();
+    pyodide.runPython(
+      `import time
+
+async def main():
+    started()
+    try:
+        time.sleep(5)
+    except KeyboardInterrupt:
+        print('caught')
+    finally:
+        print('fin')
+`,
+      { globals: pyodide.globals, filename: "<console>" },
+    );
+    const presser = runner.presser();
+    presser.press({ offsets: [300] });
+    const startedAt = performance.now();
+
+    expect(await runner.run("asyncio.run(main())")).toEqual(READY);
+
+    expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
+    expect(runner.screen.stdout).toBe("caught\nfin\n");
+    expect(runner.screen.stderr).toBe("");
+    await presser.done();
+  }, 20_000);
+
+  it("코루틴 안 sys.exit는 트레이스백 없이 종료 표시로 끝난다", async () => {
+    const runner = await setup();
+    pyodide.runPython("async def main():\n    import sys\n    sys.exit(3)\n", {
+      globals: pyodide.globals,
+      filename: "<console>",
+    });
+
+    expect(await runner.run("asyncio.run(main())")).toEqual({
+      prompt: PS1,
+      exit: true,
+    });
+
+    expect(runner.screen.stderr).toBe("");
   }, 20_000);
 });
