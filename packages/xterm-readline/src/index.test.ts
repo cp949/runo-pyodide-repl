@@ -6,10 +6,11 @@
 import { expect, test } from "vitest";
 import * as api from "./index";
 
-test("코어가 쓰는 Readline·History·State·Tty·InputType만 값으로 export한다", () => {
+test("코어가 쓰는 Readline·ReadCancelledError·History·State·Tty·InputType만 값으로 export한다", () => {
   expect(Object.keys(api).sort()).toEqual([
     "History",
     "InputType",
+    "ReadCancelledError",
     "Readline",
     "State",
     "Tty",

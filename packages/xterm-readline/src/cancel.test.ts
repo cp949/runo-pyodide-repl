@@ -4,7 +4,7 @@
  * 옵션을 주지 않으면 원본 동작이 그대로 남는지도 같이 고정한다.
  */
 import { describe, expect, test } from "vitest";
-import { Readline } from "./readline";
+import { Readline, ReadCancelledError } from "./readline";
 import { VTerm } from "./vterm";
 
 /** Readline이 읽는 xterm 멤버만 가진 시험용 터미널. write 콜백을 동기로 돌려 상태를 바로 읽는다. */
@@ -205,6 +205,130 @@ describe("cancelable 읽기의 Ctrl+C", () => {
     await tick();
 
     expect(outcome()).toEqual({ state: "rejected", reason: expect.any(Error) });
+  });
+});
+
+describe("cancelRead()", () => {
+  test("cancelRead는 활성 읽기를 ReadCancelledError로 끝내고 다음 read()를 받는다", async () => {
+    const { term, readline } = createSession();
+    const outcome = observe(readline.read("> "));
+    term.type("abc");
+
+    readline.cancelRead();
+    await tick();
+
+    expect(outcome()).toEqual({
+      state: "rejected",
+      reason: expect.any(ReadCancelledError),
+    });
+    // 화면·커서는 코어가 결정한다 — cancelRead 자체는 아무것도 그리지 않는다.
+    expect(term.vt.screen()).toBe("> abc");
+    expect(term.vt.screen()).not.toContain("^C");
+
+    const next = observe(readline.read("> "));
+    term.type("next");
+    term.feed(ENTER);
+    await tick();
+
+    expect(next()).toEqual({ state: "resolved", value: "next" });
+  });
+
+  test("cancelRead는 write 콜백을 기다리는 읽기도 끝낸다", async () => {
+    const written: string[] = [];
+    const queue: (() => void)[] = [];
+    const term = {
+      cols: 20,
+      rows: 8,
+      options: { tabStopWidth: 8 } as { tabStopWidth?: number },
+      buffer: { active: { cursorY: 0 } },
+      onData: (_handler: (data: string) => void) => ({ dispose: () => {} }),
+      onResize: (_handler: (size: { cols: number; rows: number }) => void) => ({
+        dispose: () => {},
+      }),
+      attachCustomKeyEventHandler: (_fn: (event: KeyboardEvent) => boolean) => {},
+      write: (text: string, callback?: () => void) => {
+        written.push(text);
+        if (callback) queue.push(callback);
+      },
+    };
+    const readline = new Readline({ persist: false });
+    readline.activate(term as unknown as Parameters<Readline["activate"]>[0]);
+
+    const outcome = observe(readline.read("> "));
+    // write 콜백이 아직 오지 않은 상태(pendingReads)에서 취소한다.
+    readline.cancelRead();
+    await tick();
+
+    expect(outcome()).toEqual({
+      state: "rejected",
+      reason: expect.any(ReadCancelledError),
+    });
+
+    // 늦게 도착한 콜백이 activeRead를 되살리지 않는다(dispose와 같은 방어).
+    for (const callback of queue.splice(0)) callback();
+    const next = observe(readline.read("> "));
+    // 되살아났다면 이 read()가 activeRead를 덮어써 "next"를 못 받는다.
+
+    expect(next()).toEqual({ state: "pending" });
+  });
+
+  test("읽기가 없을 때 cancelRead는 아무것도 하지 않는다", () => {
+    const { term, readline } = createSession();
+
+    expect(() => readline.cancelRead()).not.toThrow();
+    expect(term.vt.screen()).toBe("");
+
+    const outcome = observe(readline.read("> "));
+    term.type("ok");
+    term.feed(ENTER);
+
+    return tick().then(() => {
+      expect(outcome()).toEqual({ state: "resolved", value: "ok" });
+    });
+  });
+
+  test("cancelRead로 끝난 입력은 history에 남지 않는다", async () => {
+    const { term, readline } = createSession();
+    const outcome = observe(readline.read("> "));
+    term.type("abc");
+    readline.cancelRead();
+    await tick();
+
+    readline.read("> ");
+    term.feed(ARROW_UP);
+
+    expect(outcome()).toEqual({
+      state: "rejected",
+      reason: expect.any(ReadCancelledError),
+    });
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("cancelRead 뒤에도 Ctrl+C 핸들러·키 리스너가 살아 있다", async () => {
+    const { term, readline } = createSession();
+    let ctrlCCount = 0;
+    readline.setCtrlCHandler(() => {
+      ctrlCCount += 1;
+    });
+    const outcome = observe(readline.read("> "));
+    term.type("abc");
+    readline.cancelRead();
+    await tick();
+
+    // cancelRead 뒤에는 activeRead가 없으니 Ctrl+C는 ctrlCHandler로 간다(활성 읽기 중 취소와 다름).
+    term.feed(CTRL_C);
+    expect(ctrlCCount).toBe(1);
+
+    const next = observe(readline.read("> "));
+    term.type("z");
+    term.feed(ENTER);
+    await tick();
+
+    expect(outcome()).toEqual({
+      state: "rejected",
+      reason: expect.any(ReadCancelledError),
+    });
+    expect(next()).toEqual({ state: "resolved", value: "z" });
   });
 });
 

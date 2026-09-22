@@ -12,6 +12,20 @@ interface ActiveRead {
   cancelable: boolean;
 }
 
+/** write 콜백을 기다리는 읽기 하나. `cancelled`는 콜백 도착 전에 `cancelRead()`가 먼저 끝냈는지 표시한다. */
+interface PendingRead {
+  reject: (e: unknown) => void;
+  cancelled: boolean;
+}
+
+/** `cancelRead()`가 읽기를 끝낼 때 reject 사유로 쓰는 오류. */
+export class ReadCancelledError extends Error {
+  constructor() {
+    super("read cancelled");
+    this.name = "ReadCancelledError";
+  }
+}
+
 type CheckHandler = (text: string) => boolean;
 type CtrlCHandler = () => void;
 type PauseHandler = (resume: boolean) => void;
@@ -32,8 +46,8 @@ export class Readline implements ITerminalAddon {
   private history: History;
   private activeRead: ActiveRead | undefined;
   private disposables: IDisposable[] = [];
-  /** write 콜백이 아직 오지 않아 activeRead가 없는 읽기의 reject. dispose가 이 읽기들도 끝내야 한다. */
-  private pendingReads = new Set<(e: unknown) => void>();
+  /** write 콜백이 아직 오지 않아 activeRead가 없는 읽기들. dispose·cancelRead가 이들도 끝내야 한다. */
+  private pendingReads = new Set<PendingRead>();
   private watermark = 0;
   private highWatermark = 10000;
   private lowWatermark = 1000;
@@ -88,12 +102,30 @@ export class Readline implements ITerminalAddon {
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
     this.term = undefined;
-    const rejects = [...this.pendingReads];
+    const rejects = [...this.pendingReads].map((p) => p.reject);
     if (this.activeRead !== undefined) rejects.push(this.activeRead.reject);
     this.pendingReads.clear();
     this.activeRead = undefined;
     const error = new Error("readline disposed");
     rejects.forEach((reject) => reject(error));
+  }
+
+  /**
+   * 열린 읽기(활성 읽기 + write 콜백을 기다리는 읽기)를 `ReadCancelledError`로 끝낸다.
+   * `dispose()`와 달리 리스너·term·history·state는 건드리지 않고 화면에도 아무것도 쓰지 않는다
+   * (개행·안내 줄 여부는 호출자가 결정한다). 열린 읽기가 없으면 아무것도 하지 않는다.
+   */
+  public cancelRead(): void {
+    const pending = [...this.pendingReads];
+    this.pendingReads.clear();
+    pending.forEach((p) => {
+      p.cancelled = true;
+    });
+    const active = this.activeRead;
+    this.activeRead = undefined;
+    const error = new ReadCancelledError();
+    pending.forEach((p) => p.reject(error));
+    active?.reject(error);
   }
 
   /**
@@ -283,11 +315,14 @@ export class Readline implements ITerminalAddon {
       // may not have updated buffer.active.cursorY by the time we read it
       // synchronously. Wait for the buffer to flush so the anchor row
       // accurately reflects where the prompt will land.
-      this.pendingReads.add(reject);
+      const pending: PendingRead = { reject, cancelled: false };
+      this.pendingReads.add(pending);
       this.term.write("", () => {
-        this.pendingReads.delete(reject);
+        this.pendingReads.delete(pending);
         // 콜백이 오기 전에 dispose됐으면 이미 reject됐다. 해제된 터미널에는 닿지 않는다.
         if (this.term === undefined) return;
+        // 콜백이 오기 전에 cancelRead()로 이미 reject됐다. activeRead를 되살리지 않는다.
+        if (pending.cancelled) return;
         this.state = new State(
           prompt,
           this.tty(),
