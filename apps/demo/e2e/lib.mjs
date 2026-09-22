@@ -30,6 +30,12 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     workers.created += 1;
     w.on("console", (msg) => logs.push({ source: "worker", type: msg.type(), text: msg.text() }));
   });
+  // 클립보드 붙여넣기(paste())가 쓰는 권한. headless Chromium이 거부해도(구버전 등) paste()가 fallback으로
+  // 넘어가므로 여기서는 실패를 삼킨다.
+  await page
+    .context()
+    .grantPermissions(["clipboard-read", "clipboard-write"])
+    .catch(() => {});
   if (before) await before(page);
   // `commit`은 문서 응답이 오자마자 돌아온다. 부팅 중(pyodide 로드 중)에 무언가를 하려면 이것이 필요하다.
   await page.goto(url, { waitUntil });
@@ -171,6 +177,49 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     }, `입력 ${JSON.stringify(tailChars)}가 커서 행에 그려짐`, 5000);
   };
   const press = (key) => page.keyboard.press(key);
+  /**
+   * xterm의 `paste` 이벤트 경로(RD-011): 클립보드에 쓰고 Control+V로 붙여넣는다(`\n`→`\r` 변환은 벤더
+   * `readPaste`가 한다). headless Chromium은 Control+V가 실제 OS 클립보드 붙여넣기를 일으키지 않는다(실측,
+   * DELTA-04 "## 결정") — 화면이 안 바뀌면 `textarea`에 `ClipboardEvent("paste")`를 직접 dispatch하는
+   * fallback으로 대체한다. `page.keyboard.insertText`는 대신 쓰지 않는다: CDP `Input.insertText`가 `\n`을
+   * 삽입 이벤트에서 지워버려(실측) 여러 줄 소스가 한 줄로 뭉개진다. 합성 `paste` 이벤트는 xterm이 실제로
+   * 듣는 이벤트(`qs` 핸들러, `event.clipboardData.getData("text/plain")`)라 실제 붙여넣기와 같은 코드 경로를
+   * 지난다. 반환값의 `usedFallback`으로 호출부가 기록할 수 있다.
+   */
+  const paste = async (text) => {
+    const before = await snapshot();
+    let usedFallback = false;
+    try {
+      await page.evaluate((t) => navigator.clipboard.writeText(t), text);
+      await focus();
+      await press("Control+V");
+      const changed = await waitFor(
+        async () => (await snapshot()) !== before,
+        "붙여넣기 반영",
+        1500,
+      ).then(
+        () => true,
+        () => false,
+      );
+      if (!changed) throw new Error("clipboard paste가 화면을 바꾸지 않았다(headless Control+V)");
+    } catch {
+      usedFallback = true;
+      await focus();
+      await page.evaluate((t) => {
+        const ta = document.querySelector(".xterm-helper-textarea");
+        const dt = new DataTransfer();
+        dt.setData("text/plain", t);
+        const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+        ta.dispatchEvent(ev);
+      }, text);
+      await waitFor(
+        async () => (await snapshot()) !== before,
+        "합성 paste 이벤트 반영",
+        1500,
+      );
+    }
+    return { usedFallback };
+  };
   /** 화면 스냅샷(행 + 커서 행). Enter가 화면을 바꿨는지 보는 데 쓴다. */
   const snapshot = async () => JSON.stringify([await rows(), await cursorRow()]);
   /**
@@ -415,6 +464,7 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     focus,
     type,
     press,
+    paste,
     enter,
     submit,
     clear,
