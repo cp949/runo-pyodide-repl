@@ -44,7 +44,7 @@
   화면 순서는 REPL 줄 → 배경 `input` 줄 → 콜백 출력 → REPL 줄 실행.
 - 겹침 거절(열린 읽기 위에 `readLine` 요청이 또 오면 `Error("이미 읽는 중")`)은 `createRepl`이 가드 **바깥**에서 검사한다. 거절된 promise를 가드가 활성 읽기로 추적하면 진짜 활성 REPL 읽기를 잃어 stdin 읽기가 앞당겨진다. 순서: `reading` 검사 → `guard.readLine(prompt)` → `.finally(reading = false)`.
 - stdin 읽기가 실패(reject)하면 `createRepl`의 `readInput` 핸들러가 `disposed`가 아닐 때만 `mailbox.fail(String(error))`로 worker를 깨워 Python `OSError`로 드러낸다. `disposed`면 쓰지 않는다: worker는 이미 `terminate()`됐고 `fail()`의 `untilIdle`이 영영 안 풀릴 수 있다. `Readline.dispose()`가 대기 중인 읽기를 reject하므로 dispose 때는 항상 이 분기다.
-- 제네릭(`L`·`I`)은 REPL 읽기 결과를 `string | null`로 넓혀도 가드 코드를 바꾸지 않으려는 것이다(RD-008에서 실제로 그렇게 넓혔고 가드는 인자 전달만 늘었다). 인자는 `readLine(prompt, cancelable)`·`readInput(cancelable)`이고, `pending`은 RD-013·014가 리더에 넣을 때 함께 넓힌다.
+- 제네릭(`L`·`I`)은 REPL 읽기 결과를 `string | null`로 넓혀도 가드 코드를 바꾸지 않으려는 것이다(RD-008에서 실제로 그렇게 넓혔고 가드는 인자 전달만 늘었다). 인자는 `readLine(prompt, pending, cancelable)`·`readInput(cancelable)`이다(RD-013 완료: `pending`을 `ReadGuardDeps.readLine`·`ReadGuard.readLine`에 넣어 리더까지 그대로 통과시킨다 — stdin 읽기(`readInput`)는 여전히 `pending`을 받지 않는다).
 - 화면(브라우저 확인): 활성 REPL 읽기 중 배경 `bg> `는 프롬프트 행 뒤에 붙고(`>>> bg>`), REPL 줄 Enter 뒤 그 행은 `>>> x = 41`로 다시 그려지며 다음 행에서 stdin 읽기가 `bg> `로 시작해 `bg> hello`가 남는다.
 
 ## 3.3 프롬프트 꼬리(output-tail) 렌더링

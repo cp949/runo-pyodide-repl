@@ -23,7 +23,7 @@ history·입력:
 9. **history가 중복을 제거한다**(3.14는 안 한다). 다중 줄 항목에서 편집 전 ↑는 바로 이전 항목으로 넘어간다(3.14는 줄 단위 이동).
 10. **붙여넣은/Shift+Enter로 만든/재호출한 블록의 둘째 줄부터 `... ` 접두사가 없다**.
 11. **문법 오류가 즉시 표시된다**(3.14는 다중 줄 입력에서 빈 줄 뒤).
-12. **Backspace dedent 단위 차이**: 웹은 단위 배수까지, 3.14는 이전 줄들의 더 얕은 수준까지. 2칸·4칸 혼용 블록에서 다르다. 탭 들여쓰기는 1글자씩.
+12. **Backspace dedent 단위 차이**: 웹은 단위 배수까지, 3.14는 이전 줄들의 더 얕은 수준까지. 2칸·4칸 혼용 블록에서 다르다. 탭 들여쓰기는 1글자씩. (RD-013 완료 시점 확인: `pending` + 현재 버퍼로 3.14 `backspace_dedent`를 정확히 이식하는 것도 원리적으로 가능해 보인다 — 후속 후보로 ROADMAP에 등록했다, 이번 RD 범위는 단위 배수로 유지.)
 13. **본문 없는 중첩 블록**(`if True:` / `    if True:` / `    pass`)의 문구는 3.14와 같은 `IndentationError`이고 즉시 표시(편차 11)만 남는다. pyodide 콘솔이 내는 `_IncompleteInputError: incomplete input`은 재컴파일로 표준 문구로 바꾼다(`02-console-core.md` 5.1). `1 +`·`foo bar`·블록 안 `1 +`는 3.14.4 pty와 캐럿 위치까지 같다.
 14. **프리필이 있는 동안 ↑가 history를 탐색하지 않는다**. `... ` 입력줄의 ↑는 무동작(3.14는 이전 줄로 커서 이동).
 15. `input()` 대기 중 붙여넣은 여러 줄은 첫 줄만 값으로 쓰인다. 탭은 8칸 폭으로 표시된다.
@@ -85,6 +85,9 @@ stdin 읽기의 끝:
     top-level 문장 단위 청크마다 `push`하므로 `File "<console>", line N`의 N은 그 청크 안 상대 번호다
     (RD-011). 파싱·컴파일 단계 오류의 줄 번호는 전체 기준이다(`split_paste`가 청크로 나누기 전에 전체
     소스를 검사한다, `02-console-core.md` 5.2).
+42. **`input()` 중 Shift+Enter는 개행만 삽입한다**(RD-013). 자동 들여쓰기 프리필·Backspace 단위 삭제와
+    함께 `input()` 읽기에는 전부 꺼져 있어(`06-editing.md` 6.3, 확정 4) 벤더 원본 동작(개행만) 그대로다.
+    3.14의 `raw_input`은 Enter로만 제출받고 편집 중 개행 삽입이 없어 대응하는 3.14 동작이 없다.
 
 top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 한 줄로 끝나고 `except KeyboardInterrupt`로는 잡히지 않는 것(우리 구현은 콘솔 task를 취소하고 표지 예외 `IdleInterrupt`를 한 줄로 표시한다. `except asyncio.CancelledError`는 잡고 `finally`는 돈다)은 **편차로 등록하지 않는다**. 대기 중 Ctrl+C를 task 취소로 처리하고 한 줄만 내는 것은 3.14의 `python -m asyncio`와 같은 동작이고, 우리 TLA 옵션의 기준이 기본 REPL이 아니라 `python -m asyncio`이기 때문이다(편차 1과 같은 정렬). 2절 "범위 밖"에도 넣지 않는다 — 재현하지 않기로 한 차이가 아니라 차이가 아니다.
 

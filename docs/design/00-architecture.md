@@ -80,8 +80,10 @@ main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미
 
 ### 3.4 세션 리셋·크래시·종료
 
-- 리셋(`ReplHandle.reset()`, RD-010)은 worker 교체다. 화면·history는 유지된다. 순서(자동 들여쓰기 단위
-  초기화는 RD-013 몫): 벤더 `readline.cancelRead()`로 옛 세션의 열린 읽기를 화면·history를 건드리지 않고
+- 리셋(`ReplHandle.reset()`, RD-010)은 worker 교체다. 화면·history는 유지된다. 자동 들여쓰기 단위
+  (`lastUsedIndentation`)는 세션 소유(`createAutoIndent`, RD-013 완료)라 별도 초기화 단계가 없다 — 새
+  세션을 만드는 자리에서 저절로 4칸으로 돌아간다. 순서: 벤더 `readline.cancelRead()`로 옛 세션의 열린
+  읽기를 화면·history를 건드리지 않고
   끝낸다 → 인터럽트 송신기 취소 → interrupt buffer `SIGNAL=0` → RPC dispose → 이전 worker `terminate()`
   → 커서가 행 머리가 아니면 개행 → 청록 안내 줄 → 새 worker + 새 초기화 프레임(`08-session.md` 8.1).
   interrupt buffer는 세션 간 **재사용**(ack·요청 번호가 이어진다), 메일박스·sink 세트는 worker마다 **새로**
@@ -129,7 +131,7 @@ export function runReplWorker(): void                   // '@cp949/runo-pyodide-
 
 `reset(options?: { topLevelAwait?: boolean }): void`(RD-010이 무인자로 추가, RD-012가 옵션을 더했다). `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면 마지막으로 적용한 값을 유지한다(sticky, 핸들이 보관, getter는 없다). `disposed`·`!isolated`면 no-op, 그 외 상태는 전부 허용한다. 순서·게이트는 3.4·`08-session.md` 8.1.
 
-main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 그려 한 줄을 읽어 응답한다(`04-stdin-input.md` 3.3). 열린 읽기가 있는 동안 도착한 요청은 `Error("이미 읽는 중")`로 거절한다(벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다). 요청 시그니처는 `readLine(prompt, pending, cancelable)`이고 `cancelable`은 리더에 그대로 전달한다(RD-008). `pending`은 아직 무시하며 RD-013·014가 쓴다. 리더에는 `dispose()` 뒤 write 콜백을 전달하지 않는 터미널 뷰를 준다. xterm은 `term.dispose()` 뒤에도 대기 중인 write 콜백을 실행하므로, `rewindTail`이 flush를 기다리는 중에 dispose되면 그 콜백이 해제된 `buffer`를 읽는다(`docs/traps/TRP-004`). 뷰가 이 콜백을 막는다.
+main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 그려 한 줄을 읽어 응답한다(`04-stdin-input.md` 3.3). 열린 읽기가 있는 동안 도착한 요청은 `Error("이미 읽는 중")`로 거절한다(벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다). 요청 시그니처는 `readLine(prompt, pending, cancelable)`이고 `cancelable`은 리더에 그대로 전달한다(RD-008). `pending`은 `createAutoIndent(readline).readOptions(pending)`으로 프리필·키 훅(Shift/Alt+Enter·Backspace)이 된다(RD-013 완료, `06-editing.md` 6.3). RD-014가 블록 history 항목 묶기에도 같은 `pending`을 쓴다. 리더에는 `dispose()` 뒤 write 콜백을 전달하지 않는 터미널 뷰를 준다. xterm은 `term.dispose()` 뒤에도 대기 중인 write 콜백을 실행하므로, `rewindTail`이 flush를 기다리는 중에 dispose되면 그 콜백이 해제된 `buffer`를 읽는다(`docs/traps/TRP-004`). 뷰가 이 콜백을 막는다.
 
 `readline?` 옵션은 두지 않는다. 호출자가 준 `Readline`은 `persist: false`를 보장할 수 없고, auto-indent·tab 래퍼는 코어가 만든 인스턴스를 감싼다. 코어는 `terminal.loadAddon(readline)`과 `readline.dispose()`만 하고 `Terminal`은 dispose하지 않는다. `term.dispose()`도 로드된 addon을 dispose하므로 `Readline.dispose()`는 멱등이다(`06-editing.md` 6.1).
 
@@ -158,8 +160,8 @@ packages/pyodide-repl/src/
     repl-reader.ts         꼬리 + '>>> ' 합성 읽기                   ← 04 3.3
     stdin-reader.ts        input() 읽기(꼬리 그대로, SGR 리셋 없음)     ← 04 3.3
     read-guard.ts          stdin 읽기를 활성 REPL 읽기 뒤로(순서만)    ← 04 3.2
-    auto-indent.ts         순수 계산                                  ← 06 6.3
-    auto-indent-reader.ts  read()/readKey 래핑(벤더링 export만 사용)
+    auto-indent.ts          순수 계산(`nextIndentation` 등) + `createAutoIndent`(세션 소유 정책 객체,
+                             `readOptions(pending)` → 벤더 `ReadOptions`)   ← 06 6.3(RD-013 완료)
     block-history.ts       블록 → history 항목 하나                   ← 06 6.4
     history-filter.ts
     tab-completion.ts      순수 로직                                  ← 07

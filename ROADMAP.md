@@ -167,7 +167,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 
 구현: 벤더 `Readline.read(prompt, { cancelable })` → `Promise<string | null>`(`^C`·history 없이 `\r\n` 뒤 `null`), 리더·가드가 `cancelable` 전달, `createRepl`의 `readLine`이 `null` 응답·`readInput`이 `mailbox.cancel()`, 게이트 항 `cancelSettling`, `createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt })`(던지지 않으면 `console.warn` + EOF 폴백)와 `boot.ts`의 클로저 주입.
 
-인계(RD-005·RD-006 해소): `readLine` 핸들러는 `(prompt, pending, cancelable)`를 받고 취소를 `null`로 응답한다(`pending`은 RD-013·014가 쓴다). `createInputReader.read(cancelable)`·`createReadGuard`의 제네릭은 `string | null`로 넓혔고 가드 규칙은 그대로다. 중간 상태를 고정하던 시험 두 건(`index.test.ts` "stdin 읽기 중 Ctrl+C는 `^C`를 찍고…", `stdin-callback.test.ts` "`wait()`가 `null`이면 `EOFError`")은 취소 동작으로 교체했다. 건너뛰었던 RD-006b G3·W2, RD-011a S14, RD-006b A1~A5·B1·B2·C1·C2·D1·E2·H1·H2·Q1, F×5는 이 RD에서 전부 실행했다(J1·J2는 RD-010).
+인계(RD-005·RD-006 해소): `readLine` 핸들러는 `(prompt, pending, cancelable)`를 받고 취소를 `null`로 응답한다(`pending`은 RD-013이 자동 들여쓰기로 썼고 RD-014가 블록 history로 쓴다). `createInputReader.read(cancelable)`·`createReadGuard`의 제네릭은 `string | null`로 넓혔고 가드 규칙은 그대로다. 중간 상태를 고정하던 시험 두 건(`index.test.ts` "stdin 읽기 중 Ctrl+C는 `^C`를 찍고…", `stdin-callback.test.ts` "`wait()`가 `null`이면 `EOFError`")은 취소 동작으로 교체했다. 건너뛰었던 RD-006b G3·W2, RD-011a S14, RD-006b A1~A5·B1·B2·C1·C2·D1·E2·H1·H2·Q1, F×5는 이 RD에서 전부 실행했다(J1·J2는 RD-010).
 
 ### RD-009 — 정지한 실행 중 Ctrl+C: 감시 타이머, `time.sleep` 조각, webloop 재보고 억제, 프롬프트 유휴 SIGINT 폐기
 
@@ -294,9 +294,9 @@ cursorX=4) 실사용 경로로는 재현되지 않았다(Enter와 리셋 클릭�
 지금 무인자(`reset(): void`)다 — 옵션을 추가하면 `00-architecture.md` 4.1의 시그니처 주석과
 `session-reset-check.mjs`의 `resetAndWait()` 호출부(옵션 없이 부르는 곳들)를 함께 확인한다.
 
-인계(RD-013): 리셋 순서(확정 12, `08-session.md` 8.1)의 맨 앞에 "자동 들여쓰기 단위 초기화"를 끼워 넣을
-자리가 이미 마련돼 있다(`session.ts`의 `resetSession`/`spawnSession` 앞). RD-013이 `autoIndent`류 상태를
-핸들에 두면 그 초기화를 여기서 부른다.
+RD-013 완료 반영: 자동 들여쓰기 단위(`lastUsedIndentation`)는 핸들이 아니라 **세션 소유**
+(`session.ts`의 `startSession()` 안에서 만드는 `createAutoIndent(readline)`)가 됐다 — 리셋 순서에 별도
+초기화 단계를 끼워 넣지 않아도 새 세션이 새 객체(4칸)를 만든다(`08-session.md` 8.1).
 
 인계(RD-018): 확인 스크립트는
 `_works/_completed/20260922-11-rd-010-session-reset/verify/session-reset-check.mjs`(+
@@ -330,9 +330,11 @@ PyCF_ONLY_AST)`)로 top-level 문장 경계를 구하고 얻은 AST를 2차 `com
 `replayLines`·`multiline.py`·`.py?raw` 관례를 추가했다. 건너뛴 이전 시나리오: RD-011a의 S03·S07(붙여넣기
 분할) — 둘 다 브라우저 `paste`·`parse` 절에서 확인했다.
 
-인계(RD-013): `shift` 절(Shift+Enter로 블록 진행)은 RD-013의 프리필이 아직 없는 채로 들여쓰기를 직접 쳐서
-확인했다(`for i in range(2):` Shift+Enter `    print(i)` Enter 1회 → `0`·`1`). RD-013이 프리필을 넣으면
-`multiline-check.mjs`의 `shift` 절 기대 입력(들여쓰기를 직접 치는 부분)을 프리필 뒤 기대값으로 되돌린다.
+RD-013 완료 반영: `shift` 절(Shift+Enter로 블록 진행)은 프리필이 아직 없던 채로 들여쓰기를 직접 쳐서
+확인했었다(`for i in range(2):` Shift+Enter `    print(i)` Enter 1회 → `0`·`1`). RD-013이 프리필을 넣은 뒤
+이 절의 복사본을 `_works/…-rd-013-…/verify/auto-indent-check.mjs`의 `multiline-shift` 절로 되돌렸다(들여쓰기
+직접 입력 제거, `print(i)`만 입력 → 프리필이 채운다). 완료된 `multiline-check.mjs` 원본 파일은 고치지 않았다
+(rubber-workflow: 완료 폴더는 읽기 전용 참고).
 
 인계(RD-014): 블록 입력 중(`... `) 붙여넣은 여러 줄은 `replayLines`가 한 줄씩 흘려 넣는다 — 각 줄이 벤더
 `history.append`를 그대로 타므로, 흘려 넣은 텍스트가 history에 (블록으로 묶이지 않은) 들여쓴 항목 여러 개로
@@ -368,13 +370,41 @@ PyCF_ONLY_AST)`)로 top-level 문장 경계를 구하고 얻은 AST를 2차 `com
 
 ### RD-013 — 자동 들여쓰기
 
-상태: 대기 · 이전: RD-019 · 설계: `06-editing.md` 6.3
+상태: 완료 · 이전: RD-019 · 설계: `06-editing.md` 6.3
 
 시나리오: `for i in range(2):` Enter → `... ` 다음 줄에 4칸. `    print(i)` Enter 뒤에도 4칸 유지. 공백뿐인 줄 Enter로 블록 종료. Backspace가 단위 배수까지 지운다. 2칸으로 쓴 블록 뒤 새 블록은 2칸, 세션 리셋 뒤 4칸.
 
-완료 기준: 위 규칙 전부 + Shift+Enter/Alt+Enter 프리필, 일반 Enter·붙여넣기·`input()`에는 프리필 없음, 채워진 공백뿐인 줄은 history에 없음, 본문 없이 Enter 반복 시 블록이 끝나지 않음. `auto-indent.ts`가 pyodide에 든 `_pyrepl.readline` 함수와 차분 검증된다(`auto-indent-parity`). 프리필은 벤더링 readline의 공개 훅으로 넣는다. **그 훅은 이 RD가 벤더 소스에 추가한다**(`read()`가 입력 상태를 만든 뒤 알리는 `onInputReady` 콜백 또는 `ready` Promise, `06-editing.md` 6.1) — 코어는 private 멤버(`state`·`activeRead`)에 손대지 않는다. 훅의 완료 조건: 훅 시점의 `updateLine`·커서 복원이 사라지지 않는다(TRP-008 재현 시험이 훅 없이 RED, 훅으로 GREEN).
+완료 기준: 위 규칙 전부 + Shift+Enter/Alt+Enter 프리필, 일반 Enter·붙여넣기·`input()`에는 프리필 없음, 채워진 공백뿐인 줄은 history에 없음, 본문 없이 Enter 반복 시 블록이 끝나지 않음. `auto-indent.ts`가 pyodide에 든 `_pyrepl.readline` 함수와 차분 검증된다(`auto-indent-parity`).
 
-인계(RD-008): 건너뛴 이전 시나리오는 RD-012b G1(2칸 블록을 취소해도 다음 블록 프리필이 2칸)이다 — 취소가 `lastUsedIndentation`을 지우지 않아야 한다. 프리필이 없어서 RD-008이 이식할 때 기대값을 고친 확인이 셋 더 있다: RD-012b C1(블록 본문을 `    print(2)`로 직접 쳐야 한다)과 D1·D2·D3(Shift+Enter 둘째 행이 `print(3)`이다). 프리필이 들어오면 옛 기대(`... ` 다음 줄 4칸, `    print(3)`)로 되돌린다(`_works/_completed/…-rd-008-…/verify/skipped-ids.md` 4절). auto-indent 래퍼는 벤더 `Readline.read(prompt, { cancelable })`를 감싸고 취소 분기(`^C`·history 없이 `null`)는 바꾸지 않는다. `createRepl`의 `readLine` 핸들러는 이미 `(prompt, pending, cancelable)`를 받으며 `pending`만 무시하고 있다.
+결과: 벤더 `packages/xterm-readline`에 `ReadOptions.prefill?: string`(`read()`의 write 콜백 안, `new State`
+직후 1회 채움 — 초안이던 `onInputReady`/`ready` Promise 대신 옵션으로 계약을 명시했다, TRP-008 재현 시험
+RED→GREEN)과 `ReadOptions.onKey?: (input: Input) => boolean`(범용 키 훅, Backspace·Shift/Alt+Enter가 쓰고
+Tab은 RD-015가 그대로 쓴다), `ReadlineOptions.skipBlankHistory`, `Readline.getCursor()`·`editInsert()`·
+`editBackspace()`, `Input` 타입 export를 추가했다(`readline.test.ts`·`prefill.test.ts`·`on-key.test.ts`).
+코어는 `terminal/auto-indent.ts`에 순수 함수(`nextIndentation`·`backspaceCount`·`indentUnitWidth`,
+이전 구현 이식) + `createAutoIndent(readline)`(세션 소유 정책 객체, `readOptions(pending)`)을 두고,
+`repl-reader.ts`·`read-guard.ts`·`session.ts`가 `pending`을 그대로 통과시킨다. `session.ts`의
+`startSession()`이 세션마다 `createAutoIndent`를 새로 만들어 리셋 시 별도 초기화 없이 4칸으로 돌아간다.
+검증: parity 29/29(pyodide `_pyrepl.readline` 오라클), 벤더+코어 단위 시험(RED→GREEN 다수) + 변이 검사
+2세트(DELTA-02용 3건, DELTA-04용 7건, 모두 killed), 브라우저 `auto-indent-check.mjs` dev 26/26 + preview
+9/9(`pageerror` 0), 양성 대조 2건(`readOptions`의 `prefill` 제거 → `prefill`·`unit` 실패, `onKey` 제거 →
+`backspace`·`shift`·`alt`·`cancel` 대부분 실패). 루트 4종 통과.
+
+인계(RD-008 이월 복원): RD-012b G1(2칸 블록을 취소해도 다음 블록 프리필이 2칸)·C1(본문을 `    print(2)`로
+직접 쳐야 했던 것을 프리필 위 `print(2)`로)·D1·D2·D3(Shift+Enter 둘째 행이 `print(3)`였던 것을
+`    print(3)`으로) 5건을 `auto-indent-check.mjs`의 `cancel` 절로 복원했다. `_works/_completed/…-rd-008-…/
+verify/skipped-ids.md`에 "RD-013 복원" 표기를 남겼다.
+
+인계(RD-014): `ReadlineOptions.skipBlankHistory`는 벤더 옵션(Enter 분기에서 처리)이라 블록 묶기
+(`groupBlockHistory`)는 이 옵션이 이미 거른 뒤의 `history.append` 호출 위에 겹쳐 쌓으면 된다. 프리필된
+`... ` 줄의 ↑는 이 RD가 손대지 않았다(벤더 history 탐색 그대로, RD-014가 결정할 몫).
+
+인계(RD-015): 키 훅(`ReadOptions.onKey`)은 이 RD가 범용으로 이미 벤더 소스에 추가했다 — RD-015는 새 훅을
+만들 필요 없이 `readOptions`에 Tab 처리 분기를 합쳐 쓰고 `getLine`·`getCursor`·`editInsert`로 버퍼·커서를
+다룬다(`07-tab-completion.md` 7.1 갱신 완료).
+
+후속 후보 등록(범위 밖): 3.14 `backspace_dedent` 정확 이식(이전 줄들의 더 얕은 들여쓰기 수준까지 — 지금은
+단위 배수로 단순화, 편차 12 유지). `pending` + 현재 버퍼로 원리적으로 가능해 보이나 이번 RD 범위 밖.
 
 ### RD-014 — 블록 입력을 history 항목 하나로
 
@@ -386,7 +416,10 @@ PyCF_ONLY_AST)`)로 top-level 문장 경계를 구하고 얻은 AST를 2차 `com
 
 인계(RD-005): 건너뛴 이전 시나리오는 RD-006b의 X2·X3(블록 history 재호출 뒤 `012>>> ` 프롬프트 유지)다. worker는 `readLine`에 `pending`을 보내지만 main 핸들러가 아직 쓰지 않는다.
 
-인계(RD-006): `createReadGuard`의 `readLine`은 `(prompt)`만 받는다. `pending`을 리더에 넣는 RD-013·014는 `ReadGuardDeps.readLine` 시그니처와 `createRepl`의 `readLine` 핸들러·조립을 함께 넓힌다(REPL 읽기는 가드가 즉시 부르므로 시작 타이밍은 그대로다).
+RD-013 완료 반영: `createReadGuard`의 `readLine`은 이제 `(prompt, pending, cancelable)`을 받는다
+(`ReadGuardDeps.readLine`·`createRepl`의 `readLine` 핸들러·조립을 RD-013이 넓혔다, REPL 읽기는 가드가
+즉시 부르므로 시작 타이밍은 그대로다). 이 RD는 시그니처를 다시 바꾸지 않고 그 `pending`을 블록 묶기에
+쓰기만 하면 된다.
 
 인계(RD-008): 블록 history의 `discard()`를 걸 지점은 main `readLine` continuation의 `line === null`(취소)이다 — worker 쪽에서 `run(null)`이 `clearPending()`하는 것과 짝이다. "Ctrl+C로 취소한 블록은 history에 남지 않는다"는 완료 기준 중 **줄 단위 부분은 이미 성립한다**: RD-008이 RD-012c H2(취소 뒤에도 제출한 블록 줄이 ↑로 돌아온다)와 RD-012b H1(취소한 입력 줄은 ↑ 30회 동안 없다)을 브라우저로 통과시켰다. 이 RD가 볼 것은 블록을 항목 하나로 묶은 뒤의 동작이다(RD-006b X2·X3 포함).
 
@@ -400,7 +433,11 @@ PyCF_ONLY_AST)`)로 top-level 문장 경계를 구하고 얻은 AST를 2차 `com
 
 왕복 지연 측정 계약: keydown(Tab) → 후보 삽입 또는 목록이 화면에 반영된 시각. 페이지 내부 시계(TRP-022), dev Chromium headless, 웜(세션 첫 Tab 제외), 대표 입력 3종(`a.` 속성 후보 다수, 빈 스템 공백 삽입, `import os.pa`는 RD-016 뒤) × N=20. **필수**는 정지 0과 200ms 이내(RD-009 시나리오와 같은 판정선)이고, 30ms는 참고치로 기록한다(출처 없는 수치라 필수에서 뺐다. RD-009 Ctrl+C 복귀 중앙값 22~30ms와 같은 자릿수인지 본다). 결과를 본 뒤 기준을 재해석하지 않는다.
 
-Tab 가로채기는 벤더 `readKey`(private)를 감싸지 않는다. **키 가로채기 공개 훅을 이 RD가 벤더 소스에 추가한다**(예: `Input`을 받아 소비했으면 `true`를 돌려주는 핸들러 등록, `06-editing.md` 6.1) — `createTabReader`는 그 훅과 `getLine`·`updateLine`·`tty()` 같은 공개 API만 쓴다. `07-tab-completion.md` 7.1은 이에 맞게 고쳤다.
+Tab 가로채기는 벤더 `readKey`(private)를 감싸지 않는다. **키 가로채기 공개 훅은 RD-013이 이미 벤더 소스에
+추가했다**(`ReadOptions.onKey?: (input: Input) => boolean`, `Input`을 받아 소비했으면 `true`를 돌려준다,
+`06-editing.md` 6.1·6.3) — `createTabReader`는 REPL 읽기의 `readOptions`에 Tab 처리 분기를 합쳐 쓰고
+그 훅과 `getLine`·`getCursor`·`editInsert`·`updateLine`·`tty()` 같은 공개 API만 쓴다(새 훅을 만들 필요
+없음). `07-tab-completion.md` 7.1은 이에 맞게 고쳤다.
 
 인계(RD-006): "main이 `input()` 읽기 중 Tab을 요청하지 않는다"는 성질(메일박스 대기 중 worker는 `complete`에 답하지 못한다)은 Tab 리더가 들어올 때 시험으로 고정한다. 프로토콜 쪽(메일박스 대기 중 보낸 `complete`는 `deliver` 전 응답 없음, 뒤 응답, 유실 없음)은 RD-006이 `protocol/thread-scenario.test.ts`에 넣었다. `input()` 안 Tab 무동작은 편차 17이다.
 

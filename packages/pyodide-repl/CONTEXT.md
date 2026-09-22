@@ -63,6 +63,22 @@ _Avoid_: 커맨드, 셀
 **블록**:
 `... ` 프롬프트로 이어지는 미완성 복합문 입력. 제출이 아니라 판정(`incomplete`)의 결과다.
 
+**프리필**:
+`... ` 다음 입력줄에 자동으로 채워 넣는 들여쓰기 텍스트(`terminal/auto-indent.ts`의 `nextIndentation`).
+벤더 `ReadOptions.prefill`로 넣는다. 일반 Enter·붙여넣기·`input()`에는 넣지 않는다.
+_Avoid_: 자동완성(Tab 완성과 혼동), 힌트
+
+**`lastUsedIndentation`**:
+세션이 사는 동안 유지되는 "마지막으로 본 들여쓰기 단위"(`_pyrepl`의 `last_used_indentation`과 같은 개념).
+`createAutoIndent(readline)`가 소유하는 클로저 상태이고, 세션 리셋은 새 객체를 만들어 4칸(`DEFAULT_UNIT`)으로
+되돌린다. 취소로는 지워지지 않는다.
+_Avoid_: 들여쓰기 폭(단위 자체를 가리킬 때는 이 말을 쓴다. 상태 이름과 섞지 않는다)
+
+**`onKey`**:
+벤더 `ReadOptions.onKey`. 활성 읽기의 키마다 벤더 처리 앞에서 불려 `true`를 돌려주면 그 키를 소비한다.
+자동 들여쓰기(Shift/Alt+Enter·Backspace)와 Tab 완성이 같은 훅을 쓴다.
+_Avoid_: 키 핸들러(범용 이벤트 핸들러와 혼동)
+
 **중단**:
 실행 중 Ctrl+C로 사용자 코드에 `KeyboardInterrupt`를 올리는 것.
 _Avoid_: 취소, 인터럽트(신호 자체를 가리킬 때만)

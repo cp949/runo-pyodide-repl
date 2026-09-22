@@ -98,7 +98,8 @@
     `print(..., end="")`로 만든다.
 
 ## 9.2 jsdom(기본 환경) + 실제 `Readline` + 가짜 터미널 / 가짜 타이머
-`auto-indent.test.ts`, `auto-indent-reader.test.ts`, `tab-reader.test.ts`, `stdin-reader.test.ts`,
+`auto-indent.test.ts`(순수 함수 + `createAutoIndent` 정책 객체, RD-013 완료 — 별도 `-reader.ts` 파일 없이
+한 모듈에 둔다), `tab-reader.test.ts`, `stdin-reader.test.ts`,
 `repl-reader.test.ts`, `rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
 `worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
 요청 거절 정책, **`setAtPrompt` 호출 순서**(`true` → `readLine` → `false` → `discardPendingInterrupt` → `run`, 취소
@@ -275,3 +276,13 @@ preview(4173)에 대해 `paste`·`tab`·`parse` 3절을 재실행한다. 이 RD�
 getData("text/plain")` → `coreService.triggerDataEvent`)라 `readPaste` 이후 코드 경로는 실제 붙여넣기와
 같다. 변이 4건은 `verify/positive-controls.md`에 기록(소스 변조 → dev HMR 반영 대기 → `ONLY=` 재실행 →
 `git checkout --` 원복, RD-010과 같은 방식).
+
+RD-013의 `auto-indent-check.mjs`(`_works/_completed/20260923-14-rd-013-auto-indent/verify/`)는 절 10개
+(`prefill`·`backspace`·`unit`·`history`·`shift`·`alt`·`paste`·`cancel`·`input`·`multiline-shift`, dev
+26개 확인)를 순서대로 돌리고, preview(4173)에 대해 `prefill`·`shift`·`unit` 3절을 재실행한다. `lib.mjs`에
+없는 `cursorCol()`(커서 앞 형제 노드의 `textContent` 길이 합산)을 이 스크립트가 로컬로 더했다 — `rows()`의
+끝 공백 제거가 "프리필만 있고 아직 타이핑하지 않은" 상태의 공백을 지워 버려 행 문자열 판정이 못 미친다.
+벤더 재그리기가 비동기라(`state.update`/`refresh`의 `term.write` 콜백) `Backspace` 직후 `cursorCol()`을
+곧바로 읽으면 낡은 값을 보므로 250~300ms 유예를 넣는다. 양성 대조 2건은 `verify/positive-controls.md`에
+기록 — ① `readOptions`의 `prefill` 제거(`prefill`·`unit` 절 실패, `shift`는 `onKey`만으로 계산돼 죽지
+않는다), ② `onKey` 제거(`backspace`·`shift`·`alt`·`cancel` 대부분 실패). 둘을 합치면 배선 전체가 커버된다.
