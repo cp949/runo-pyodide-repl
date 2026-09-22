@@ -80,8 +80,14 @@ main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미
 
 ### 3.4 세션 리셋·크래시·종료
 
-- 리셋은 worker 교체다. 화면은 유지된다. 순서: 자동 들여쓰기 단위 초기화 → 인터럽트 송신기 취소 → interrupt buffer `SIGNAL=0` → 이전 worker `terminate()` → 새 worker + 새 초기화 프레임. interrupt buffer는 세션 간 **재사용**(ack·요청 번호가 이어진다), 메일박스는 worker마다 **새로** 만든다. sink 세트도 worker마다 새로 만든다(`08-session.md`).
-- worker `error` 이벤트 → `onCrash(message)` → 앱이 리셋 UI를 띄운다.
+- 리셋(`ReplHandle.reset()`, RD-010)은 worker 교체다. 화면·history는 유지된다. 순서(자동 들여쓰기 단위
+  초기화는 RD-013 몫): 벤더 `readline.cancelRead()`로 옛 세션의 열린 읽기를 화면·history를 건드리지 않고
+  끝낸다 → 인터럽트 송신기 취소 → interrupt buffer `SIGNAL=0` → RPC dispose → 이전 worker `terminate()`
+  → 커서가 행 머리가 아니면 개행 → 청록 안내 줄 → 새 worker + 새 초기화 프레임(`08-session.md` 8.1).
+  interrupt buffer는 세션 간 **재사용**(ack·요청 번호가 이어진다), 메일박스·sink 세트는 worker마다 **새로**
+  만든다.
+- worker `error` 이벤트·부팅 예외 → `crashed` 상태 + `onCrash(message)` → 앱이 재시작 버튼을 띄운다(RD-010,
+  `08-session.md`).
 - `exit()`/`quit()`/`SystemExit` → `sessionTerminated` 알림 → 앱이 안내를 띄우고, 복구 경로는 리셋뿐이다.
 
 ## 4. 패키지 구조와 공개 인터페이스
@@ -119,7 +125,9 @@ interface ReplHandle {
 export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
 ```
 
-RD-005 시점의 부분 구현: `ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`이고 `ReplHandle`은 `dispose()`와 `crossOriginIsolated`다. RD-003·004의 임시 `readLine(prompt)` 핸들 API는 RD-005에서 빠졌다. 줄 읽기는 worker가 보내는 `readLine` 요청이 유일한 경로다. 나머지 옵션은 그것을 쓰는 RD가 추가한다(`topLevelAwait`는 RD-012, `onCrash`·`reset`은 RD-010). `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`·`terminated`(`sessionTerminated` 알림)를 발행하고 `crashed`는 RD-010이 발행한다. `sessionTerminated`는 터미널에 쓰지 않고 worker도 종료하지 않는다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다.
+RD-005 시점의 부분 구현: `ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`이고 `ReplHandle`은 `dispose()`와 `crossOriginIsolated`다. RD-003·004의 임시 `readLine(prompt)` 핸들 API는 RD-005에서 빠졌다. 줄 읽기는 worker가 보내는 `readLine` 요청이 유일한 경로다. 나머지 옵션은 그것을 쓰는 RD가 추가한다(`topLevelAwait`는 RD-012, `onCrash`는 RD-010). `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`·`terminated`(`sessionTerminated` 알림)를 발행하고 `crashed`는 RD-010이 발행한다. `sessionTerminated`는 터미널에 쓰지 않고 worker도 종료하지 않는다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다.
+
+`reset()`은 RD-010이 인자 없이(`reset(): void`) 추가했다. `{ topLevelAwait? }` 옵션은 RD-012가 더한다(그 전까지는 위 시그니처가 아니라 무인자다). `disposed`·`!isolated`면 no-op, 그 외 상태는 전부 허용한다. 순서·게이트는 3.4·`08-session.md` 8.1.
 
 main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 그려 한 줄을 읽어 응답한다(`04-stdin-input.md` 3.3). 열린 읽기가 있는 동안 도착한 요청은 `Error("이미 읽는 중")`로 거절한다(벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다). 요청 시그니처는 `readLine(prompt, pending, cancelable)`이고 `cancelable`은 리더에 그대로 전달한다(RD-008). `pending`은 아직 무시하며 RD-013·014가 쓴다. 리더에는 `dispose()` 뒤 write 콜백을 전달하지 않는 터미널 뷰를 준다. xterm은 `term.dispose()` 뒤에도 대기 중인 write 콜백을 실행하므로, `rewindTail`이 flush를 기다리는 중에 dispose되면 그 콜백이 해제된 `buffer`를 읽는다(`docs/traps/TRP-004`). 뷰가 이 콜백을 막는다.
 

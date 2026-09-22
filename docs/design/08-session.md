@@ -2,24 +2,54 @@
 
 > 이 문서의 규칙·상수는 이전 구현(`/work/cp949/pyodide-samples/apps/repl`, 읽기 전용 참고)이 CPython 3.14.4 pty 실측과 브라우저 회귀로 확정한 것이다. 새 구현은 통신 계층만 바꾸고(`docs/design/00-architecture.md`, `01-protocols.md`) 이 규칙은 그대로 지킨다. 절 끝의 "참고:" 경로는 이전 구현의 근거 위치다.
 
-이 절의 `sessionGen`·`setState`류 서술은 이전 구현의 React 데모 배선이다. 새 구조에서는 코어 패키지의 `createRepl()` 핸들이 `reset()`·`dispose()`·`onCrash`·`onSessionTerminated`를 노출하고(`00-architecture.md` 4절), `apps/demo`이 그 위에 같은 규칙으로 UI 상태를 얹는다. 순서 규칙(버퍼 재사용 전 송신기 취소·슬롯 비우기, sink 세트 재생성, 화면은 1회 생성)은 코어가 지킨다.
+## 8.1 리셋 = worker 교체(`ReplHandle.reset()`, RD-010)
 
-## 8.1 리셋 = worker 교체
-- 화면(`Terminal`/`Readline`)은 마운트 시 **1회만** 만든다(deps `[]`). 세션 리셋으로도 스크롤 기록이
-  유지되어야 한다. worker는 `sessionGen`·`topLevelAwaitEnabled`가 바뀔 때마다 새로 만든다(effect deps).
-- `resetSession(message)`: `setWorkerSync(null)` → `setSessionTerminated(false)` →
-  안내 줄을 `println`(청록) → `setSessionGen(g => g + 1)`. 그러면 worker effect의 cleanup(이전
-  `worker.terminate()`)과 새 worker 생성이 자연히 일어난다. top-level await 스위치도 같은 경로를 쓴다.
-- 새 worker 직전 순서: `autoIndent.reset()`(들여쓰기 단위 잊기) → `interruptSender.cancel()` →
-  `Atomics.store(buffer, SIGNAL, 0)` → 버퍼 전달. **interrupt buffer는 세션 사이에 재사용**하므로 남은
-  SIGINT·재전송을 반드시 먼저 치운다(이전 worker가 소비하지 못한 값이 새 worker의 시작 코드를 죽인다).
-  ack·요청 번호는 이어진다(핸들러의 `last_seq` 초기값이 설치 시점 `buf[SEQ]`라 안전하다).
-- sink 세트도 worker마다 새로 만든다(이전 꼬리 비물려받음). cleanup에서 `rpc.dispose()`,
-  `tabReader.dispose()`, `sinksRef = null`, worker error 리스너 제거, `interruptSender.cancel()`,
-  `worker.terminate()`.
-- Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 **반드시 별개 기능**으로 유지한다.
-- worker `error` 이벤트 → `onCrash(message)` → 상위가 `ReplSession`을 `key`로 재마운트한다(이 경로에서는
-  top-level await 스위치가 OFF로 돌아간다).
+`readline`(벤더 `Readline`)·`interruptBuffer`·`interruptSender`·Ctrl+C 핸들러는 핸들(`index.ts`) 소유라
+리셋을 넘어 산다. `Terminal`(화면)도 호출자 소유라 마운트 시 1회만 만들어진다. 세션 1개(worker·RPC·
+sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들고 `reset()`이 통째로 교체하는 단위다
+(`00-architecture.md` 4.2).
+
+`reset()` 순서(자동 들여쓰기 단위 초기화는 RD-013 몫):
+
+1. `session.terminate()` — 옛 세션을 끝낸다: `readline.cancelRead()`(열린 읽기를 `ReadCancelledError`로
+   끝낸다. 화면·history·리스너·`term`은 건드리지 않는다, `06-editing.md` 6.1) → `endSession()`
+   (`alive=false`, `interruptSender.cancel()`) → `rpc.dispose()` → `worker.terminate()`.
+2. `Atomics.store(interruptBuffer, SIGNAL, 0)` — interrupt buffer는 세션 사이에 재사용하므로(같은
+   `SharedArrayBuffer`) 옛 세션이 못 비운 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를
+   죽이지 않는다.
+3. 커서 행 처리: `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다
+   (TRP-006). 개행 여부는 **코어**가 결정한다 — 벤더 `cancelRead()`는 화면에 아무것도 그리지 않는다.
+4. `writeNotice(readline, RESET_NOTICE, "info")` — 청록 안내 줄
+   `[세션 리셋됨 — 이전 변수/import가 모두 초기화되었습니다]`. 세션 밖 출력 경로(TRAP-12의 유일한 예외,
+   `05-output.md` 4.1).
+5. `startSession(...)`로 새 세션을 만든다: 새 `MessageChannel`·메일박스·`InitFrame`·RPC·worker·sink
+   세트·리더·가드·게이트. `interruptBuffer`는 같은 것을 새 프레임에 싣는다(`createWorker()`가 새 worker를
+   만든다).
+6. `onStatus("loading")`을 동기로 발행한다. 이후 새 worker의 `ready`/`loadFailed` 알림이
+   `ready`/`load-failed`를 재발행한다.
+
+`dispose()` 뒤 `reset()`은 no-op. `!isolated`(worker가 없다)에서도 no-op. 그 외 상태(`ready`·
+`terminated`·`load-failed`·`loading`)는 전부 허용한다. 인자 없음(옵션은 RD-012), 확인 대화상자·디바운스
+없음.
+
+세션 소유 vs 핸들 소유(`session.ts`): 세션은 게이트 4종(`alive`·`readLinePending`·`inputReadsPending`·
+`cancelSettling`)·`reading`·`ended`·sink·리더·가드·메일박스·RPC·worker를 소유한다. 리셋마다 전부
+초기값으로 새로 만들어져, 옛 세션의 상태(예: 취소 응답 직후의 `cancelSettling=true`)가 새 세션으로 새지
+않는다. 핸들은 `readline`·`interruptBuffer`·`interruptSender`·Ctrl+C 핸들러(`session?.pythonRunning()`을
+현재 세션 변수로 늦게 읽어, 리셋으로 세션이 바뀌어도 다시 등록할 필요가 없다)·`dispose()`·`reset()`을
+소유한다.
+
+화면·history는 유지된다: `Readline`이 핸들 소유라 벤더 `History`(`persist: false`, 메모리만)가 세션을
+넘어 산다. 리셋 시 미제출 입력·대기 읽기는 버린다(history 미기록, 화면에는 남긴다) — `cancelRead()`가
+벤더 읽기를 화면·history를 건드리지 않고 끝내기 때문이다.
+
+옛 세션의 열린 읽기: `cancelRead()`로 `ReadCancelledError`가 되면 `session.ts`의 `readLine`/`readInput`
+RPC 핸들러가 응답 없이 조용히 끝낸다(영영 안 풀리는 Promise를 돌려줘 RPC가 응답을 보내지 않는다) — 옛
+worker는 이미 종료 중이라 응답을 기다리지 않는다. `readInput`은 세션이 `ended`면(TRP-003) 메일박스에
+`fail()`도 쓰지 않는다.
+
+Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 별개 기능이다. Ctrl+L은 벤더 동작 그대로이고 코어는
+손대지 않는다(`10-parity-deviations.md`).
 
 ## 8.2 StrictMode 이중 마운트
 - dev의 StrictMode는 mount→cleanup→mount를 한 번 더 돌린다. `Readline.dispose()`는 리스너만 정리하고

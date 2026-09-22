@@ -17,8 +17,10 @@ export interface FakeTerminalOptions {
   rows?: number;
 }
 
-/** 시험이 값을 지정하는 화면 모델. `buffer.active.{cursorY, baseY, getLine(row)?.isWrapped}`가 이것을 읽는다. */
+/** 시험이 값을 지정하는 화면 모델. `buffer.active.{cursorX, cursorY, baseY, getLine(row)?.isWrapped}`가 이것을 읽는다. */
 export interface FakeScreen {
+  /** 뷰포트 안 커서 열. 기본 0. `reset()`의 커서 행 처리(08-session.md, TRP-006)가 읽는다. */
+  cursorX: number;
   /** 뷰포트 안 커서 행. 기본 0. */
   cursorY: number;
   /** 스크롤백 행 수. 기본 0. */
@@ -53,6 +55,7 @@ interface FakeXterm {
   options: { tabStopWidth: number };
   buffer: {
     active: {
+      readonly cursorX: number;
       readonly cursorY: number;
       readonly baseY: number;
       getLine(row: number): IBufferLine | undefined;
@@ -111,6 +114,7 @@ export function createFakeTerminal(
   let disposed = false;
   let disposedBufferReads = 0;
   const screen: FakeScreen = {
+    cursorX: 0,
     cursorY: 0,
     baseY: 0,
     wrappedRows: new Set<number>(),
@@ -126,6 +130,10 @@ export function createFakeTerminal(
     options: { tabStopWidth: 8 },
     buffer: {
       active: {
+        get cursorX() {
+          countDisposedRead();
+          return screen.cursorX;
+        },
         get cursorY() {
           countDisposedRead();
           return screen.cursorY;

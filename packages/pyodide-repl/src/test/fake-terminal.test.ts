@@ -176,17 +176,27 @@ describe("addon과 dispose", () => {
 });
 
 describe("화면 모델(screen)", () => {
-  test("기본값은 cursorY 0·baseY 0·wrapped 행 없음이다", () => {
+  test("기본값은 cursorX 0·cursorY 0·baseY 0·wrapped 행 없음이다", () => {
     const fake = createFakeTerminal();
     const active = fake.term.buffer.active;
 
     expect(fake.screen).toEqual({
+      cursorX: 0,
       cursorY: 0,
       baseY: 0,
       wrappedRows: new Set<number>(),
     });
+    expect(active.cursorX).toBe(0);
     expect(active.cursorY).toBe(0);
     expect(active.baseY).toBe(0);
+  });
+
+  test("screen에 지정한 cursorX를 buffer.active가 읽는다", () => {
+    const fake = createFakeTerminal();
+
+    fake.screen.cursorX = 7;
+
+    expect(fake.term.buffer.active.cursorX).toBe(7);
   });
 
   test("screen에 지정한 cursorY·baseY를 buffer.active가 읽는다", () => {

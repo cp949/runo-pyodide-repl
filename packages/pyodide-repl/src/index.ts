@@ -1,6 +1,6 @@
 import { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
-import { createInterruptBuffer } from "./protocol/interrupt-protocol";
+import { createInterruptBuffer, SIGNAL } from "./protocol/interrupt-protocol";
 import { createInterruptSender } from "./protocol/interrupt-sender";
 import { startSession, type ReplSession } from "./session";
 import { writeNotice } from "./terminal/notice";
@@ -12,6 +12,10 @@ export const DEFAULT_PYODIDE_INDEX_URL =
 /** 비격리 페이지에서 세션을 시작하지 않는 이유를 알리는 터미널 안내 문구(ADR-0004). */
 export const NOT_ISOLATED_WARNING =
   "경고: cross-origin isolation이 꺼져 있어 Python 세션을 시작하지 않습니다. 서버가 COOP/COEP 헤더를 보내야 합니다.";
+
+/** `reset()`이 옛 세션 뒤에 남기는 안내 줄(청록, `08-session.md`). */
+export const RESET_NOTICE =
+  "[세션 리셋됨 — 이전 변수/import가 모두 초기화되었습니다]";
 
 /**
  * 세션의 생애를 앱에 알리는 값. RD-004는 `loading`·`ready`·`load-failed`·`not-isolated`를 발행하고, RD-005부터
@@ -46,6 +50,13 @@ export interface ReplHandle {
    * `Terminal`은 dispose하지 않는다.
    */
   dispose(): void;
+  /**
+   * 화면·history를 유지한 채 worker를 새로 만든다(변수·import는 사라진다). 청록 안내 줄(`RESET_NOTICE`) 뒤 새 배너가
+   * 뜬다. `dispose()` 뒤·`!isolated`면 no-op. 그 외 상태(`ready`·`terminated`·`crashed`·`load-failed`·`loading`)는
+   * 전부 허용한다. 동기이며 안에서 `loading`을 동기로 발행하고 이후 새 worker의 `ready`/`load-failed`가 재발행한다.
+   * 인자는 없다(옵션은 RD-012). 확인 대화상자·디바운스 없음.
+   */
+  reset(): void;
   /** `globalThis.crossOriginIsolated === true`. 거짓이면 worker가 없다. */
   readonly crossOriginIsolated: boolean;
 }
@@ -60,38 +71,57 @@ export function createRepl(options: ReplOptions): ReplHandle {
   options.terminal.loadAddon(readline);
   const onStatus = options.onStatus ?? (() => {});
   const isolated = globalThis.crossOriginIsolated === true;
+  const indexURL = normalizeIndexUrl(
+    options.pyodide?.indexURL ?? DEFAULT_PYODIDE_INDEX_URL,
+  );
 
   let disposed = false;
   let session: ReplSession | undefined;
+  // isolated일 때만 있다. not-isolated에서 reset()은 no-op(ReplHandle.reset 문서).
+  let resetSession: (() => void) | undefined;
 
   if (!isolated) {
     // SharedArrayBuffer가 없어 초기화 프레임을 만들 수 없다(ADR-0004, TRP-002). 폴백은 없다.
     writeNotice(readline, NOT_ISOLATED_WARNING, "warning");
     onStatus("not-isolated");
   } else {
-    // 프레임에 넣는 것과 같은 SharedArrayBuffer 뷰를 송신기도 쓴다(RD-010 리셋이 이 버퍼를 재사용한다).
+    // 프레임에 넣는 것과 같은 SharedArrayBuffer 뷰를 송신기도 쓴다. reset()이 새 세션에도 같은 버퍼를 싣는다.
     const interruptBuffer = createInterruptBuffer();
     const interruptSender = createInterruptSender(interruptBuffer);
     // 벤더 `Readline`은 활성 읽기가 없을 때만 부른다(읽기 중 Ctrl+C는 벤더가 같은 프롬프트를 다시 그린다).
-    // 현재 세션을 `session` 변수로 늦게 읽는다: 리셋(RD-010)이 세션을 바꿔도 다시 등록할 필요가 없다.
+    // 현재 세션을 `session` 변수로 늦게 읽는다: 리셋이 세션을 바꿔도 다시 등록할 필요가 없다.
     readline.setCtrlCHandler(() => {
       if (!session?.pythonRunning()) return;
       // tty 로컬 에코 흉내. 개행 없이 꼬리에 남아 다음 프롬프트·`input()` 프롬프트가 이어 그려진다(`t^Cx: `).
       session.echoCtrlC();
       interruptSender.send();
     });
-    session = startSession({
-      readline,
-      terminal: options.terminal,
-      interruptBuffer,
-      interruptSender,
-      createWorker: options.createWorker,
-      indexURL: normalizeIndexUrl(
-        options.pyodide?.indexURL ?? DEFAULT_PYODIDE_INDEX_URL,
-      ),
-      onStatus,
-    });
+    const spawnSession = () => {
+      session = startSession({
+        readline,
+        terminal: options.terminal,
+        interruptBuffer,
+        interruptSender,
+        createWorker: options.createWorker,
+        indexURL,
+        onStatus,
+      });
+    };
+    spawnSession();
     onStatus("loading");
+
+    resetSession = () => {
+      // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
+      // rpc.dispose() → worker.terminate()(session.terminate()).
+      session?.terminate();
+      // 옛 세션이 남겼을 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않게 한다.
+      Atomics.store(interruptBuffer, SIGNAL, 0);
+      // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006).
+      if (options.terminal.buffer.active.cursorX !== 0) readline.write("\r\n");
+      writeNotice(readline, RESET_NOTICE, "info");
+      spawnSession();
+      onStatus("loading");
+    };
   }
 
   return {
@@ -105,6 +135,10 @@ export function createRepl(options: ReplOptions): ReplHandle {
       session?.terminate();
       // 벤더 dispose가 멱등이라 term.dispose()가 addon을 다시 dispose해도 안전하다.
       readline.dispose();
+    },
+    reset() {
+      if (disposed) return;
+      resetSession?.();
     },
     get crossOriginIsolated() {
       return isolated;

@@ -21,6 +21,7 @@ import {
   createRepl,
   DEFAULT_PYODIDE_INDEX_URL,
   NOT_ISOLATED_WARNING,
+  RESET_NOTICE,
   type ReplHandle,
   type ReplOptions,
 } from "./index";
@@ -58,6 +59,12 @@ function observe(promise: Promise<unknown>): () => Outcome {
 /** 대기 중인 마이크로태스크와 타이머 하나를 모두 지나가게 한다. */
 function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** 배열 인덱스가 반드시 있는 시험에서 `T | undefined`를 `T`로 좁힌다(`noUncheckedIndexedAccess`). */
+function must<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("있어야 할 값이 없다");
+  return value;
 }
 
 /** MessagePort 알림이 도착했을 시간을 준다. "오지 않아야 한다"는 단언 앞에서 쓴다. */
@@ -131,6 +138,57 @@ function startSession(
     createWorkerSpy,
     handle,
     workerRpc,
+    bytes,
+  };
+}
+
+/**
+ * `reset()` 시험용: `createWorker`를 부를 때마다 새 가짜 worker를 만든다(`startSession`은 같은 worker를 재사용해
+ * 리셋 전후의 worker를 구분할 수 없다). `fake`는 세션을 넘어 하나다(화면·history가 리셋을 넘어 산다). `fakeWorker`·
+ * `workerRpc`는 가장 최근 세션(리셋됐으면 새 세션)을 가리킨다 — 기존 헬퍼(`startRead` 등)를 리셋 뒤에도 그대로 쓸 수 있게.
+ */
+function startResettableSession(
+  overrides: Partial<ReplOptions> = {},
+  terminalOptions: FakeTerminalOptions = {},
+) {
+  const fake = createFakeTerminal(terminalOptions);
+  const workers: ReturnType<typeof createFakeWorker>[] = [];
+  const rpcs: Rpc[] = [];
+  const onStatus = vi.fn();
+  const createWorkerSpy = vi.fn(() => {
+    const fakeWorker = createFakeWorker();
+    workers.push(fakeWorker);
+    return fakeWorker.worker;
+  });
+  const handle = createRepl({
+    terminal: fake.term,
+    createWorker: createWorkerSpy,
+    onStatus,
+    ...overrides,
+  });
+  handles.push(handle);
+  const bytes = () => fake.written.join("");
+  const workerRpcAt = (index: number): Rpc => {
+    const existing = rpcs[index];
+    if (existing !== undefined) return existing;
+    const rpc = createRpc(must(workers[index]).frame().rpcPort);
+    workerRpcs.push(rpc);
+    rpcs[index] = rpc;
+    return rpc;
+  };
+  return {
+    fake,
+    workers,
+    onStatus,
+    createWorkerSpy,
+    handle,
+    workerRpcAt,
+    get fakeWorker() {
+      return must(workers[workers.length - 1]);
+    },
+    get workerRpc() {
+      return workerRpcAt(workers.length - 1);
+    },
     bytes,
   };
 }
@@ -1230,5 +1288,229 @@ describe("비격리 페이지", () => {
       handle.dispose();
       handle.dispose();
     }).not.toThrow();
+  });
+});
+
+describe("reset()(RD-010)", () => {
+  test("reset은 cancelRead → rpc dispose(port.close) → worker.terminate 순서로 옛 세션을 끝내고, SIGNAL을 지우며 송신기도 멈춘다", async () => {
+    const cancelReadSpy = vi.spyOn(Readline.prototype, "cancelRead");
+    const closeSpy = vi.spyOn(MessagePort.prototype, "close");
+
+    const session = startResettableSession();
+    const oldWorker = must(session.workers[0]);
+    session.workerRpc.notify("write", "t");
+    await waitFor(() => session.bytes() === "t");
+
+    // 가짜 worker는 SIGINT를 소비(ack)하지 않는다 — 송신기가 살아 있다면 5ms마다 재전송한다.
+    session.fake.type("\x03");
+    const buffer = oldWorker.frame().interruptBuffer;
+    await waitFor(() => Atomics.load(buffer, SIGNAL) === 2);
+    cancelReadSpy.mockClear();
+    closeSpy.mockClear();
+
+    session.handle.reset();
+
+    expect(Atomics.load(buffer, SIGNAL)).toBe(0);
+    expect(cancelReadSpy).toHaveBeenCalledTimes(1);
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(must(cancelReadSpy.mock.invocationCallOrder[0])).toBeLessThan(
+      must(closeSpy.mock.invocationCallOrder[0]),
+    );
+    expect(must(closeSpy.mock.invocationCallOrder[0])).toBeLessThan(
+      must(oldWorker.terminate.mock.invocationCallOrder[0]),
+    );
+
+    // 송신기가 멈췄으면 잠시 뒤에도 SIGNAL이 되살아나지 않는다(재전송 없음, TRP-009 계승).
+    await settle();
+    expect(Atomics.load(buffer, SIGNAL)).toBe(0);
+  });
+
+  test("reset은 같은 interruptBuffer를 새 프레임에 싣고 createWorker를 다시 부르며, 옛 worker만 terminate된다", () => {
+    const session = startResettableSession();
+    const oldWorker = must(session.workers[0]);
+    const buffer = oldWorker.frame().interruptBuffer;
+
+    session.handle.reset();
+
+    expect(session.createWorkerSpy).toHaveBeenCalledTimes(2);
+    expect(session.workers).toHaveLength(2);
+    const newWorker = must(session.workers[1]);
+    expect(newWorker.frame().interruptBuffer.buffer).toBe(buffer.buffer);
+    expect(oldWorker.terminate).toHaveBeenCalledTimes(1);
+    expect(newWorker.terminate).not.toHaveBeenCalled();
+  });
+
+  test("reset은 새 sink 세트·메일박스로 시작해 이전 꼬리·메일박스 값을 물려받지 않는다", async () => {
+    const session = startResettableSession();
+    session.workerRpc.notify("write", "t");
+    await waitFor(() => session.bytes() === "t");
+    const oldStdinData = must(session.workers[0]).frame().stdinData;
+
+    session.handle.reset();
+    await startRead(session);
+
+    expect(session.bytes()).toContain(RESET_NOTICE);
+    // 새 세션의 프롬프트가 옛 세션의 꼬리("t")를 이어 그리지 않는다(`t\x1b[0m>>> ` 형태가 되지 않는다, 296행과 대조).
+    expect(session.bytes()).not.toContain("t\x1b[0m>>> ");
+    const afterNotice = session
+      .bytes()
+      .slice(session.bytes().indexOf(RESET_NOTICE));
+    expect(afterNotice).toContain(">>> ");
+    expect(must(session.workers[1]).frame().stdinData.buffer).not.toBe(
+      oldStdinData.buffer,
+    );
+  });
+
+  test("reset은 loading을 동기로 발행하고 새 worker의 ready 알림에 ready를 발행한다", async () => {
+    const session = startResettableSession();
+    session.onStatus.mockClear();
+
+    session.handle.reset();
+
+    expect(session.onStatus.mock.calls.at(-1)).toEqual(["loading"]);
+
+    session.workerRpc.notify("ready", { pyodideVersion: "0.28.3" });
+    await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "ready");
+
+    expect(session.onStatus.mock.calls.at(-1)).toEqual(["ready"]);
+  });
+
+  test("리셋 안내 줄: 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 그려진다(TRP-006)", () => {
+    const session = startResettableSession();
+
+    session.fake.screen.cursorX = 4;
+    const before1 = session.fake.written.length;
+    session.handle.reset();
+    const written1 = session.fake.written.slice(before1).join("");
+    expect(written1.startsWith("\r\n")).toBe(true);
+    expect(written1).toContain(RESET_NOTICE);
+
+    session.fake.screen.cursorX = 0;
+    const before2 = session.fake.written.length;
+    session.handle.reset();
+    const written2 = session.fake.written.slice(before2).join("");
+    expect(written2.startsWith("\r\n")).toBe(false);
+    expect(written2).toContain(RESET_NOTICE);
+  });
+
+  test("reset은 옛 세션의 열린 readLine 읽기를 응답 없이 끝내고 새 세션의 첫 readLine 요청을 받는다", async () => {
+    const session = startResettableSession();
+    const { line: oldLine } = await startRead(session);
+    const oldOutcome = observe(oldLine);
+
+    session.handle.reset();
+    await settle();
+
+    expect(oldOutcome()).toEqual({ state: "pending" });
+
+    // "이미 읽는 중"으로 거절되지 않고 새 세션의 첫 readLine이 정상 시작된다(reading은 세션마다 새로 시작).
+    const { line: newLine } = await startRead(session);
+    session.fake.type("ok\r");
+
+    await expect(newLine).resolves.toBe("ok");
+  });
+
+  test("reset은 열린 input() 읽기를 끝내되 옛 메일박스에 fail을 쓰지 않는다(TRP-003)", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const session = startResettableSession();
+    session.workerRpc.notify("write", "x: ");
+    await startInputRead(session);
+    const oldWorker = must(session.workers[0]);
+
+    session.handle.reset();
+    await settle();
+
+    expect(readMailbox({ fakeWorker: oldWorker }).state).toBe(MAILBOX.IDLE);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  test("취소 응답 뒤(cancelSettling) 리셋하면 새 세션의 첫 Ctrl+C가 에코·전송된다", async () => {
+    const session = startResettableSession();
+    const { line } = await startRead(session);
+    session.fake.type("abc\x03");
+    await expect(line).resolves.toBeNull();
+
+    session.handle.reset();
+    const newWorker = must(session.workers[1]);
+    session.fake.type("\x03");
+
+    expect(echoes(session)).toBe(1);
+    expect(slots({ fakeWorker: newWorker }).seq).toBe(1);
+  });
+
+  test("ready·terminated·load-failed·loading 상태 어디서든 reset이 새 세션을 만든다", () => {
+    const triggers: Array<
+      (s: ReturnType<typeof startResettableSession>) => void
+    > = [
+      () => {}, // loading(기본 상태, ready 알림 전)
+      (s) => s.workerRpc.notify("ready", { pyodideVersion: "0.28.3" }),
+      (s) => s.workerRpc.notify("sessionTerminated"),
+      (s) => s.workerRpc.notify("loadFailed", "실패"),
+    ];
+    for (const trigger of triggers) {
+      const session = startResettableSession();
+      trigger(session);
+
+      session.handle.reset();
+
+      expect(session.workers).toHaveLength(2);
+      expect(session.createWorkerSpy).toHaveBeenCalledTimes(2);
+      expect(session.onStatus.mock.calls.at(-1)).toEqual(["loading"]);
+    }
+  });
+
+  test("dispose 뒤 reset은 아무것도 하지 않는다", () => {
+    const session = startResettableSession();
+    session.handle.dispose();
+    const writtenAtDispose = session.fake.written.length;
+
+    expect(() => session.handle.reset()).not.toThrow();
+
+    expect(session.createWorkerSpy).toHaveBeenCalledTimes(1);
+    expect(session.fake.written).toHaveLength(writtenAtDispose);
+  });
+
+  test("reset 뒤 dispose는 마지막 세션만 끝낸다", () => {
+    const session = startResettableSession();
+    const oldWorker = must(session.workers[0]);
+    session.handle.reset();
+    const newWorker = must(session.workers[1]);
+
+    session.handle.dispose();
+
+    expect(oldWorker.terminate).toHaveBeenCalledTimes(1);
+    expect(newWorker.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  test("not-isolated에서 reset은 no-op이다", () => {
+    vi.stubGlobal("crossOriginIsolated", false);
+    const fake = createFakeTerminal();
+    const createWorkerSpy = vi.fn(() => createFakeWorker().worker);
+    const handle = createRepl({
+      terminal: fake.term,
+      createWorker: createWorkerSpy,
+    });
+    handles.push(handle);
+    const writtenBefore = fake.written.length;
+
+    expect(() => handle.reset()).not.toThrow();
+
+    expect(createWorkerSpy).not.toHaveBeenCalled();
+    expect(fake.written).toHaveLength(writtenBefore);
+  });
+
+  test("history는 reset을 넘어 유지된다(같은 Readline 인스턴스)", async () => {
+    const session = startResettableSession();
+    const { line } = await startRead(session);
+    session.fake.type("kept\r");
+    await expect(line).resolves.toBe("kept");
+
+    session.handle.reset();
+
+    const { line: next } = await startRead(session);
+    session.fake.type("\x1b[A\r"); // ↑로 이전 history를 불러와 그대로 제출
+    await expect(next).resolves.toBe("kept");
   });
 });
