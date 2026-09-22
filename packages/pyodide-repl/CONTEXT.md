@@ -37,7 +37,10 @@ Python `input()`·`sys.stdin`이 한 줄을 요구하는 것(`readInput`). worke
 _Avoid_: input 읽기, 동기 읽기
 
 **취소**:
-읽기 중 Ctrl+C로 그 읽기를 `null`로 끝내는 것. REPL 읽기의 취소는 미완성 블록을 버리고, stdin 읽기의 취소는 `KeyboardInterrupt`가 된다.
+읽기 중 Ctrl+C로 그 읽기를 `null`로 끝내는 것. 벤더 `Readline`의 cancelable 읽기가 `^C`·history 없이 `\r\n` 뒤 `null`로 이행한다.
+REPL 읽기의 취소는 `readLine` 응답 `null` → worker `run(null)`이 미완성 블록을 버리고 빨간 `KeyboardInterrupt` 한 줄을 낸다.
+stdin 읽기의 취소는 메일박스 CANCELLED → worker 콜백이 `signalInterrupt` → `checkInterrupt()`로 바꿔 `input()` 호출 지점의 `KeyboardInterrupt`가 된다.
+취소는 **읽기를 끝내는 것**이고 중단은 **돌고 있는 코드를 끊는 것**이다. 취소는 interrupt buffer를 main에서 쓰지 않는다(REPL 취소는 버퍼를 전혀 쓰지 않고, stdin 취소는 worker 콜백이 쓰고 그 자리에서 소비한다).
 _Avoid_: 중단(실행 중 Ctrl+C를 가리키는 말), abort
 
 **read-guard**:
@@ -98,8 +101,12 @@ _Avoid_: 재시도
 main의 눌림 전송·점검·재전송 상태기계(`protocol/interrupt-sender.ts`).
 
 **게이트**:
-main이 보는 "Python 실행 중"(`createRepl`의 `pythonRunning`). worker가 살아 있고(`alive`) 대기 중인 `readLine`·`readInput` 읽기가 없으면 참이다. 거짓이면 Ctrl+C를 에코도 전송도 하지 않는다. 로딩 중은 참이다(부팅 중 눌림은 worker의 연결 단계가 폐기한다).
+main이 보는 "Python 실행 중"(`createRepl`의 `pythonRunning`). worker가 살아 있고(`alive`) 대기 중인 `readLine`·`readInput` 읽기가 없고 취소 직후 구간이 아니면(`!cancelSettling`) 참이다. 거짓이면 Ctrl+C를 에코도 전송도 하지 않는다. 로딩 중은 참이다(부팅 중 눌림은 worker의 연결 단계가 폐기한다).
 _Avoid_: running 플래그, busy
+
+**cancelSettling**:
+게이트의 항 하나. REPL 읽기가 취소로 끝난 뒤 다음 요청이 도착하기 전까지 참이다(`readLine` 도착·`readInput` 도착·`inputReadsPending → 0`에서 거짓). 이 구간의 Ctrl+C는 SIGINT를 남겨 다음 실행을 죽이므로 막는다. `input()` 취소에는 세우지 않는다(취소 뒤에도 사용자 코드가 계속 돈다).
+_Avoid_: guardAfterCancel(이전 구현의 벤더 인자 이름), 취소 방어 플래그
 
 **감시 타이머**:
 worker의 20ms 타이머. 정지한 실행 중 SIGINT를 엿보고 깨우며, 프롬프트 유휴 SIGINT를 폐기한다.

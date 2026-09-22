@@ -19,7 +19,8 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
 ## 2.2 쓰기·ack 규칙
 - `signalInterrupt(buffer)`: **`Atomics.add(SEQ, 1)`을 먼저** 하고 그다음 `Atomics.store(SIGNAL, 2)`.
   SIGINT가 보이는 순간 핸들러가 읽는 번호가 이 눌림의 것이어야 새 눌림이 직전 눌림의 재전송으로 오인되지 않는다.
-  새 SIGINT를 쓰는 경로는 main 송신기와 `stdin-callback.ts` 두 곳뿐이다.
+  새 SIGINT를 쓰는 경로는 main 송신기와 `stdin-callback.ts` 두 곳뿐이다(후자는 RD-008이 넣었다: `boot.ts`가
+  주입한 `signalInterrupt` 클로저가 취소 표식을 받은 콜백 안에서 쓰고 `checkInterrupt()`가 그 자리에서 소비한다).
 - 재전송은 번호를 올리지 않고 `Atomics.compareExchange(SIGNAL, 0, 2)`만 한다.
 - ack를 올리는 지점은 셋뿐이다: ① 핸들러 진입(스택 검사·예외보다 먼저, 버려지는 SIGINT도 ack),
   ② 감시 타이머의 소비 성공(`compareExchange(2→0)`가 성공했을 때만), ③ 폐기(`discardPendingInterrupt`,
@@ -110,17 +111,24 @@ RD-007 시점의 시그니처는 `install(console, ack, seq)`(세 인자 필수,
 ## 2.7 main 쪽 Ctrl+C 처리
 - `readline.setCtrlCHandler(...)`는 읽는 중이 아닐 때만 불린다. 눌림마다 `^C`를 **sink `write`로**
   에코하고(꼬리에 들어가야 한다) `interruptSender.send()`를 부른다.
-- **게이트 `pythonRunning = alive && !readLinePending && inputReadsPending === 0`**. 거짓이면 에코도 전송도
-  하지 않는다. 각 항의 뜻:
+- **게이트 `pythonRunning = alive && !readLinePending && inputReadsPending === 0 && !cancelSettling`**. 거짓이면
+  에코도 전송도 하지 않는다. 각 항의 뜻:
   - `alive`: worker 생성부터 `sessionTerminated`·`loadFailed`·`dispose()` 전까지. 그 뒤에는 눌림이 닿을
     코드가 없다(3.14에도 프로세스가 없으므로 편차가 아니다).
   - `!readLinePending`: 수락한 `readLine`의 읽기가 끝나기 전. 요청 도착부터 응답이 포트에 올라가기 전까지라
     **읽기가 실제로 열리기 전의 갭(약 20ms)도 포함한다** — 그 사이 눌림은 에코 없이 버려진다(편차 32).
-  - `inputReadsPending === 0`: `readInput` 알림 도착부터 `deliver`/`fail`이 끝날 때까지. 값을 다 전달한
+  - `inputReadsPending === 0`: `readInput` 알림 도착부터 `deliver`/`fail`/`cancel`이 끝날 때까지. 값을 다 전달한
     시점이 worker가 깨어나 실행을 재개하는 시점이다.
+  - `!cancelSettling`(RD-008): REPL 읽기가 취소(`null` 응답)로 끝난 continuation에서 참이 되고, **`readLine`
+    도착·`readInput` 도착·`inputReadsPending → 0`** 세 지점에서 거짓이 된다. 즉 "취소 응답 → 다음 요청 도착"
+    구간을 덮는다. `!readLinePending`이 덮는 "요청 도착 → 응답" 구간과 이어져 빈틈이 없다(`06-editing.md` 6.3).
+    불변식: worker가 코드를 돌리기 시작하는 모든 지점에서 게이트가 열린다. **`input()` 취소에는 세우지 않는다**
+    — 취소 뒤에도 사용자 코드가 계속 돌아 그 구간의 Ctrl+C는 중단이어야 한다(`04-stdin-input.md` 3.1의 실측).
 - 로딩 중(`ready` 전)은 참이다. 부팅 중 눌림이 실제로 버퍼에 써지고 worker의 연결 단계가 폐기한다(2.6).
   `readLine` 응답 뒤~다음 요청 전(배경 콜백이 CPU를 잡는 구간)도 참이다(편차 2).
-- 입력줄 편집 중 Ctrl+C는 `auto-indent-reader`의 `readKey` 래퍼가 처리한다(`04-stdin-input.md` 3.1, `06-editing.md` 6.3).
+- 입력줄 편집 중 Ctrl+C는 벤더 `Readline`의 cancelable 읽기가 처리한다(`06-editing.md` 6.1·6.3): 활성 읽기가
+  있으면 `setCtrlCHandler`가 아예 불리지 않고 읽기가 `null`로 끝난다. worker는 `readLine`·`readInput`에
+  `cancelable = true`를 보내며, `false`를 보내면 벤더 원본 동작(`^C` + 같은 프롬프트 재그리기)이다.
 
 ## 2.8 webloop 재보고 억제(`webloop-reraise.py`)
 - WebLoop의 `_keyboard_interrupt_handler`·`_system_exit_handler`를 no-op으로 바꿔 `run_handle`이
@@ -153,6 +161,24 @@ main: SEQ+=1 → SIGNAL=2
 worker: Python이 안 돌아 폴링 없음 → 20ms 감시 타이머가 Atomics.load===2 확인
         interruptIdle() 호출 → 깨우기 성공 → compareExchange(2→0) 성공 → ACK+=1
         run_sync 래퍼 또는 콘솔 task 취소로 사용자 지점에서 중단
+
+(D) 입력줄(REPL 프롬프트) 취소 — 버퍼를 전혀 쓰지 않는다
+main: Ctrl+C → 활성 읽기가 있으므로 setCtrlCHandler는 불리지 않는다
+      벤더 readline: moveCursorToEnd → refreshUnhighlighted → "\r\n" → resolve(null)
+      readLine 응답 = null → readLinePending=false, cancelSettling=true (SEQ·SIGNAL 불변)
+worker: discardPendingInterrupt(잔류 없음) → run(null) → clearPending()
+        → writeError("KeyboardInterrupt") → req readLine(">>> ")
+main: 요청 도착 → cancelSettling=false → 게이트 다시 열림
+      (그 사이의 Ctrl+C는 에코도 전송도 하지 않는다)
+
+(E) input() 대기 중 취소 — 콜백이 버퍼를 쓰고 그 자리에서 소비한다
+main: Ctrl+C → 활성 stdin 읽기가 null로 끝남 → "\r\n"
+      readInput 핸들러: mailboxWriter.cancel() → finally에서 inputReadsPending-=1, cancelSettling=false
+worker: wait()가 null → signalInterrupt()(SEQ+=1, SIGNAL=2) → checkInterrupt()
+        → FS.ErrnoError(EINTR) → CPython이 EINTR 뒤 신호 처리(PEP 475)
+        → 핸들러(새 번호, ACK+=1, 스택에 <console>) → input() 호출 지점에서 KeyboardInterrupt
+        → 트레이스백 3줄(writeError) → req readLine(">>> ")
+main: 이 구간의 Ctrl+C는 게이트가 열려 있어 에코·전송한다(취소 뒤 사용자 코드가 계속 돌 수 있다)
 ```
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`,

@@ -53,6 +53,8 @@
     물려 한 줄 제출·값 에코·오류 표시·끝 개행·`exit`·`null` 취소를 본다. 사용자 코드 밖에서 새는 `KeyboardInterrupt` 안전망은
     실제 SIGINT 없이 `runLine`·`clearPending`을 `KeyboardInterrupt`를 던지는 Python 함수로 바꿔 끼워 재현한다.
   - stdin 콜백(`worker/stdin-callback.test.ts`)은 실제 pyodide에 `setStdin({ stdin: createStdinCallback(...) })`을 걸고 `input()`·`sys.stdin.readline()`·`read(3)`·`readlines(1)`·`for line in sys.stdin`이 같은 경로로 값을 받는지, 콜백 호출 수가 소비한 줄 수와 같은지 본다. `requestInput`과 `wait`의 앞뒤 순서는 호출 순서를 기록하는 주입 함수로 단언한다(알림을 `wait()` 뒤로 옮긴 변이가 이 시험에서 잡힌다). `setStdin` 없이 `input()`을 부르면 시험이 실패하지 않고 스위트가 멈추므로(외부 `timeout`이 필요하다) 시험 인스턴스에 `setStdin({ error: true })`를 먼저 걸고, `afterEach`에서 `sys.stdin`을 새 스트림으로 교체한다(`read(n)`이 남긴 `\n`이 다음 시험을 채운다, `docs/traps/TRP-010`).
+  - 같은 파일의 **취소 변환**(RD-008)은 `runPython`이 아니라 **콘솔 러너 경로**로 돌린다: 핸들러는 스택에 `<console>` 프레임이 있을 때만 `KeyboardInterrupt`를 내므로 `runPython`의 파일명 `<exec>`에서는 취소가 버려지고 CPython이 읽기를 재시도한다. `sigint-handler.test.ts`의 `setup()`과 같은 순서로 `createConsole` → `createInterruptBuffer` → `installSigintHandler` → `setInterruptBuffer` → `createSubmissionRunner`를 만들어 제출하고 `screen.stderr`로 트레이스백 바이트를 단언한다. 보는 것: `input()`·`readline()`·`read()`·`for line in sys.stdin`·함수 프레임의 트레이스백, `try/except/finally/with`, 재시도 없음(`countWaits === 1`), 요청 번호를 올리지 않은 전송은 무시(TRP-035 검출), `checkInterrupt()`가 던지지 않으면 `EOFError` + `console.warn` 1회, 20회 반복 뒤 SIGINT 잔류 0.
+  - **취소와 눌림의 경합**(같은 파일)은 눌림 스레드(`src/test/roles/interrupt-presser.ts`)를 띄운다. 읽기가 열린 순간을 기준으로 삼기 위해 `installStdin`에 `onRead` 훅을 두고 그 안에서 시작 표시(`ctl`)를 세운다. 0ms 연타는 취소와 같은 읽기 안에 떨어져 콜백의 `checkInterrupt()`가 함께 소비하고(실측 20라운드 잔류 0), 취소가 끝난 뒤 도착한 눌림은 돌고 있는 Python이 없어 슬롯에 남아 루프의 `discardPendingInterrupt`가 지운다(그 시험이 `SIGNAL === 2`를 단언한다). `except KeyboardInterrupt` 뒤 계산 중 눌림은 시간과 stderr 둘 다 본다(대조 215ms → 눌림 34ms).
   - 부팅의 `input()` 시험(`worker/boot.test.ts`)은 **선전달 기법**을 쓴다. `Atomics.wait(ctrl, STATE, IDLE)`은 STATE가 이미 READY면 즉시 돌아오므로, 각본이 `input()` 줄을 답하기 전에 main 역할이 `deliver`를 해 두고 타임라인(`write("x: ")` → `readInput(true)` → 다음 `readLine`)과 값(`x`의 에코 `'abc'`, `sys.stdin.readline()`의 에코 `'def\n'`)을 단언한다. 스레드는 쓰지 않는다. 메일박스 대기 중 `complete`가 큐잉되는 프로토콜 쪽은 `protocol/thread-scenario.test.ts`의 스레드 시험이 본다.
   - `exit()`를 실행하면 asyncio가 `SystemExit`을 WebLoop로 다시 던져 vitest가 `Unhandled Rejection`으로 실패 종료한다.
     `vitest.config.ts`의 `onUnhandledError`가 `PythonError` + 줄 시작 `SystemExit`만 무시하는 임시 조치이고(RD-009의
@@ -101,7 +103,9 @@
 - 눌림 간격·소실률·위험 구간 같은 타이밍 통계(연타 매트릭스 조합별 N=20, `while True: pass` 단일 눌림
   N=200 등), 부팅 중 Ctrl+C(N=30), 정지한 실행 12조합. RD-007의 스크립트: `ctrl-c-check.mjs`·`press-loss.mjs`·
   `burst-matrix.mjs`·`boot-press.mjs`·`positive-controls.py`(양성 대조 3건), node 통계는 `verify/node/`의
-  `press-loss.mjs`(N=3000)·`poll-overhead.mjs`.
+  `press-loss.mjs`(N=3000)·`poll-overhead.mjs`. RD-008의 스크립트: `prompt-cancel-check.mjs`(23개)·
+  `input-cancel-check.mjs`(26개)·`input-burst-matrix.mjs`(8셀 × N=20)·`positive-controls.py`(3건)·
+  `pty/pty_cancel.py`(3.14.4 취소 7건).
 - 연타 화면 판정은 행 감김·스크롤 아웃·프롬프트 재그리기에 깨진다(TRP-016). `while True: pass`·`for …: pass`는
   **한 줄 복합문**이라 빈 줄 Enter가 있어야 실행이 시작된다(3.14와 같다) — 그 단계를 빼면 Ctrl+C가 `... `
   프롬프트의 활성 읽기로 가 벤더 경로에서 `... ^C`만 남는다.
@@ -112,6 +116,9 @@
   바뀐 것을 확인하고 나서 새 프롬프트(`>>>`·`... `) 행을 기다린다. 그리기 전에 화면을 읽으면 낡은 프롬프트 행에 통과하고,
   새 프롬프트가 뜨기 전에 보낸 키는 버려진다(`docs/traps/TRP-005`).
 - stdin 프롬프트(`x: `)는 읽기가 시작되기 전에 화면에 나온다(`write` 알림이 `readInput` 알림보다 먼저 그린다). 프롬프트 없는 `input()`은 화면 신호가 없다. 그래서 `waitLastEndsWith("x:")`가 참이어도 읽기가 시작됐다는 보장이 없어, 입력은 첫 글자가 에코될 때까지 재시도한다(`typeWhenReading`, 버려진 키는 화면에 흔적이 없어 안전하다, `docs/traps/TRP-005`).
+- **취소도 같다**: 읽기가 열리기 전의 Ctrl+C는 활성 읽기가 없어 `ctrlCHandler`로 가 버려진다. `cancelWhenReading(text)`는 `typeWhenReading`으로 읽기를 확인한 뒤 Ctrl+C를 누른다(글자가 최소 하나 필요하다). 그 앞에 화면을 바꾸는 동작(빈 줄 제출 등)을 두면 무관한 재그리기를 첫 글자 에코로 오인해 글자를 잃는다 — `clear()` → 제출 → `cancelWhenReading` 순서만 쓴다.
+- 출력 유무를 **부분일치로 판정하지 않는다**: 제출한 소스 줄이 화면에 에코되므로 `exec("…print('wrong')")`을 제출하면 화면에 `wrong`이 있다. 행 정확일치(`hasRow`)나 눌림 직전 개수를 기준선으로 잡은 증가분(`countOf`)으로 본다(RD-008에서 이 버그로 확인 하나가 거짓 통과했다).
+- 취소 전 마지막 행이 이미 `>>>`인 확인(빈 프롬프트 취소)은 `waitPrompt(">>>")`가 낡은 행에 즉시 통과한다. 취소 줄(`KeyboardInterrupt`)이 나타나는 것을 먼저 기다린다.
 - 출력이 나온 시점을 "행에 마커 포함"으로 기다릴 때는 입력한 코드 행을 뺀다. 코드 행이 같은 마커를 포함해 즉시 통과한다(`docs/traps/TRP-011`). 시간을 재는 확인은 경과 시간과 화면 끝을 로그에 남긴다.
 - "이 로그가 없다"는 확인은 후속 출력에 밀려 뷰포트 밖으로 나간 행을 놓친다. 화면을 지우고(Ctrl+L) 한 번의 동작 직후 행 목록을
   정확히 단언한다(예: `gc.collect()` 직후 화면이 값 에코 한 줄뿐). 수정을 제거하는 변조로 확인이 실패하는지 봐서 검출력을 확인한다.

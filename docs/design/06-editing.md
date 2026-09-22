@@ -10,6 +10,7 @@
 - `History`의 `localStorage` 자동 저장/복원은 옵션으로 끈다(벤더링했으므로 no-op 덮어쓰기 대신 생성자 옵션 `persist: false`).
 - `Readline.dispose()`는 리스너를 해제하고 `term`을 비우며 대기 중인 읽기(write 콜백 대기 중이라 `activeRead`가 없는 것 포함)를 `Error("readline disposed")`로 reject한다. 두 번째 호출은 무동작이다(RD-003). `term.dispose()`가 로드된 addon을 다시 dispose하므로 멱등이 필수다. dispose 뒤 `read()`는 reject하고 `println`·`print`는 터미널에 쓰지 않는다. 실제 xterm 6은 `term.dispose()` 뒤에도 write 콜백을 돌리고 그 안의 `term.buffer` 읽기는 `DisposableStore` 경고를 낸다.
 - `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다.
+- RD-008이 소스에 더한 공개 API: `read(prompt: string): Promise<string>` / `read(prompt: string, options: ReadOptions): Promise<string | null>` 오버로드와 `ReadOptions = { cancelable?: boolean }`(기본 `false` = 원본 `^C` + 같은 프롬프트 재그리기). `cancelable`이면 활성 읽기 중 Ctrl+C가 읽기를 `null`로 끝낸다(6.3). 오버로드라 기존 `read(prompt)` 호출부의 반환형은 `Promise<string>`으로 남는다. `ReadOptions`도 export한다.
 - 업스트림 추적: 원격을 연결하지 않는다(runo-coincident와 같은 방식). 업스트림 변경을 가져올 때는 `CHANGELOG.md`의 버전 기준으로 수동 diff한다.
 
 ## 6.2 이전 구현이 적용한 수정(무엇을 / 어떤 방법으로) — 새 구현은 6.1 방침대로 소스에서 처리
@@ -37,13 +38,19 @@
   배수까지 지운다(최소 1글자). `>>> ` 첫 줄·탭 혼합·글자 뒤·줄 시작은 1글자.
 - Shift+Enter/Alt+Enter: 개행을 넣은 뒤 같은 규칙으로 채운다(`... `에서는 이미 제출된 줄을 앞에 붙여 계산).
   **일반 Enter와 붙여넣기는 채우지 않는다.** 자동 dedent는 없다. 켜고 끄는 스위치도 없다.
-- 취소(`cancelable` 읽기의 Ctrl+C): `moveCursorToEnd()` → `\r\n` → `activeRead.resolve(null)` →
-  `activeRead = undefined`. reject는 쓰지 않는다(TRP-010). `lastUsedIndentation`은 유지하고 `^C` 에코는
-  하지 않으며 history에 남기지 않는다. 화면은 `KeyboardInterrupt`(빨강) + 새 `>>> `.
-- `cancelSettling`: 취소한 뒤 **다음 읽기의 입력 상태가 만들어질 때까지** Ctrl+C를 무시한다(`activeRead`로
-  판단). 이 구간의 Ctrl+C가 중단 경로로 가면 SIGINT가 남아 다음 `push`가 죽는다(TRP-009).
-  `read()`의 4번째 인자 `guardAfterCancel`(기본 `true`)을 `input()` 경로만 `false`로 넘긴다.
-- `read(prompt, pending?, cancelable = false, guardAfterCancel = true) => Promise<string | null>`.
+- 취소(`cancelable` 읽기의 Ctrl+C)는 **벤더 `Readline` 소스**가 처리한다(6.1). 순서는 Enter 분기와 같게
+  `state.moveCursorToEnd()` → `state.refreshUnhighlighted()` → `term.write("\r\n")` → `activeRead`를 먼저
+  비우고 `resolve(null)`. reject는 쓰지 않는다(값이 RPC로 그대로 가야 한다). `^C`를 찍지 않고(3.14 프롬프트는
+  raw mode, pty 실측) history에도 넣지 않는다(벤더는 Enter에서만 `history.append`). 화면은 `KeyboardInterrupt`
+  (빨강) + 새 `>>> `이고 그 줄은 worker의 `run(null)`이 낸다(`02-console-core.md` 5.2). `lastUsedIndentation`은
+  RD-013이 유지한다(벤더는 들여쓰기 상태를 모른다).
+- `cancelSettling`은 **벤더 readline이 아니라 main 게이트의 항**이다(`03-ctrl-c.md` 2.7): 취소 응답 뒤 다음
+  요청이 도착하기 전의 Ctrl+C를 에코도 전송도 하지 않는다. 이전 구현이 `activeRead`로 판단해야 했던 비동기
+  창(TRP-008: `read()` 호출과 입력 상태 생성 사이)은 새 구조에서 `readLinePending`(요청 도착 → 응답)이 이미
+  덮으므로 두 구간이 이어져 빈틈이 없다. 벤더 readline은 REPL 정책을 모른다. `input()` 취소에는 이 항을
+  세우지 않는다(`04-stdin-input.md` 3.1).
+- 벤더 시그니처는 `read(prompt, options?: { cancelable?: boolean })`이다. RD-013의 auto-indent 래퍼가 그
+  `read()`를 감싸고 `pending`을 받아 프리필을 넣는다(래퍼가 취소 분기를 바꾸지는 않는다).
 
 ## 6.4 블록 히스토리 규칙(`groupBlockHistory(readline)`)
 - `history.append`를 감싼다. 기록 방식은 **"진행형 교체"**: 블록 첫 줄이 append되기 직전의 `entries`

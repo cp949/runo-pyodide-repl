@@ -20,3 +20,7 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-014](./TRP-014-atomics-wait-kills-sender-resend-timer.md) | 눌림 스레드를 `Atomics.wait`로 재우면 송신기의 재전송 점검이 죽고 "소실 0"이 저절로 나온다 | ACTIVE | 별도 스레드에서 `createInterruptSender`를 써서 소실·복구를 재는 하니스를 쓸 때 |
 | [TRP-015](./TRP-015-nohup-background-dies-with-agent-session.md) | `nohup ... &`로 띄운 장시간 작업은 에이전트 세션 정리에 죽고, 로그만 보면 정상 종료와 구별되지 않는다 | ACTIVE | 에이전트가 셸 도구로 수 분 이상 걸리는 측정·서버를 띄울 때 |
 | [TRP-016](./TRP-016-burst-screen-assertions-break-three-ways.md) | 연타 Ctrl+C의 화면 판정은 행 감김·스크롤 아웃·프롬프트 재그리기에 세 번 깨진다 | ACTIVE | 실행 중 Ctrl+C를 여러 번 누르고 화면 텍스트로 판정하는 브라우저 확인을 쓸 때 |
+| [TRP-017](./TRP-017-mutation-runner-timeout-misses-grandchild.md) | 변이 검사기의 `spawnSync` timeout이 `pnpm exec vitest`에는 듣지 않는다(손자가 파이프를 붙잡는다) | ACTIVE | `spawnSync("pnpm", ["exec", "vitest"…], { timeout })`로 변이 검사를 돌리는데 어떤 변이가 스위트를 멈추게 할 때 |
+| [TRP-018](./TRP-018-pkill-f-matches-own-shell.md) | `pkill -f`가 자기 셸 명령줄을 매치해 뒤 단계(원복)를 날린다 | ACTIVE | 한 셸 호출에서 `pkill -9 -f` 뒤에 원복·정리 단계를 이어 붙일 때 |
+| [TRP-019](./TRP-019-residual-sigint-passes-loose-assertion.md) | 잔류 SIGINT가 다음 시험에서 터져 느슨한 단언이 우연히 통과한다 | ACTIVE | 한 파일에서 실제 pyodide + interrupt buffer를 공유하며 취소·중단 시험을 연달아 돌릴 때 |
+| [TRP-020](./TRP-020-non-console-filename-drops-cancel-into-retry-loop.md) | `<console>` 밖 파일명(`runPython`의 `<exec>`)에서 취소하면 핸들러가 버려 읽기 재시도 루프가 된다 | ACTIVE | stdin 취소·실행 중 중단을 node 시험에서 `pyodide.runPython`으로 재현할 때 |

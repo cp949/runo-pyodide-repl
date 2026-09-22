@@ -60,9 +60,15 @@ Ctrl+C·sleep:
 
 stdin 읽기의 끝:
 
-34. **`sys.stdin.read()`·`readlines()`·`for line in sys.stdin`은 EOF(Ctrl+D)가 없어 줄마다 다시 읽고 끝나지 않는다**(RD-006). 벤더 `Readline`의 Ctrl+D는 글자 삭제이고 메일박스에 EOF 표식이 없다. 끊는 방법은 Ctrl+C뿐이며 그 경로는 RD-008이 넣는다. `input()`·`readline()`은 3.14와 같다(pyodide 314.0.7 `LegacyReader`가 콜백이 돌려준 문자열 끝에 `\n`을 붙이고 마지막 바이트가 `\n`이면 EOF를 넣지 않는다). `read(n)`·`readlines(hint)`처럼 상한이 있는 읽기는 한 줄 뒤 돌아온다(`read(n)`이 남긴 `\n`이 다음 읽기를 콜백 없이 채우는 것은 CPython 표준 동작이다, `docs/traps/TRP-010`). Ctrl+D EOF 표식은 프로토콜 확장이라 ROADMAP 항목으로 등록해야 한다.
+34. **`sys.stdin.read()`·`readlines()`·`for line in sys.stdin`은 EOF(Ctrl+D)가 없어 줄마다 다시 읽고 끝나지 않는다**(RD-006). 벤더 `Readline`의 Ctrl+D는 글자 삭제이고 메일박스에 EOF 표식이 없다. 끊는 방법은 Ctrl+C뿐이고 그 경로는 RD-008이 넣었다(취소가 `input()` 호출 지점의 `KeyboardInterrupt`가 되어 `read()`·`readlines()`·`for line in sys.stdin` 모두 끊긴다). `input()`·`readline()`은 3.14와 같다(pyodide 314.0.7 `LegacyReader`가 콜백이 돌려준 문자열 끝에 `\n`을 붙이고 마지막 바이트가 `\n`이면 EOF를 넣지 않는다). `read(n)`·`readlines(hint)`처럼 상한이 있는 읽기는 한 줄 뒤 돌아온다(`read(n)`이 남긴 `\n`이 다음 읽기를 콜백 없이 채우는 것은 CPython 표준 동작이다, `docs/traps/TRP-010`). Ctrl+D EOF 표식은 프로토콜 확장이라 ROADMAP 항목으로 등록해야 한다.
 
-참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약")
+`input()` 취소:
+
+35. **`input()` 취소의 트레이스백이 입력 줄 아래에서 시작하고 `_pyrepl` 프레임·소스 줄이 없다.** 3.14.4 pty 실측(RD-008 재측정 ⑤): Ctrl+C 응답이 개행 없이 `Traceback (most recent call last):\r\n`부터 시작해 화면에서는 `x: abcTraceback (most recent call last):`처럼 입력 줄에 붙고, 프레임은 `File "<python-input-0>", line 1, in <module>` + 소스 줄 + `_pyrepl/readline.py`(`input`) → `reader.py`(`readline`) → `reader.py`(`handle1`) → `unix_console.py`(`wait`) 4개다. 우리는 `\r\n` 뒤 다음 줄에서 시작하고 `Traceback (most recent call last):` / `  File "<console>", line 1, in <module>` / `KeyboardInterrupt` 3줄뿐이다(소스 줄·`_pyrepl` 프레임 없음). 함수 안 취소는 그 프레임(`File "<string>", line 2, in f`)이 더해진다. 프레임 흉내는 범위 밖이고, 개행은 sink의 println 계약(끝 개행을 sink가 붙인다)과 얽혀 있다.
+36. **`input()` 취소 직후 연타의 두 번째 눌림부터 `^C`가 에코되어 트레이스백 앞에 붙는다.** 취소에는 게이트 항 `cancelSettling`을 세우지 않으므로(`04-stdin-input.md` 3.1) 두 번째 눌림은 `setCtrlCHandler` 경로로 가 `^C`를 꼬리에 남긴다(`^CTraceback (most recent call last):` 형태). RD-008 브라우저 실측(N=20, 중앙값·범위): 0ms 2회 → 1 (1~1), 0ms 5회 → 4 (2~4), 키 반복 20회 → 19 (5~19), 긴 프롬프트 + 5회 → 4 (3~4), 짧은 프롬프트 + 5회 → 4 (1~4). 트레이스백은 모든 셀·모든 시행에서 정확히 1개였다. 3.14도 cooked mode에서 실행 중 `^C`를 에코하므로 "Python이 도는 중" 표시로는 옳다. 방어를 걸면 `except KeyboardInterrupt` 뒤 계산 중 Ctrl+C가 무시되므로(이전 구현 3.0초) 걸지 않는 쪽을 골랐다.
+37. **`... ` 프롬프트 취소 연타는 여러 눌림이 `KeyboardInterrupt` 한 줄로 합쳐진다.** `cancelSettling`이 취소 응답 뒤 구간을 덮어 `^C`도 찍히지 않는다. RD-008 실측(N=20): 0ms 2회·5회·키 반복 20회 모두 `^C` 0, `KeyboardInterrupt` 줄 수 중앙값 1(5회·키 반복에서 드물게 2 — 두 번째 취소가 새 읽기가 열린 뒤에 떨어진 경우). 이전 구현은 1~5ms 간격에서 평균 2·9.65줄이었으므로 합쳐짐이 더 강하다. 3.14는 눌림마다 한 줄을 내므로 줄 수 차이가 남는다.
+
+참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약"), RD-008 pty 재측정 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/pty/results.md`
 
 
 ## 2. 범위 밖 확정 (2026-09-21)
@@ -70,7 +76,7 @@ stdin 읽기의 끝:
 3.14 pty와의 차이 중 웹에서 원리적으로 재현하기 어렵거나 사용자 시나리오에 닿지 않는 것.
 
 - **stdout 버퍼링 모사**: flush 없는 `print(end="")`를 입력 뒤에 내는 3.14 동작. 웹은 즉시 출력(RD-015 정책).
-- **`sys.stdin.readline()`의 `^C` 에코**.
+- **`sys.stdin.readline()`의 `^C` 에코**. 3.14.4 pty 실측(RD-008 재측정 ⑦): `abc` 입력 뒤 Ctrl+C가 `^CTraceback (most recent call last):\r\n  File "<python-input-5>", line 1, in <module>\r\n    y = sys.stdin.readline()\r\nKeyboardInterrupt\r\n`이다(tty 드라이버의 cooked mode 에코, `_pyrepl` 프레임 없음). 우리는 `^C` 없이 같은 3줄 트레이스백을 낸다.
 - **꼬리 뒤 블록의 `... `가 꼬리 폭만큼 밀리는 3.14 quirk**.
 - **RD-012g 동기 XHR 대기 중 Ctrl+C**: `pyodide.http.open_url`·`pyxhr.get`은 `req.open(…, False)`인 동기 XHR이라 워커 스레드를 통째로 막아 폴링 지점도 감시 타이머도 없다. 3초 지연 서버 N=5 실측에서 `pyxhr.get`은 응답 뒤 `KeyboardInterrupt`, `open_url`은 눌림 무시. 동기 API 의미를 바꾸지 않는 설계가 필요한데 시나리오가 드물다.
 - **RD-016e 미로드 pyodide 배포 패키지의 import 후보**: 3.14 동등 범위 밖의 pyodide 확장. lockfile 패키지명을 후보에 넣으면 후보 집합이 로드 상태에 의존하고 `from numpy import <Tab>`은 로드 전 속성을 볼 수 없어 일관성이 깨진다.
