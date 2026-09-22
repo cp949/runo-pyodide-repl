@@ -49,6 +49,7 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine,
+      setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
       onTerminated,
@@ -71,6 +72,7 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine,
+      setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
       onTerminated,
@@ -96,6 +98,7 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine,
+      setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
       onTerminated,
@@ -125,6 +128,7 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine,
+      setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
       onTerminated,
@@ -148,6 +152,7 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine: vi.fn<ReadLine>().mockRejectedValue(boom),
+      setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
       onTerminated,
@@ -167,6 +172,7 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine,
+      setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
       onTerminated: vi.fn(),
@@ -176,23 +182,29 @@ describe("runReplLoop", () => {
     expect(run.mock.calls).toEqual([[null]]);
   });
 
-  test("readLine 응답 직후·run 전에 discardPendingInterrupt를 부른다(`null`에도)", async () => {
+  test("setAtPrompt(true) → readLine → setAtPrompt(false) → discardPendingInterrupt → run 순서다(`null`에도, 두 번째 반복에도)", async () => {
     const { readLine, run } = script([
       { line: "1+1", result: READY },
       { line: null, result: EXIT },
     ]);
+    const setAtPrompt = vi.fn<(value: boolean) => void>();
     const discardPendingInterrupt = vi.fn();
 
     await runReplLoop({
       readLine,
+      setAtPrompt,
       discardPendingInterrupt,
       run,
       onTerminated: vi.fn(),
       onError: vi.fn(),
     });
 
-    // 호출 전역 순번(invocationCallOrder)으로 세 함수의 호출을 한 줄로 펴서 순서를 본다.
+    // 호출 전역 순번(invocationCallOrder)으로 네 함수의 호출을 한 줄로 펴서 순서를 본다.
     const timeline = [
+      ...setAtPrompt.mock.invocationCallOrder.map(
+        (n, i) =>
+          [n, setAtPrompt.mock.calls[i]?.[0] ? "atPrompt(true)" : "atPrompt(false)"] as const,
+      ),
       ...readLine.mock.invocationCallOrder.map((n) => [n, "readLine"] as const),
       ...discardPendingInterrupt.mock.invocationCallOrder.map(
         (n) => [n, "discard"] as const,
@@ -202,10 +214,14 @@ describe("runReplLoop", () => {
       .sort(([a], [b]) => a - b)
       .map(([, name]) => name);
     expect(timeline).toEqual([
+      "atPrompt(true)",
       "readLine",
+      "atPrompt(false)",
       "discard",
       "run",
+      "atPrompt(true)",
       "readLine",
+      "atPrompt(false)",
       "discard",
       "run",
     ]);
@@ -217,11 +233,27 @@ describe("runReplLoop", () => {
     await runReplLoop({
       readLine: vi.fn<ReadLine>().mockRejectedValue(new Error("rpc disposed")),
       discardPendingInterrupt,
+      setAtPrompt: vi.fn(),
       run: vi.fn<Run>(),
       onTerminated: vi.fn(),
       onError: vi.fn(),
     });
 
     expect(discardPendingInterrupt).not.toHaveBeenCalled();
+  });
+
+  test("readLine이 reject되면 setAtPrompt(false)로 되돌리지 않는다", async () => {
+    const setAtPrompt = vi.fn<(value: boolean) => void>();
+
+    await runReplLoop({
+      readLine: vi.fn<ReadLine>().mockRejectedValue(new Error("rpc disposed")),
+      setAtPrompt,
+      discardPendingInterrupt: vi.fn(),
+      run: vi.fn<Run>(),
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(setAtPrompt.mock.calls).toEqual([[true]]);
   });
 });

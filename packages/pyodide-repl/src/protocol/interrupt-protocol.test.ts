@@ -7,8 +7,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acknowledgeInterrupt,
+  consumeInterrupt,
   createInterruptBuffer,
   discardPendingInterrupt,
+  hasPendingInterrupt,
   hasProtocolSlots,
   readRequestSeq,
   signalInterrupt,
@@ -140,6 +142,44 @@ describe("discardPendingInterrupt", () => {
     discardPendingInterrupt(buffer);
 
     expect(buffer[2]).toBe(1);
+  });
+});
+
+// 감시 타이머(03-ctrl-c.md 2.5)의 엿보기. 실제로 지우지는 않는다.
+describe("hasPendingInterrupt", () => {
+  it("SIGINT 슬롯이 2이면 참이다", () => {
+    const buffer = createInterruptBuffer();
+    signalInterrupt(buffer);
+
+    expect(hasPendingInterrupt(buffer)).toBe(true);
+  });
+
+  it("SIGINT 슬롯이 2가 아니면 거짓이다", () => {
+    const buffer = createInterruptBuffer();
+
+    expect(hasPendingInterrupt(buffer)).toBe(false);
+  });
+});
+
+// 감시 타이머가 정지한 실행을 깨웠을 때만 부른다. 비교 교환이 실패하면(폴링이 먼저 비웠다) ack를 또 올리지 않는다.
+describe("consumeInterrupt", () => {
+  it("SIGINT 슬롯이 2면 지우고 ack를 올리고 true를 돌려준다", () => {
+    const buffer = createInterruptBuffer();
+    signalInterrupt(buffer);
+
+    expect(consumeInterrupt(buffer)).toBe(true);
+
+    expect(buffer[0]).toBe(0);
+    expect(buffer[1]).toBe(1);
+  });
+
+  it("SIGINT 슬롯이 2가 아니면 건드리지 않고 false를 돌려준다", () => {
+    const buffer = createInterruptBuffer();
+
+    expect(consumeInterrupt(buffer)).toBe(false);
+
+    expect(buffer[0]).toBe(0);
+    expect(buffer[1]).toBe(0);
   });
 });
 

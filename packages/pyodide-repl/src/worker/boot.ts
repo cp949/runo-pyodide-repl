@@ -7,7 +7,9 @@ import type { PyodideInterface } from "pyodide";
 import type { InitFrame } from "../protocol/init-frame";
 import {
   acknowledgeInterrupt,
+  consumeInterrupt,
   discardPendingInterrupt,
+  hasPendingInterrupt,
   readRequestSeq,
   signalInterrupt,
 } from "../protocol/interrupt-protocol";
@@ -15,6 +17,7 @@ import { createRpc } from "../protocol/rpc";
 import { createMailboxReader } from "../protocol/stdin-mailbox";
 import { createConsole, type ConsoleSinks, type ReplConsole } from "./console";
 import { connectInterrupts } from "./interrupt-buffer";
+import { startInterruptWatch } from "./interrupt-watch";
 import { runReplLoop } from "./repl-loop";
 import type { InterruptIdle } from "./sigint-handler";
 import { createStdinCallback } from "./stdin-callback";
@@ -27,11 +30,12 @@ export interface BootDeps {
 
 /**
  * 순서: RPC 생성 → loadPyodide → createConsole → suppressWebLoopReraise → connectInterrupts → setStdin → ntf ready →
- * ntf writeOutput(BANNER) → REPL 루프 실행. `suppressWebLoopReraise`(WebLoop의 KeyboardInterrupt·SystemExit 재보고
- * 억제, 03-ctrl-c.md 2.8)는 콘솔 생성 직후·Ctrl+C 연결 전에 한 번만 부른다. `connectInterrupts`(SIGINT 핸들러 설치 →
- * 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중 눌림이 시작 코드를 죽이지 않도록 `setStdin`보다 앞이다(03-ctrl-c.md 2.6).
- * 로드·콘솔 생성·재보고 억제·Ctrl+C 연결·stdin 배선 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아
- * 있다).
+ * ntf writeOutput(BANNER) → 감시 타이머 시작 → REPL 루프 실행(00-architecture.md 3.1(5)). `suppressWebLoopReraise`
+ * (WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제, 03-ctrl-c.md 2.8)는 콘솔 생성 직후·Ctrl+C 연결 전에 한 번만
+ * 부른다. `connectInterrupts`(SIGINT 핸들러 설치 → 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중 눌림이 시작 코드를 죽이지
+ * 않도록 `setStdin`보다 앞이다(03-ctrl-c.md 2.6). 로드·콘솔 생성·재보고 억제·Ctrl+C 연결·stdin 배선 실패는 ntf
+ * loadFailed(String(error))로 알리고 돌아온다(worker는 살아 있다). 감시 타이머(`startInterruptWatch`, 03-ctrl-c.md
+ * 2.5)는 루프 직전에 켜고 루프가 끝나면(`exit()`) `finally`에서 끈다.
  */
 export async function bootReplWorker(
   frame: InitFrame,
@@ -95,11 +99,23 @@ export async function bootReplWorker(
     writeOutput: (text) => rpc.notify("writeOutput", text),
     writeError: (text) => rpc.notify("writeError", text),
   });
-  // 루프가 끝나면(`exit()`) 세션이 끝난 것이다. 깨우기 proxy는 여기서 놓아 준다.
+  // 루프의 readLine 대기 중(atPrompt=true)인지를 감시 타이머의 프롬프트 유휴 폐기가 읽는다(03-ctrl-c.md 2.5).
+  let atPrompt = false;
+  const stopWatch = startInterruptWatch({
+    interruptIdle,
+    atPrompt: () => atPrompt,
+    hasPending: () => hasPendingInterrupt(interruptBuffer),
+    consume: () => consumeInterrupt(interruptBuffer),
+    discard: () => discardPendingInterrupt(interruptBuffer),
+  });
+  // 루프가 끝나면(`exit()`) 세션이 끝난 것이다. 감시 타이머와 깨우기 proxy는 여기서 놓아 준다.
   try {
     await runReplLoop({
       readLine: (prompt, pending) =>
         rpc.call<string | null>("readLine", prompt, pending, true),
+      setAtPrompt: (value) => {
+        atPrompt = value;
+      },
       discardPendingInterrupt: () => discardPendingInterrupt(interruptBuffer),
       run: (line) => runner.run(line),
       onTerminated: () => rpc.notify("sessionTerminated"),
@@ -114,6 +130,7 @@ export async function bootReplWorker(
       },
     });
   } finally {
+    stopWatch();
     interruptIdle.destroy();
   }
 }

@@ -48,3 +48,18 @@ export function acknowledgeInterrupt(buffer: Int32Array): void {
 export function discardPendingInterrupt(buffer: Int32Array): void {
   if (Atomics.exchange(buffer, SIGNAL, 0) === 2) acknowledgeInterrupt(buffer);
 }
+
+/** SIGINT 슬롯이 2(전달 대기)인가. 감시 타이머의 엿보기(03-ctrl-c.md 2.5). */
+export function hasPendingInterrupt(buffer: Int32Array): boolean {
+  return Atomics.load(buffer, SIGNAL) === 2;
+}
+
+/**
+ * 2 → 0 비교 교환이 성공했을 때만 ack하고 true를 돌려준다. 폴링이 먼저 비웠으면(핸들러가 이미 ack했다) false —
+ * 감시 타이머가 되살리거나 다시 ack하지 않는다(03-ctrl-c.md 2.2 ack 지점 ②).
+ */
+export function consumeInterrupt(buffer: Int32Array): boolean {
+  if (Atomics.compareExchange(buffer, SIGNAL, 2, 0) !== 2) return false;
+  acknowledgeInterrupt(buffer);
+  return true;
+}

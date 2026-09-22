@@ -10,6 +10,7 @@ import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import type { InitFrame } from "../protocol/init-frame";
 import {
+  ACK,
   SIGNAL,
   createInterruptBuffer,
   signalInterrupt,
@@ -487,4 +488,84 @@ describe("bootReplWorker", () => {
 
     expect(events).toEqual([["loadFailed", "Error: bad interrupt buffer"]]);
   });
+
+  test("루프가 끝나면 감시 타이머를 끈다(clearInterval이 setInterval의 id로 불린다)", async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    const { frame, events, waitFor } = createMainSide(["exit()"]);
+
+    await bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    // 감시 타이머는 tickMs 기본값 20으로 건다. 다른 setInterval 호출과 섞여도 간격으로 골라낸다.
+    const watchCallIndex = setIntervalSpy.mock.calls.findIndex(
+      ([, ms]) => ms === 20,
+    );
+    expect(watchCallIndex).toBeGreaterThanOrEqual(0);
+    const timerId = setIntervalSpy.mock.results[watchCallIndex]?.value;
+    expect(clearIntervalSpy).toHaveBeenCalledWith(timerId);
+  }, 30_000);
+
+  test("정지한 실행(asyncio.run 대기) 중 눌림은 감시 타이머가 200ms 안에 깨운다", async () => {
+    let pressedAt: number | undefined;
+    const { frame, events, waitFor } = createMainSide([
+      "import asyncio",
+      () => {
+        // 타이머가 깨운다는 것을 보이기 위해 main의 재전송 송신기는 전혀 쓰지 않는다: signalInterrupt 한 번뿐이다.
+        // 100ms 뒤에 쓰는 것은 readLine 응답 직후 루프의 discardPendingInterrupt(실행 전 폐기, TRP-009)가 이 눌림을
+        // 지우지 않도록, 대기가 실제로 시작된 뒤에 누른 것으로 만들기 위해서다.
+        setTimeout(() => {
+          pressedAt = performance.now();
+          signalInterrupt(frame.interruptBuffer);
+        }, 100);
+        return "asyncio.run(asyncio.sleep(5))";
+      },
+      "exit()",
+    ]);
+
+    await bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    await waitFor(
+      () => events.filter((e) => e[0] === "readLine").length >= 3,
+    );
+    const elapsedMs = performance.now() - (pressedAt as number);
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    expect(elapsedMs).toBeLessThan(200);
+    // 우리 프레임(핸들러·run_sync 래퍼)도 webloop 프레임도 남지 않는다(03-ctrl-c.md 2.4 깨우기 세부).
+    expect(events.find((e) => e[0] === "writeError")).toEqual([
+      "writeError",
+      'Traceback (most recent call last):\n  File "<console>", line 1, in <module>\nKeyboardInterrupt',
+    ]);
+    // 깨운 쪽이 타이머든(핸들러 규칙 ③과의 경합) 어느 쪽이든 정확히 한 번만 소비·ack된다.
+    expect([...frame.interruptBuffer]).toEqual([0, 1, 1, 0]);
+  }, 30_000);
+
+  test("프롬프트가 열려 있는 동안 남은 SIGINT는 감시 타이머가 100ms 안에 버리고, 다음 실행에는 새지 않는다", async () => {
+    let pressedAt: number | undefined;
+    let resolveNext: ((line: string) => void) | undefined;
+    const { frame, events, waitFor } = createMainSide([
+      // readLine 요청이 도착한 시점(atPrompt=true, 아직 응답 전)에 SIGINT를 쓴다. 대상 코드가 없는 낡은 눌림이라
+      // 감시 타이머가 그 틱에서 버려야 한다(03-ctrl-c.md 2.5 프롬프트 유휴 폐기).
+      () =>
+        new Promise<string>((resolve) => {
+          resolveNext = resolve;
+          pressedAt = performance.now();
+          signalInterrupt(frame.interruptBuffer);
+        }),
+      "exit()",
+    ]);
+
+    const booted = bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    await waitFor(() => frame.interruptBuffer[ACK] === 1);
+    const elapsedMs = performance.now() - (pressedAt as number);
+    expect(elapsedMs).toBeLessThan(100);
+    expect(frame.interruptBuffer[SIGNAL]).toBe(0);
+
+    resolveNext?.("1 + 1");
+    await booted;
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    // 버려진 SIGINT는 다음 실행으로 새지 않는다: writeOutput("2")(값 에코)만 오고 writeError는 없다.
+    expect(events.slice(2)).toEqual(CLEAN_SESSION.slice(2));
+  }, 30_000);
 });
