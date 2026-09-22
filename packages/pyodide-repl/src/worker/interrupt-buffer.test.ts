@@ -17,8 +17,14 @@ import {
   readRequestSeq,
   signalInterrupt,
 } from "../protocol/interrupt-protocol";
+import type { PresserCommand } from "../test/roles/interrupt-presser";
+import { CONSOLE_TRACEBACK } from "../test/sigint-setup";
+import { spawnRole } from "../test/thread";
 import { createConsole } from "./console";
 import { connectInterrupts } from "./interrupt-buffer";
+import { SLEEP_SLICE_FILENAME } from "./sleep-slice";
+import { createSubmissionRunner } from "./submission-runner";
+import { suppressWebLoopReraise } from "./webloop-reraise";
 
 let pyodide: PyodideInterface;
 
@@ -47,7 +53,7 @@ afterEach(() => {
 /** 폴링이 여러 번 일어나는 짧은 바쁜 루프(약 25ms). 폴링이 대기 중인 SIGINT를 읽으면 핸들러가 돈다. */
 const BUSY = "for _ in range(10**6): pass";
 
-/** 새 콘솔·새 버퍼와 `boot.ts`가 넣는 세 클로저. `discard`는 호출 순서를 보려고 `vi.fn`으로 감싼다. */
+/** 새 콘솔·새 버퍼와 `boot.ts`가 넣는 네 클로저. `discard`는 호출 순서를 보려고 `vi.fn`으로 감싼다. */
 function setup() {
   const { pyconsole } = createConsole(
     pyodide,
@@ -57,12 +63,14 @@ function setup() {
   const buffer = createInterruptBuffer();
   connected = buffer;
   const discard = vi.fn(() => discardPendingInterrupt(buffer));
+  const warn = vi.fn<(message: string) => void>();
   const deps = {
     ack: () => acknowledgeInterrupt(buffer),
     seq: () => readRequestSeq(buffer),
     discard,
+    warn,
   };
-  return { pyconsole, buffer, deps, discard };
+  return { pyconsole, buffer, deps, discard, warn };
 }
 
 /** 원본 `setInterruptBuffer`를 부르기 직전에 `hook`을 실행한다. 폴링이 시작되는 순간에 무슨 일이 일어나는지를 만든다. */
@@ -122,6 +130,76 @@ describe("connectInterrupts", () => {
 
     expect([...buffer]).toEqual([0, 0, 0, 0]);
   });
+
+  // 조각 교체는 핸들러보다 먼저여야 한다: 래퍼의 코드 객체를 핸들러의 절단 목록에 넘겨야 트레이스백에서 우리 프레임이
+  // 잘린다(절단 결과는 아래 회귀 시험이 실제 배선으로 본다).
+  test("연결이 time.sleep 조각 교체까지 한다", () => {
+    const { pyconsole, buffer, deps, warn } = setup();
+
+    connectInterrupts(pyodide, pyconsole, buffer, deps);
+
+    expect(
+      pyodide.runPython("import time\ntime.sleep.__code__.co_filename"),
+    ).toBe(SLEEP_SLICE_FILENAME);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // `installSigintHandler`에 조각 래퍼의 코드 객체(`extraOwnCodes`)를 안 넘기면 `formattraceback`이 그 프레임을
+  // 우리 것으로 못 알아봐 화면에 `<sleep-slice>` 줄이 샌다. `sigint-handler-sleep-slice.test.ts`는 `sigint-setup.ts`로
+  // **스스로** 조립하므로 이 배선 누락에 영향받지 않는다 — 실제 `connectInterrupts`를 거치는 이 시험만 잡는다.
+  test("연결 뒤 sleep 중 눌림의 트레이스백에 sleep-slice 프레임이 없다", async () => {
+    const screen = { stdout: "", stderr: "" };
+    const repl = createConsole(
+      pyodide,
+      {
+        write: (text) => {
+          screen.stdout += text;
+        },
+        writeErrorRaw: (text) => {
+          screen.stderr += text;
+        },
+      },
+      { topLevelAwait: false },
+    );
+    const buffer = createInterruptBuffer();
+    connected = buffer;
+    // boot.ts와 같은 순서: WebLoop 재보고 억제 → connectInterrupts. 억제가 없으면 Task 밖으로 나간 KeyboardInterrupt가
+    // 처리되지 않은 Promise 거부로 남는다(03-ctrl-c.md 2.8).
+    suppressWebLoopReraise(pyodide, {
+      warn: (message) => console.warn(message),
+    });
+    connectInterrupts(pyodide, repl.pyconsole, buffer, {
+      ack: () => acknowledgeInterrupt(buffer),
+      seq: () => readRequestSeq(buffer),
+      discard: () => discardPendingInterrupt(buffer),
+      warn: (message) => console.warn(message),
+    });
+    const { run } = createSubmissionRunner(pyodide, repl, {
+      writeOutput: (text) => {
+        screen.stdout += `${text}\n`;
+      },
+      writeError: (text) => {
+        screen.stderr += `${text}\n`;
+      },
+    });
+    // 눌림 스레드가 Python이 sleep에 들어간 뒤에 쓰도록 시작 표시를 둔다. 같은 스레드 `press()`는 pyodide 폴링이
+    // sleep 진입 전에 소비할 수 있어(약 50 바이트코드마다) 중단 지점이 흔들린다.
+    const ctl = new Int32Array(new SharedArrayBuffer(4));
+    pyodide.globals.set("started", () => {
+      Atomics.store(ctl, 0, 1);
+      Atomics.notify(ctl, 0);
+    });
+    const presser = spawnRole("interrupt-presser", { buffer, ctl });
+    presser.post({ kind: "press", offsets: [200] } satisfies PresserCommand);
+
+    expect(await run("import time; started(); time.sleep(5)")).toEqual({
+      prompt: ">>> ",
+      exit: false,
+    });
+    expect(await presser.next()).toMatchObject({ kind: "pressed", count: 1 });
+
+    expect(screen.stderr).toBe(CONSOLE_TRACEBACK);
+  }, 20_000);
 
   test("폐기가 버퍼 연결보다 먼저다", () => {
     const { pyconsole, buffer, deps, discard } = setup();

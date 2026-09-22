@@ -26,11 +26,15 @@ export const SIGINT_HANDLER_FILENAME = "<sigint-handler>";
  * `signal.signal(SIGINT, …)` 핸들러 설치 + `console.formattraceback` 교체. `connectInterrupts`가 버퍼 연결 **전에**
  * 부른다(핸들러 없이 연결하면 부팅 중 눌림이 기본 핸들러로 시작 코드를 죽인다, TRP-009). 세션마다 pyodide가 새로
  * 만들어지므로 한 번만 설치한다. 동기 함수.
+ *
+ * `extraOwnCodes`는 다른 모듈이 심은 우리 코드 객체 tuple의 proxy다(`installSleepSlice`의 반환값). 절단 대상에
+ * 합쳐지며, 호출자가 이 함수가 돌아온 뒤 destroy한다.
  */
 export function installSigintHandler(
   pyodide: Pick<PyodideInterface, "runPython" | "toPy">,
   pyconsole: PyodideConsoleProxy,
   deps: SigintHandlerDeps,
+  extraOwnCodes?: PyProxy,
 ): void {
   // 별도 namespace(빈 dict)에서 정의해 사용자 globals를 오염시키지 않는다. proxy는 설치 뒤 버리고, 핸들러 함수는
   // Python 쪽 참조(`signal` 모듈, `console.formattraceback`)가 유지한다.
@@ -47,10 +51,13 @@ export function installSigintHandler(
         console: PyodideConsoleProxy,
         ack: () => void,
         seq: () => number,
+        extraOwnCodes?: PyProxy,
       ) => void);
     try {
       // JS 함수 두 개는 pyodide가 JsProxy로 넘긴다. 핸들러 진입에서만 불리며 폴링 경로가 아니다(TRP-024 무관).
-      install(pyconsole, deps.ack, deps.seq);
+      // `undefined`를 넘기면 Python이 `None`으로 받아 기본값 `()`가 무시되므로 인자 수를 나눠 부른다.
+      if (extraOwnCodes) install(pyconsole, deps.ack, deps.seq, extraOwnCodes);
+      else install(pyconsole, deps.ack, deps.seq);
     } finally {
       install.destroy();
     }

@@ -7,11 +7,14 @@
 #   (핸들러 실행 중에 또 눌림이 도착하면 핸들러 프레임이 겹치므로 안쪽 하나만 자르면 샌다). 바깥의 내부 프레임(`runcode`
 #   등)은 원본 `formattraceback`이 `<console>` 첫 프레임부터 남긴다.
 #
+# - `extra_own_codes`는 다른 모듈이 심은 우리 코드 객체다(`sleep-slice.py`의 `sleep`·`poll`). 절단 규칙은 같으므로
+#   `own_codes`에 합치기만 한다. 설치 순서상 조각 교체가 먼저라 여기서는 이미 만들어진 tuple을 받는다.
+#
 # RD-009 확장 지점: `install`의 인자에 `warn`, 반환값 `interrupt_idle`, 사용자 프레임이 없을 때 정지한 실행 깨우기,
-# `own_codes.update(...)`, `webloop.py` 프레임 제거, `IdleInterrupt`.
+# `webloop.py` 프레임 제거, `IdleInterrupt`.
 import signal
 
-def install(console, ack, seq):
+def install(console, ack, seq, extra_own_codes=()):
     user_filename = console.filename
     # 설치 시점의 번호는 이미 처리한 것으로 본다: 세션 리셋 뒤 버퍼를 재사용하면 이전 세션이 남긴 번호의 재전송이
     # 새 세션을 끊으면 안 된다.
@@ -31,7 +34,7 @@ def install(console, ack, seq):
             f = f.f_back
         # 사용자 프레임이 없다: 다음 문장 컴파일·트레이스백 생성·시작 코드 중이므로 버린다.
 
-    own_codes = {sigint_handler.__code__}
+    own_codes = {sigint_handler.__code__, *extra_own_codes}
     format_traceback = console.formattraceback
 
     def formattraceback(exc):

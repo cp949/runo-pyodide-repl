@@ -53,12 +53,14 @@ export async function bootReplWorker(
     suppressWebLoopReraise(pyodide, {
       warn: (message) => console.warn(message),
     });
-    // SIGINT 핸들러 설치 → 폐기 → 버퍼 연결. 폴링은 연결 뒤에 시작하므로 이 순서가 부팅 중 눌림으로부터 시작 코드를 지킨다.
+    // time.sleep 조각 교체 → SIGINT 핸들러 설치 → 폐기 → 버퍼 연결. 폴링은 연결 뒤에 시작하므로 이 순서가 부팅 중
+    // 눌림으로부터 시작 코드를 지킨다.
     // `worker/`가 `protocol/`을 import하지 않도록 프로토콜 함수는 여기서 클로저로 넣는다. 실패는 loadFailed다.
     connectInterrupts(pyodide, repl.pyconsole, interruptBuffer, {
       ack: () => acknowledgeInterrupt(interruptBuffer),
       seq: () => readRequestSeq(interruptBuffer),
       discard: () => discardPendingInterrupt(interruptBuffer),
+      warn: (message) => console.warn(message),
     });
     const mailbox = createMailboxReader({
       ctrl: frame.stdinCtrl,

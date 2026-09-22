@@ -12,21 +12,18 @@
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
-  acknowledgeInterrupt,
-  createInterruptBuffer,
   discardPendingInterrupt,
-  readRequestSeq,
   signalInterrupt,
 } from "../protocol/interrupt-protocol";
-import type {
-  PresserCommand,
-  PresserEvent,
-} from "../test/roles/interrupt-presser";
-import { spawnRole } from "../test/thread";
-import { createConsole } from "./console";
-import { installSigintHandler } from "./sigint-handler";
-import { createSubmissionRunner } from "./submission-runner";
-import { suppressWebLoopReraise } from "./webloop-reraise";
+import {
+  BUSY,
+  CONSOLE_TRACEBACK,
+  execSource,
+  setupConsoleRunner,
+  type SetupOptions,
+  slots,
+  teardownConsoleRunner,
+} from "../test/sigint-setup";
 
 let pyodide: PyodideInterface;
 
@@ -38,36 +35,18 @@ beforeAll(async () => {
 let connected: Int32Array | undefined;
 
 afterEach(() => {
-  // 남은 SIGINT가 다음 시험의 Python 실행을 끊지 않도록 버퍼를 먼저 떼고 비운 뒤 핸들러를 기본으로 되돌린다.
-  pyodide.setInterruptBuffer(
-    undefined as unknown as Parameters<
-      PyodideInterface["setInterruptBuffer"]
-    >[0],
-  );
-  if (connected) discardPendingInterrupt(connected);
+  teardownConsoleRunner(pyodide, connected);
   connected = undefined;
-  pyodide.runPython(
-    "import signal\nsignal.signal(signal.SIGINT, signal.default_int_handler)",
-  );
 });
 
+/** 조립 뒤 버퍼를 `afterEach`가 치우도록 기록한다. */
+function setup(options?: SetupOptions) {
+  const runner = setupConsoleRunner(pyodide, options);
+  connected = runner.buffer;
+  return runner;
+}
+
 const READY = { prompt: ">>> ", exit: false };
-
-/**
- * 상한 있는 바쁜 루프(약 0.23초). 핸들러가 잘못돼 SIGINT가 버려져도 시험이 멈추지 않고 단언에서 실패한다.
- * `while True: pass`는 눌림이 소실되면 vitest가 멈출 수 없는 무한 루프가 된다.
- */
-const BUSY = "for _ in range(10**7): pass";
-
-/** `started()`가 참을 돌려주는 최대 시간(ms). `while started(): pass`가 눌림 소실 때 이 시간 뒤에는 끝난다. */
-const STARTED_LIMIT_MS = 5000;
-
-/** 사용자 프로그램 소스를 한 줄 `exec(...)` 제출로 만든다. JSON 문자열은 Python 문자열 리터럴로도 유효하다. */
-const execSource = (program: string) => `exec(${JSON.stringify(program)})`;
-
-/** `<console>` 한 줄 실행이 `KeyboardInterrupt`로 끝났을 때의 정확한 출력. 소스 줄·핸들러 프레임이 없다. */
-const CONSOLE_TRACEBACK =
-  'Traceback (most recent call last):\n  File "<console>", line 1, in <module>\nKeyboardInterrupt\n';
 
 /**
  * `<console>` 파일명으로 정의해 이 함수의 프레임이 사용자 프레임으로 인정되게 한다. 상한 시간 동안 돌며 `KeyboardInterrupt`를
@@ -109,91 +88,6 @@ def install_hook(console, press):
 
     console.formattraceback = formattraceback
 `;
-
-interface SetupOptions {
-  topLevelAwait?: boolean;
-  /** 핸들러를 설치하기 전에 버퍼를 만진다(이전 세션이 남긴 요청 번호 등). */
-  prepare?: (buffer: Int32Array) => void;
-}
-
-function setup({ topLevelAwait = false, prepare }: SetupOptions = {}) {
-  const screen = { stdout: "", stderr: "" };
-  const repl = createConsole(
-    pyodide,
-    {
-      write: (text) => {
-        screen.stdout += text;
-      },
-      writeErrorRaw: (text) => {
-        screen.stderr += text;
-      },
-    },
-    { topLevelAwait },
-  );
-  // KeyboardInterrupt를 잡고 계속 도는 프로그램·`except` 밖으로 새는 눌림 시험이 WebLoop 재보고로 처리되지 않은
-  // Promise 거부를 남기지 않도록 worker와 같은 순서로 설치한다(03-ctrl-c.md 2.8).
-  suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
-  const buffer = createInterruptBuffer();
-  prepare?.(buffer);
-  installSigintHandler(pyodide, repl.pyconsole, {
-    ack: () => acknowledgeInterrupt(buffer),
-    seq: () => readRequestSeq(buffer),
-  });
-  pyodide.setInterruptBuffer(buffer);
-  connected = buffer;
-
-  // 실제 sink(readline.println)처럼 writeOutput/writeError가 끝에 개행을 붙인다.
-  const { run } = createSubmissionRunner(pyodide, repl, {
-    writeOutput: (text) => {
-      screen.stdout += `${text}\n`;
-    },
-    writeError: (text) => {
-      screen.stderr += `${text}\n`;
-    },
-  });
-
-  // 실행 중인 Python에서 부르는 JS 콜백. `press`는 main이 Ctrl+C마다 쓰는 것, `resend`는 main의 재전송(같은 요청 번호로
-  // SIGINT 슬롯만 다시 쓴다)이다.
-  pyodide.globals.set("press", () => signalInterrupt(buffer));
-  pyodide.globals.set("resend", () => {
-    Atomics.compareExchange(buffer, 0, 0, 2);
-  });
-  // 눌림 스레드에 "Python이 시나리오에 들어갔다"를 알린다. 참을 돌려주는 동안 `while started(): pass`가 돈다.
-  const ctl = new Int32Array(new SharedArrayBuffer(4));
-  let firstCallAt: number | undefined;
-  pyodide.globals.set("started", () => {
-    Atomics.store(ctl, 0, 1);
-    Atomics.notify(ctl, 0);
-    firstCallAt ??= performance.now();
-    return performance.now() - firstCallAt < STARTED_LIMIT_MS;
-  });
-
-  /** 눌림 스레드를 띄운다. 시험이 끝나면 종료된다. */
-  function presser() {
-    const role = spawnRole("interrupt-presser", { buffer, ctl });
-    return {
-      /** 눌림을 예약한다. 바로 돌아오고, 눌림 스레드가 `started()`를 기다린 뒤 쓴다. */
-      press(
-        command: Omit<Extract<PresserCommand, { kind: "press" }>, "kind">,
-      ): void {
-        role.post({ kind: "press", ...command } satisfies PresserCommand);
-      },
-      /** 시작 표시를 지운다(라운드 반복용). */
-      async reset(): Promise<void> {
-        firstCallAt = undefined;
-        role.post({ kind: "reset" } satisfies PresserCommand);
-        await role.next();
-      },
-      /** 눌림을 다 쓴 뒤의 보고를 기다린다. */
-      done: () => role.next<PresserEvent>(),
-    };
-  }
-
-  return { run, screen, buffer, pyconsole: repl.pyconsole, presser };
-}
-
-/** [SIGINT, ack, 요청 번호, 예약]. 슬롯 배치는 프로토콜 규약이라 인덱스 그대로 본다. */
-const slots = (buffer: Int32Array) => Array.from(buffer);
 
 describe("실행 중 SIGINT", () => {
   it("사용자 코드가 도는 중의 SIGINT는 KeyboardInterrupt 트레이스백을 내고 프롬프트로 돌아온다", async () => {
