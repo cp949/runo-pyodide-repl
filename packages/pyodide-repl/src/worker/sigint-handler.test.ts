@@ -26,6 +26,7 @@ import { spawnRole } from "../test/thread";
 import { createConsole } from "./console";
 import { installSigintHandler } from "./sigint-handler";
 import { createSubmissionRunner } from "./submission-runner";
+import { suppressWebLoopReraise } from "./webloop-reraise";
 
 let pyodide: PyodideInterface;
 
@@ -129,6 +130,9 @@ function setup({ topLevelAwait = false, prepare }: SetupOptions = {}) {
     },
     { topLevelAwait },
   );
+  // KeyboardInterrupt를 잡고 계속 도는 프로그램·`except` 밖으로 새는 눌림 시험이 WebLoop 재보고로 처리되지 않은
+  // Promise 거부를 남기지 않도록 worker와 같은 순서로 설치한다(03-ctrl-c.md 2.8).
+  suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
   const buffer = createInterruptBuffer();
   prepare?.(buffer);
   installSigintHandler(pyodide, repl.pyconsole, {

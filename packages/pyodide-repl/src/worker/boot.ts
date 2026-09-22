@@ -18,16 +18,19 @@ import { connectInterrupts } from "./interrupt-buffer";
 import { runReplLoop } from "./repl-loop";
 import { createStdinCallback } from "./stdin-callback";
 import { createSubmissionRunner } from "./submission-runner";
+import { suppressWebLoopReraise } from "./webloop-reraise";
 
 export interface BootDeps {
   loadPyodide(indexURL: string): Promise<PyodideInterface>;
 }
 
 /**
- * 순서: RPC 생성 → loadPyodide → createConsole → connectInterrupts → setStdin → ntf ready → ntf writeOutput(BANNER) →
- * REPL 루프 실행. `connectInterrupts`(SIGINT 핸들러 설치 → 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중 눌림이 시작 코드를 죽이지
- * 않도록 `setStdin`보다 앞이다(03-ctrl-c.md 2.6).
- * 로드·콘솔 생성·Ctrl+C 연결·stdin 배선 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아 있다).
+ * 순서: RPC 생성 → loadPyodide → createConsole → suppressWebLoopReraise → connectInterrupts → setStdin → ntf ready →
+ * ntf writeOutput(BANNER) → REPL 루프 실행. `suppressWebLoopReraise`(WebLoop의 KeyboardInterrupt·SystemExit 재보고
+ * 억제, 03-ctrl-c.md 2.8)는 콘솔 생성 직후·Ctrl+C 연결 전에 한 번만 부른다. `connectInterrupts`(SIGINT 핸들러 설치 →
+ * 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중 눌림이 시작 코드를 죽이지 않도록 `setStdin`보다 앞이다(03-ctrl-c.md 2.6).
+ * 로드·콘솔 생성·재보고 억제·Ctrl+C 연결·stdin 배선 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아
+ * 있다).
  */
 export async function bootReplWorker(
   frame: InitFrame,
@@ -45,6 +48,10 @@ export async function bootReplWorker(
     pyodide = await deps.loadPyodide(frame.pyodide.indexURL);
     repl = createConsole(pyodide, sinks, {
       topLevelAwait: frame.topLevelAwait,
+    });
+    // WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제. 세션당 1회, 실패해도 REPL 동작은 그대로다(경고만 남는다).
+    suppressWebLoopReraise(pyodide, {
+      warn: (message) => console.warn(message),
     });
     // SIGINT 핸들러 설치 → 폐기 → 버퍼 연결. 폴링은 연결 뒤에 시작하므로 이 순서가 부팅 중 눌림으로부터 시작 코드를 지킨다.
     // `worker/`가 `protocol/`을 import하지 않도록 프로토콜 함수는 여기서 클로저로 넣는다. 실패는 loadFailed다.

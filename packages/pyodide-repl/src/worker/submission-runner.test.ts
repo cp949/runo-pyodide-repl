@@ -9,6 +9,7 @@ import { loadPyodide, type PyodideInterface } from "pyodide";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { createConsole, type ReplConsole } from "./console";
 import { createSubmissionRunner } from "./submission-runner";
+import { suppressWebLoopReraise } from "./webloop-reraise";
 
 let pyodide: PyodideInterface;
 
@@ -33,6 +34,9 @@ function setup() {
     }),
   };
   const repl = createConsole(pyodide, sinks, { topLevelAwait: false });
+  // KeyboardInterrupt 안전망·exit() 시험이 WebLoop 재보고로 처리되지 않은 Promise 거부를 남기지 않도록 worker와
+  // 같은 순서로 설치한다(03-ctrl-c.md 2.8).
+  suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
   const io = {
     writeOutput: vi.fn((text: string) => {
       screen.stdout += `${text}\n`;
