@@ -8,6 +8,7 @@ import type { PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
 import { createSinkWriter } from "./sink-writer";
 import { setTopLevelAwait, type CompilerFlagsHolder } from "./top-level-await";
+import HELPERS_SOURCE from "./console-helpers.py?raw";
 
 /** 콘솔 콜백과 전역 스트림이 같이 쓰는 sink 둘. worker에서는 RPC `notify` 래퍼다. */
 export interface ConsoleSinks {
@@ -75,36 +76,6 @@ const PROMPT_SETUP = 'import sys\nsys.ps1 = ">>> "\nsys.ps2 = "... "\n';
 // format_syntax_error는 pyrepl처럼 끝 개행을 붙여(없으면 캐럿 줄이 사라진다) codeop의 최종 컴파일과 같은 플래그로 재컴파일한다.
 // retrieve_exception은 await하지 않는 문법 오류 future의 예외를 회수한다. 그대로 두면 사이클 GC 때 asyncio가
 // "ConsoleFuture exception was never retrieved"를 sys.stderr로 내 터미널에 끼어든다(JS에서 부르면 예외 proxy를 destroy해야 해 Python에 둔다).
-const HELPERS_SOURCE = `
-import builtins, traceback
-from pyodide.ffi import to_js
-
-async def await_fut(fut):
-    try:
-        res = await fut
-    except SystemExit:
-        return to_js([None, True, None], depth=1)
-    if res is None:
-        return to_js([None, False, None], depth=1)
-    try:
-        text = repr(res)
-    except Exception as e:
-        # 첫 프레임(이 함수)을 떼고 __repr__ 프레임부터 남긴다.
-        tb = "".join(traceback.format_exception(type(e), e, e.__traceback__.tb_next))
-        return to_js([None, False, tb], depth=1)
-    builtins._ = res
-    return to_js([text, False, None], depth=1)
-
-def format_syntax_error(source, flags):
-    try:
-        compile(source + "\\n", "<console>", "single", flags & ~0x${INCOMPLETE_INPUT_FLAGS.toString(16)}, True)
-    except SyntaxError as e:
-        return "".join(traceback.format_exception_only(type(e), e))
-    return None
-
-def retrieve_exception(fut):
-    fut.exception()
-`;
 
 /** `await_fut`가 돌려주는 세 값. Python `None`은 JS `undefined`로 온다. */
 type AwaitFutResult = [
@@ -137,7 +108,10 @@ export function createConsole(
   const namespace = pyodide.toPy({}) as PyProxy & {
     get(name: string): unknown;
   };
-  pyodide.runPython(HELPERS_SOURCE, { globals: namespace });
+  pyodide.runPython(HELPERS_SOURCE, {
+    globals: namespace,
+    filename: "<console-helpers>",
+  });
   const awaitFut = namespace.get("await_fut") as (
     fut: ConsoleFutureProxy,
   ) => Promise<AwaitFutResult>;
@@ -173,7 +147,12 @@ export function createConsole(
     const whole =
       pendingBefore === undefined ? source : `${pendingBefore}\n${source}`;
     try {
-      return formatSyntaxError(whole, pyconsole._compile.compiler.flags) ?? raw;
+      return (
+        formatSyntaxError(
+          whole,
+          pyconsole._compile.compiler.flags & ~INCOMPLETE_INPUT_FLAGS,
+        ) ?? raw
+      );
     } catch {
       return raw;
     }
