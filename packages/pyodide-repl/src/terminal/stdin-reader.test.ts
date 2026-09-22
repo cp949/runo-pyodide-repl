@@ -34,8 +34,10 @@ describe.each([
      * 기다리므로 먼저 배출해야 `read`가 시작된다. 읽기가 끝나기를 기다리지 않도록(async 함수는 반환한 Promise를 풀어
      * 버린다) 시작한 읽기의 Promise를 객체에 담아 돌려준다.
      */
-    async function startRead(): Promise<{ line: Promise<string> }> {
-      const line = reader.read();
+    async function startRead(
+      cancelable = true,
+    ): Promise<{ line: Promise<string | null> }> {
+      const line = reader.read(cancelable);
       fake.flush();
       await tick();
       fake.flush();
@@ -43,7 +45,17 @@ describe.each([
     }
     /** 마지막 `readline.read`가 받은 프롬프트. */
     const lastPrompt = () => read.mock.calls.at(-1)?.[0];
-    return { fake, readline, sinks, reader, startRead, lastPrompt };
+    /** 마지막 `readline.read`가 받은 옵션. */
+    const lastOptions = () => read.mock.calls.at(-1)?.[1];
+    return {
+      fake,
+      readline,
+      sinks,
+      reader,
+      startRead,
+      lastPrompt,
+      lastOptions,
+    };
   }
 
   test('`input("x: ")`의 프롬프트를 꼬리로 받아 그 자리에 다시 그리고 입력값을 돌려준다', async () => {
@@ -117,6 +129,53 @@ describe.each([
     expect(sinks.tail()).toBe("");
   });
 
+  test("`cancelable`을 벤더 읽기 옵션으로 그대로 넘긴다", async () => {
+    const { startRead, lastOptions } = setup();
+
+    await startRead(false);
+
+    expect(lastOptions()).toEqual({ cancelable: false });
+  });
+
+  test("cancelable 읽기 중 Ctrl+C는 `^C` 없이 `null`을 돌려준다", async () => {
+    const { fake, sinks, startRead } = setup();
+    sinks.write("x: ");
+    const { line } = await startRead();
+
+    fake.type("abc\x03");
+    fake.flush();
+
+    await expect(line).resolves.toBeNull();
+    expect(fake.written.join("")).not.toContain("^C");
+  });
+
+  test("취소로 끝난 읽기도 꼬리를 남기지 않아 다음 읽기가 앞 프롬프트를 물려받지 않는다", async () => {
+    const { fake, sinks, startRead, lastPrompt } = setup();
+    sinks.write("x: ");
+    const { line } = await startRead();
+    fake.type("abc\x03");
+    fake.flush();
+    await expect(line).resolves.toBeNull();
+
+    expect(sinks.tail()).toBe("");
+    await startRead();
+    expect(lastPrompt()).toBe("");
+  });
+
+  test("`cancelable`이 거짓이면 벤더 원본대로 `^C`를 찍고 읽기가 계속된다", async () => {
+    const { fake, sinks, startRead } = setup();
+    sinks.write("x: ");
+    const { line } = await startRead(false);
+
+    fake.type("abc\x03");
+    fake.flush();
+    await tick();
+
+    expect(fake.written.join("")).toContain("^C");
+    fake.type("1\r");
+    await expect(line).resolves.toBe("1");
+  });
+
   test("`\\r`로 덮어쓴 진행률 꼬리는 마지막 `\\r` 뒤만 프롬프트다", async () => {
     const { sinks, startRead, lastPrompt } = setup();
     sinks.write("\r30%");
@@ -132,7 +191,7 @@ describe.each([
     sinks.write("x".repeat(100));
 
     // 100자 꼬리는 짧지 않아 `rewindTail`이 flush를 기다린다. 그 사이 출력 `!`가 온다.
-    void reader.read();
+    void reader.read(true);
     sinks.write("!");
     fake.flush();
     await tick();
@@ -162,7 +221,7 @@ describe.each([
     sinks.write("x: ");
 
     // `fake.flush()`를 부르지 않는다. 비동기 모드에서 flush를 기다리면 `readline.read`가 불리지 않는다.
-    void reader.read();
+    void reader.read(true);
     await tick();
 
     expect(lastPrompt()).toBe("x: ");
@@ -175,7 +234,7 @@ describe.each([
     const fresh = createTerminalSinks(readline);
     const freshReader = createInputReader(readline, fake.term, fresh);
 
-    void freshReader.read();
+    void freshReader.read(true);
     await tick();
 
     expect(lastPrompt()).toBe("");

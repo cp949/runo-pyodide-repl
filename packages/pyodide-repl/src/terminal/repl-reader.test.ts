@@ -35,8 +35,9 @@ describe.each([
      */
     async function startRead(
       prompt: string,
-    ): Promise<{ line: Promise<string> }> {
-      const line = reader.read(prompt);
+      cancelable = true,
+    ): Promise<{ line: Promise<string | null> }> {
+      const line = reader.read(prompt, cancelable);
       fake.flush();
       await tick();
       fake.flush();
@@ -44,7 +45,9 @@ describe.each([
     }
     /** 마지막 `readline.read`가 받은 합성 프롬프트. */
     const lastPrompt = () => read.mock.calls.at(-1)?.[0];
-    return { fake, sinks, reader, startRead, lastPrompt };
+    /** 마지막 `readline.read`가 받은 옵션. */
+    const lastOptions = () => read.mock.calls.at(-1)?.[1];
+    return { fake, sinks, reader, startRead, lastPrompt, lastOptions };
   }
 
   test("꼬리가 없으면 프롬프트를 그대로 읽는다(SGR 리셋 없음)", async () => {
@@ -131,12 +134,58 @@ describe.each([
     await expect(line).resolves.toBe("abc");
   });
 
+  test("`cancelable`을 벤더 읽기 옵션으로 그대로 넘긴다", async () => {
+    const { startRead, lastOptions } = setup();
+
+    await startRead(">>> ", false);
+
+    expect(lastOptions()).toEqual({ cancelable: false });
+  });
+
+  test("cancelable 읽기 중 Ctrl+C는 `^C` 없이 `null`을 돌려준다", async () => {
+    const { fake, sinks, startRead } = setup();
+    sinks.write("t");
+    const { line } = await startRead(">>> ");
+
+    fake.type("abc\x03");
+    fake.flush();
+
+    await expect(line).resolves.toBeNull();
+    expect(fake.written.join("")).not.toContain("^C");
+  });
+
+  test("취소로 끝난 읽기도 꼬리를 남기지 않아 다음 프롬프트에 앞 꼬리가 섞이지 않는다", async () => {
+    const { fake, sinks, startRead, lastPrompt } = setup();
+    sinks.write("t");
+    const { line } = await startRead(">>> ");
+    fake.type("abc\x03");
+    fake.flush();
+    await expect(line).resolves.toBeNull();
+
+    expect(sinks.tail()).toBe("");
+    await startRead(">>> ");
+    expect(lastPrompt()).toBe(">>> ");
+  });
+
+  test("`cancelable`이 거짓이면 벤더 원본대로 `^C`를 찍고 읽기가 계속된다", async () => {
+    const { fake, startRead } = setup();
+    const { line } = await startRead(">>> ", false);
+
+    fake.type("abc\x03");
+    fake.flush();
+    await tick();
+
+    expect(fake.written.join("")).toContain("^C");
+    fake.type("1\r");
+    await expect(line).resolves.toBe("1");
+  });
+
   test("꼬리 정리를 기다리는 사이에 온 출력도 꼬리에 반영한다", async () => {
     const { sinks, reader, fake, lastPrompt } = setup();
     sinks.write("x".repeat(100));
 
     // 100자 꼬리는 짧지 않아 `rewindTail`이 flush를 기다린다. 그 사이 출력 `Z`가 온다.
-    void reader.read(">>> ");
+    void reader.read(">>> ", true);
     sinks.write("Z");
     fake.flush();
     await tick();

@@ -12,6 +12,8 @@
  * RD-007: 실행 중 Ctrl+C. 벤더 `Readline`이 활성 읽기 없이 부르는 `setCtrlCHandler`가 `^C`를 꼬리에 쓰고 프레임의
  * interrupt buffer에 SIGINT를 쓰는지, 게이트(`pythonRunning`)가 대상 코드가 없는 구간의 눌림을 버리는지, cancel 지점이
  * 송신기의 재전송을 멈추는지 본다. 송신기의 상태기계 자체는 `protocol/interrupt-sender.test.ts`가 맡는다.
+ * RD-008: 입력줄 Ctrl+C 취소. REPL 읽기는 응답 `null`, stdin 읽기는 메일박스 CANCELLED가 되고 둘 다 `^C`를 찍지 않는다.
+ * 취소 응답 뒤 다음 요청이 오기 전의 구간(`cancelSettling`)은 게이트를 닫고, `input()` 취소에는 닫지 않는다.
  */
 import { Readline } from "@cp949/runo-xterm-readline";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -186,8 +188,9 @@ async function startInputRead(
   await drainReadStart(session.fake, before);
 }
 
-// 메일박스 값(01-protocols.md 2.1): ctrl = [STATE, BYTE_LENGTH, FLAGS, 예약], STATE 0=IDLE·1=READY·3=ERROR, FLAGS 비트 0=마지막 청크.
-const MAILBOX = { IDLE: 0, READY: 1, ERROR: 3 } as const;
+// 메일박스 값(01-protocols.md 2.1): ctrl = [STATE, BYTE_LENGTH, FLAGS, 예약],
+// STATE 0=IDLE·1=READY·2=CANCELLED·3=ERROR, FLAGS 비트 0=마지막 청크.
+const MAILBOX = { IDLE: 0, READY: 1, CANCELLED: 2, ERROR: 3 } as const;
 const FLAG_LAST = 1;
 
 /** 초기화 프레임의 메일박스를 읽는다. main의 `createMailboxWriter`가 쓰는 것과 같은 SharedArrayBuffer다. */
@@ -208,6 +211,27 @@ function readMailbox(
 const waitDelivered = (
   session: Pick<ReturnType<typeof startSession>, "fakeWorker">,
 ) => waitFor(() => readMailbox(session).state === MAILBOX.READY);
+
+/** 메일박스가 CANCELLED(`input()` 취소)가 될 때까지 기다린다. `cancel()`도 비동기다. */
+const waitCancelled = (
+  session: Pick<ReturnType<typeof startSession>, "fakeWorker">,
+) => waitFor(() => readMailbox(session).state === MAILBOX.CANCELLED);
+
+type Session = ReturnType<typeof startSession>;
+
+/** 프레임의 interrupt buffer 슬롯 세 개. main 송신기가 쓰는 것과 같은 SharedArrayBuffer 뷰다. */
+function slots(session: Pick<Session, "fakeWorker">) {
+  const buffer = session.fakeWorker.frame().interruptBuffer;
+  return {
+    signal: Atomics.load(buffer, SIGNAL),
+    ack: Atomics.load(buffer, ACK),
+    seq: Atomics.load(buffer, SEQ),
+  };
+}
+
+/** 지금까지 터미널에 쓴 `^C` 에코 횟수. */
+const echoes = (session: Pick<Session, "bytes">) =>
+  session.bytes().split("^C").length - 1;
 
 beforeEach(() => {
   localStorage.clear();
@@ -711,7 +735,7 @@ describe.each([
     expect(readMailbox(session).text).toContain("읽기 실패");
   });
 
-  test("stdin 읽기 중 Ctrl+C는 `^C`를 찍고 같은 프롬프트를 다시 그리며 메일박스는 IDLE이다(RD-006 중간 상태, RD-008이 취소로 바꾼다)", async () => {
+  test("stdin 읽기 중 Ctrl+C는 `^C` 없이 읽기를 취소해 메일박스를 CANCELLED로 만든다", async () => {
     const session = startSession({}, { asyncWrite });
     const { fake } = session;
     session.workerRpc.notify("write", "x: ");
@@ -719,33 +743,216 @@ describe.each([
 
     fake.type("ab\x03");
     fake.flush();
-    await settle();
-    expect(session.bytes()).toContain("^C");
-    expect(readMailbox(session).state).toBe(MAILBOX.IDLE);
-    // 활성 읽기 중의 Ctrl+C는 벤더 경로라 실행 중 Ctrl+C 핸들러가 불리지 않는다(SIGINT를 쓰지 않는다).
-    expect(Atomics.load(session.fakeWorker.frame().interruptBuffer, SEQ)).toBe(
-      0,
-    );
+    await waitCancelled(session);
 
-    fake.type("cd\r");
+    expect(session.bytes()).toContain("ab");
+    expect(session.bytes()).not.toContain("^C");
+    // 취소는 main이 메일박스로 알린다. main은 어느 취소 경로에서도 SIGINT를 쓰지 않는다(DELTA-03이 worker에서 쓴다).
+    expect(slots(session).seq).toBe(0);
+  });
+
+  test("`input()` 취소 직후의 Ctrl+C는 게이트가 열려 있어 에코하고 전송한다", async () => {
+    const session = startSession({}, { asyncWrite });
+    const { fake } = session;
+    session.workerRpc.notify("write", "x: ");
+    await startInputRead(session);
+    fake.type("ab\x03");
+    fake.flush();
+    await waitCancelled(session);
+    // `inputReadsPending`은 `cancel()`이 끝난 뒤에 내려간다.
+    await settle();
+
+    fake.type("\x03");
+
+    // 취소 뒤에도 사용자 코드(`except KeyboardInterrupt` 뒤 계산)가 계속 돌 수 있으므로 이 구간은 중단 경로다.
+    expect(echoes(session)).toBe(1);
+    expect(slots(session).seq).toBe(1);
+  });
+});
+
+describe.each([
+  { mode: "동기", asyncWrite: false },
+  { mode: "비동기", asyncWrite: true },
+])(
+  "입력줄 Ctrl+C 취소(RD-008), write 콜백이 $mode 모드일 때",
+  ({ asyncWrite }) => {
+    test("REPL 읽기 중 Ctrl+C는 `^C` 없이 줄을 바꾸고 `null`로 응답한다", async () => {
+      const session = startSession({}, { asyncWrite });
+      const { fake } = session;
+      const { line } = await startRead(session);
+
+      fake.type("abc\x03");
+      fake.flush();
+
+      await expect(line).resolves.toBeNull();
+      expect(session.bytes()).toContain("abc");
+      expect(session.bytes()).not.toContain("^C");
+      expect(session.bytes().endsWith("\r\n")).toBe(true);
+      // 취소는 응답 `null`로만 알린다. main은 SIGINT를 쓰지 않는다.
+      expect(slots(session).seq).toBe(0);
+    });
+
+    test("Shift+Enter로 쌓은 여러 줄 버퍼도 `^C` 없이 취소된다", async () => {
+      const session = startSession({}, { asyncWrite });
+      const { fake } = session;
+      const { line } = await startRead(session);
+
+      fake.type("if True:");
+      fake.keyDown({ key: "Enter", shiftKey: true });
+      fake.type("    print(3)");
+      fake.type("\x03");
+      fake.flush();
+
+      await expect(line).resolves.toBeNull();
+      expect(session.bytes()).toContain("if True:");
+      expect(session.bytes()).toContain("print(3)");
+      expect(session.bytes()).not.toContain("^C");
+      expect(session.bytes().endsWith("\r\n")).toBe(true);
+    });
+
+    test("취소 응답 뒤 새 `readLine` 요청은 겹침으로 거절되지 않는다", async () => {
+      const session = startSession({}, { asyncWrite });
+      const { fake } = session;
+      const { line: cancelled } = await startRead(session);
+      fake.type("abc\x03");
+      fake.flush();
+      await expect(cancelled).resolves.toBeNull();
+
+      const { line: next } = await startRead(session);
+      fake.type("ok\r");
+
+      await expect(next).resolves.toBe("ok");
+    });
+
+    test("`cancelable`이 거짓인 `readLine` 요청은 벤더 원본대로 `^C`를 찍고 같은 프롬프트를 다시 그린다", async () => {
+      const session = startSession({}, { asyncWrite });
+      const { fake, workerRpc } = session;
+      const before = flushRequestCount(fake);
+      const response = observe(
+        workerRpc.call("readLine", ">>> ", undefined, false),
+      );
+      await drainReadStart(fake, before);
+
+      fake.type("abc\x03");
+      fake.flush();
+      await settle();
+
+      expect(response().state).toBe("pending");
+      expect(session.bytes()).toContain("^C");
+
+      fake.type("1\r");
+      await waitFor(() => response().state === "resolved");
+      expect(response()).toEqual({ state: "resolved", value: "1" });
+    });
+
+    test("`cancelable`이 거짓인 `readInput` 알림도 원본대로라 메일박스가 IDLE로 남는다", async () => {
+      const session = startSession({}, { asyncWrite });
+      const { fake, workerRpc } = session;
+      workerRpc.notify("write", "x: ");
+      const before = flushRequestCount(fake);
+      workerRpc.notify("readInput", false);
+      await drainReadStart(fake, before);
+
+      fake.type("ab\x03");
+      fake.flush();
+      await settle();
+
+      expect(session.bytes()).toContain("^C");
+      expect(readMailbox(session).state).toBe(MAILBOX.IDLE);
+      expect(slots(session).seq).toBe(0);
+
+      fake.type("cd\r");
+      await waitDelivered(session);
+      expect(readMailbox(session)).toMatchObject({ text: "cd", last: true });
+    });
+  },
+);
+
+describe("취소 직후의 게이트(cancelSettling, RD-008)", () => {
+  test("취소 응답 뒤 다음 요청이 오기 전의 Ctrl+C는 에코도 전송도 하지 않는다", async () => {
+    const session = startSession({}, { asyncWrite: true });
+    const { fake } = session;
+    const { line } = await startRead(session);
+    fake.type("abc\x03");
+    fake.flush();
+    await expect(line).resolves.toBeNull();
+
+    // 벤더에는 활성 읽기가 없어 이 키는 Ctrl+C 핸들러로 온다. 게이트가 막지 않으면 SIGINT가 남아 다음 push가 죽는다(TRP-009).
+    fake.type("\x03");
+
+    expect(echoes(session)).toBe(0);
+    expect(slots(session).seq).toBe(0);
+
+    // 정상 복귀: 다음 요청이 오면 읽기가 열리고 그 줄이 응답이 된다.
+    const { line: next } = await startRead(session);
+    fake.type("1\r");
+    await expect(next).resolves.toBe("1");
+  });
+
+  test("`readLine` 요청 도착이 방어를 내려 응답 뒤의 Ctrl+C는 다시 전송된다", async () => {
+    const session = startSession({}, { asyncWrite: true });
+    const { fake } = session;
+    const { line } = await startRead(session);
+    fake.type("abc\x03");
+    fake.flush();
+    await expect(line).resolves.toBeNull();
+
+    const { line: next } = await startRead(session);
+    fake.type("1\r");
+    await expect(next).resolves.toBe("1");
+
+    fake.type("\x03");
+
+    expect(echoes(session)).toBe(1);
+    expect(slots(session).seq).toBe(1);
+  });
+
+  test("취소 뒤 열린 stdin 읽기가 값을 전달하면(`inputReadsPending` → 0) 방어가 내려간다", async () => {
+    const session = startSession({}, { asyncWrite: true });
+    const { fake, workerRpc } = session;
+    const { line } = await startRead(session);
+    // 프롬프트를 기다리는 사이 배경 콜백의 `input()`이 도착한다. 가드가 REPL 읽기 뒤로 미룬다.
+    const before = flushRequestCount(fake);
+    workerRpc.notify("readInput", true);
+    await settle();
+
+    // REPL 읽기를 취소하면 방어가 서고, 가드가 미뤄 둔 stdin 읽기가 열린다.
+    fake.type("\x03");
+    fake.flush();
+    await expect(line).resolves.toBeNull();
+    await drainReadStart(fake, before);
+
+    fake.type("abc\r");
     await waitDelivered(session);
-    expect(readMailbox(session)).toMatchObject({ text: "cd", last: true });
+    await settle();
+
+    // 값을 전달한 시점이 worker가 깨어나 사용자 코드를 재개하는 시점이다. 요청 도착만으로 내리면 이 구간이 막힌다.
+    fake.type("\x03");
+    expect(echoes(session)).toBe(1);
+    expect(slots(session).seq).toBe(1);
+  });
+
+  test("cancelable 읽기 중 dispose하면 응답이 가지 않고 이후 Ctrl+C는 무동작이다", async () => {
+    const session = startSession({}, { asyncWrite: true });
+    const { fake } = session;
+    const { line } = await startRead(session);
+    const outcome = observe(line);
+    fake.type("abc");
+
+    session.handle.dispose();
+    fake.flush();
+    await settle();
+
+    // 읽기는 `Error("readline disposed")`로 끝나지만 dispose가 RPC를 먼저 끊으므로 worker 역할 rpc에는 응답이 오지 않는다.
+    expect(outcome().state).toBe("pending");
+    const writtenAtDispose = fake.written.length;
+    expect(() => fake.type("\x03")).not.toThrow();
+    expect(fake.written).toHaveLength(writtenAtDispose);
+    expect(slots(session).seq).toBe(0);
   });
 });
 
 describe("실행 중 Ctrl+C(RD-007)", () => {
-  type Session = ReturnType<typeof startSession>;
-
-  /** 프레임의 interrupt buffer 슬롯 세 개. main 송신기가 쓰는 것과 같은 SharedArrayBuffer 뷰다. */
-  function slots(session: Pick<Session, "fakeWorker">) {
-    const buffer = session.fakeWorker.frame().interruptBuffer;
-    return {
-      signal: Atomics.load(buffer, SIGNAL),
-      ack: Atomics.load(buffer, ACK),
-      seq: Atomics.load(buffer, SEQ),
-    };
-  }
-
   /** 소실을 흉내 낸다: ack 없이 SIGNAL만 0으로 지운다. 송신기가 살아 있으면 5ms 안에 같은 번호로 다시 쓴다. */
   function loseSignal(session: Pick<Session, "fakeWorker">) {
     Atomics.store(session.fakeWorker.frame().interruptBuffer, SIGNAL, 0);
@@ -757,10 +964,6 @@ describe("실행 중 Ctrl+C(RD-007)", () => {
     Atomics.store(stdinCtrl, 0, MAILBOX.IDLE);
     Atomics.notify(stdinCtrl, 0);
   }
-
-  /** 지금까지 터미널에 쓴 `^C` 에코 횟수. */
-  const echoes = (session: Pick<Session, "bytes">) =>
-    session.bytes().split("^C").length - 1;
 
   /** 상태 콜백이 `loading` 다음 값을 받을 때까지 기다린다. cancel·게이트 갱신이 그 콜백보다 먼저 끝나 있다. */
   const waitNextStatus = (session: Pick<Session, "onStatus">) =>

@@ -5,16 +5,19 @@
  * 꼬리의 열린 색이 REPL 프롬프트로 새지 않도록 둘 사이에 SGR 리셋을 넣는다(3.14는 프롬프트가 자체 색을 입히고 닫아 꼬리 색이
  * 새지 않는다). 꼬리가 폭을 넘으면 읽기 전에 첫 행까지 커서를 올린다(`rewindTail`, TRP-016).
  *
- * 읽기를 시작하며 꼬리를 비운다: 읽는 동안 Python은 멈춰 있어 새 출력이 없고, 읽기가 끝나면(Enter, Ctrl+C) 커서가 다음 행
- * 처음으로 가므로 꼬리가 없다. 비우지 않으면 다음 읽기가 앞 꼬리를 물려받는다.
+ * 읽기를 시작하며 꼬리를 비운다: 읽는 동안 Python은 멈춰 있어 새 출력이 없고, 읽기가 끝나면(Enter, Ctrl+C 취소) 커서가 다음
+ * 행 처음으로 가므로 꼬리가 없다. 비우지 않으면 다음 읽기가 앞 꼬리를 물려받는다.
  */
 import type { Readline } from "@cp949/runo-xterm-readline";
 import { rewindTail, type RewindTerminal } from "./rewind-tail";
 import type { TerminalSinks } from "./sinks";
 
 export interface ReplReader {
-  /** 꼬리 + `\x1b[0m` + prompt를 그 자리에 그리고 Enter까지 한 줄을 돌려준다. 꼬리가 없으면 prompt 그대로. */
-  read(prompt: string): Promise<string>;
+  /**
+   * 꼬리 + `\x1b[0m` + prompt를 그 자리에 그리고 Enter까지 한 줄을 돌려준다. 꼬리가 없으면 prompt 그대로.
+   * `cancelable`이면 읽기 중 Ctrl+C가 `^C` 없이 줄만 바꾸고 `null`로 끝난다(취소, 06-editing.md 6.3).
+   */
+  read(prompt: string, cancelable: boolean): Promise<string | null>;
 }
 
 /** 세션(sink 세트)마다 하나. 순서: rewindTail(flush) → 꼬리 재조회 → resetTail → readline.read(합성 프롬프트). */
@@ -24,12 +27,14 @@ export function createReplReader(
   sinks: Pick<TerminalSinks, "tail" | "resetTail">,
 ): ReplReader {
   return {
-    async read(prompt) {
+    async read(prompt, cancelable) {
       await rewindTail(term, sinks.tail());
       // flush를 기다리는 사이에 온 출력을 반영하려고 꼬리를 다시 읽는다.
       const tail = sinks.tail();
       sinks.resetTail();
-      return readline.read(tail === "" ? prompt : `${tail}\x1b[0m${prompt}`);
+      return readline.read(tail === "" ? prompt : `${tail}\x1b[0m${prompt}`, {
+        cancelable,
+      });
     },
   };
 }

@@ -15,21 +15,21 @@
 const ignore = () => {};
 
 export interface ReadGuardDeps<L, I> {
-  /** REPL 읽기(`repl-reader`). 즉시 부른다. */
-  readLine(prompt: string): Promise<L>;
+  /** REPL 읽기(`repl-reader`). 즉시 부른다. `cancelable`은 그대로 리더에 넘긴다. */
+  readLine(prompt: string, cancelable: boolean): Promise<L>;
   /** stdin 읽기(`stdin-reader`). 활성 REPL 읽기가 끝난 뒤 부른다. */
-  readInput(): Promise<I>;
+  readInput(cancelable: boolean): Promise<I>;
 }
 
 export interface ReadGuard<L, I> {
-  readLine(prompt: string): Promise<L>;
-  readInput(): Promise<I>;
+  readLine(prompt: string, cancelable: boolean): Promise<L>;
+  readInput(cancelable: boolean): Promise<I>;
 }
 
 /**
  * 돌려준 `readLine`은 반환 promise를 "활성 REPL 읽기"로 추적하고, `readInput`은 그 읽기가 끝난 뒤 원본을 부른다.
  * 목록 재그리기 등으로 읽기가 새로 시작돼도 `readLine`이 돌려주는 promise는 바뀌지 않으므로 그 promise가 최종 종료 시점이다.
- * 제네릭은 RD-008이 REPL 읽기 결과를 `string | null`로 넓힐 때 시그니처를 바꾸지 않으려는 것이다.
+ * 제네릭 덕에 REPL 읽기 결과가 취소(`string | null`)로 넓어져도 가드 자체는 그대로다.
  */
 export function createReadGuard<L, I>(
   deps: ReadGuardDeps<L, I>,
@@ -37,15 +37,15 @@ export function createReadGuard<L, I>(
   // 활성 REPL 읽기가 끝나면(줄·취소·실패 어느 쪽이든) 이행된다. 읽기가 없거나 끝났으면 이미 이행된 promise다.
   let replRead: Promise<void> = Promise.resolve();
   return {
-    readLine(prompt) {
-      const read = deps.readLine(prompt);
+    readLine(prompt, cancelable) {
+      const read = deps.readLine(prompt, cancelable);
       // 가드 내부 체인만 실패를 삼킨다. 호출자가 받는 `read`는 그대로다.
       replRead = read.then(ignore, ignore);
       return read;
     },
-    async readInput() {
+    async readInput(cancelable) {
       await replRead;
-      return deps.readInput();
+      return deps.readInput(cancelable);
     },
   };
 }
