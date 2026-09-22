@@ -15,3 +15,8 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-009](./TRP-009-concurrent-agents-contaminate-worktree.md) | 한 작업 트리에서 에이전트 둘이 동시에 일하면 변이 검사와 시험이 서로를 오염시킨다 | ACTIVE | 한 저장소·브랜치에서 에이전트 둘 이상이 변이 검사기·임시 계측·커밋을 동시에 쓸 때 |
 | [TRP-010](./TRP-010-stdin-read-n-leaves-newline-in-buffer.md) | `sys.stdin.read(n)`이 남긴 줄 끝 `\n`이 다음 읽기를 콜백 없이 채운다 | ACTIVE | 같은 pyodide 인스턴스에서 `sys.stdin.read(n)` 뒤 `input()`·`readline()`·`readlines()`로 읽는 시험·세션 |
 | [TRP-011](./TRP-011-echoed-input-satisfies-output-wait-instantly.md) | 출력 도착을 "화면 행에 마커 포함"으로 기다리면 입력한 코드 행이 마커를 포함해 즉시 통과한다 | ACTIVE | 브라우저 하니스가 지연·배경 출력을 텍스트 포함으로 기다리고 마커가 입력한 코드에도 들어 있을 때 |
+| [TRP-012](./TRP-012-sigint-polling-lands-before-try-entry.md) | 눌림 뒤 첫 폴링이 `try` 진입 전에 떨어지면 `KeyboardInterrupt`가 `except` 바깥으로 나간다 | ACTIVE | 눌림을 일으킨 뒤 `try`/`except KeyboardInterrupt`로 잡는 node·브라우저 시나리오를 쓸 때 |
+| [TRP-013](./TRP-013-three-discard-paths-mask-each-other.md) | 대상 없는 SIGINT를 없애는 방어가 여럿이라 서로의 배선 결함을 가린다 | ACTIVE | 루프·버퍼 연결·핸들러의 SIGINT 폐기를 시험하거나 그 배선을 바꿀 때 |
+| [TRP-014](./TRP-014-atomics-wait-kills-sender-resend-timer.md) | 눌림 스레드를 `Atomics.wait`로 재우면 송신기의 재전송 점검이 죽고 "소실 0"이 저절로 나온다 | ACTIVE | 별도 스레드에서 `createInterruptSender`를 써서 소실·복구를 재는 하니스를 쓸 때 |
+| [TRP-015](./TRP-015-nohup-background-dies-with-agent-session.md) | `nohup ... &`로 띄운 장시간 작업은 에이전트 세션 정리에 죽고, 로그만 보면 정상 종료와 구별되지 않는다 | ACTIVE | 에이전트가 셸 도구로 수 분 이상 걸리는 측정·서버를 띄울 때 |
+| [TRP-016](./TRP-016-burst-screen-assertions-break-three-ways.md) | 연타 Ctrl+C의 화면 판정은 행 감김·스크롤 아웃·프롬프트 재그리기에 세 번 깨진다 | ACTIVE | 실행 중 Ctrl+C를 여러 번 누르고 화면 텍스트로 판정하는 브라우저 확인을 쓸 때 |

@@ -92,10 +92,14 @@ _Avoid_: seq(코드 상수명으로만), 시퀀스 ID
 _Avoid_: 재시도
 
 **폐기**:
-대상 코드가 없는 SIGINT를 지우고 ack하는 것(실행 직전, 프롬프트 유휴, 버퍼 연결 직전).
+대상 코드가 없는 SIGINT를 지우고 ack하는 것(실행 직전은 `worker/repl-loop.ts`, 버퍼 연결 직전은 `worker/interrupt-buffer.ts`, 프롬프트 유휴는 RD-009의 감시 타이머). 핸들러의 "`<console>` 프레임 없으면 버린다"도 같은 목적이다.
 
 **송신기**:
-main의 눌림 전송·점검·재전송 상태기계.
+main의 눌림 전송·점검·재전송 상태기계(`protocol/interrupt-sender.ts`).
+
+**게이트**:
+main이 보는 "Python 실행 중"(`createRepl`의 `pythonRunning`). worker가 살아 있고(`alive`) 대기 중인 `readLine`·`readInput` 읽기가 없으면 참이다. 거짓이면 Ctrl+C를 에코도 전송도 하지 않는다. 로딩 중은 참이다(부팅 중 눌림은 worker의 연결 단계가 폐기한다).
+_Avoid_: running 플래그, busy
 
 **감시 타이머**:
 worker의 20ms 타이머. 정지한 실행 중 SIGINT를 엿보고 깨우며, 프롬프트 유휴 SIGINT를 폐기한다.

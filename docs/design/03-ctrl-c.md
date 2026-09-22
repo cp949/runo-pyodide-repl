@@ -37,10 +37,19 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
   - `buf[SIGNAL] === 0`인데 ack 그대로 → 폴링이 읽고 비우는 사이에 쓴 값이 지워진 것.
     같은 번호로 `compareExchange(0→2)`(최대 10회).
 - 새 `send()`는 이전 요청을 교체한다.
-- `cancel()` 지점: ack 증가, `readLine` 진입, `readInput` 진입, worker 종료(마운트 cleanup·worker effect
-  cleanup), 새 worker 직전(슬롯 비우기 전), 새 눌림.
+- `cancel()` 지점: ack 증가(점검이 스스로 끝낸다), `readLine` 요청 도착, `readInput` 알림 도착,
+  `sessionTerminated`, `loadFailed`, `dispose()`, 새 눌림. 새 worker 직전(슬롯 비우기 전)은 RD-010.
+- **main 게이트 `pythonRunning`**(RD-007, 2.7): 거짓이면 `send()` 자체를 하지 않는다. 그래서 `exit()`·로드
+  실패 뒤의 눌림이 슬롯에 SIGNAL 2를 영원히 남겨 5ms 점검이 무한히 도는 일이 없다(이전 구현 RD-012h(a)).
 
-## 2.4 worker 핸들러(`sigint-handler.py`, `install(console, warn, ack=None, seq=None)`)
+## 2.4 worker 핸들러(`worker/sigint-handler.ts` 안의 Python 소스)
+
+RD-007 시점의 시그니처는 `install(console, ack, seq)`(세 인자 필수, 반환값 없음)이고 아래 ①②④와
+`formattraceback` 절단까지다. ③(깨우기)과 `warn`·`interrupt_idle` 반환·`run_sync`/`runcode` 래퍼·
+`time.sleep` 조각·설치 가드 5종은 RD-009가 더한다.
+
+**RD-009 전의 중간 상태**: `<console>` 프레임이 없는 SIGINT는 **사용자 실행 중이라도 버린다**(ack는 한다).
+따라서 `while True: time.sleep(0.1)`·`asyncio.run` 대기 중 Ctrl+C는 무효다(TRP-020).
 1. **진입 첫 줄에서 `seq()` 확인**. `last_seq`와 같으면 ack도 예외도 없이 무시(재전송). 다르면
    `last_seq` 갱신 후 ack. `last_seq` 초기값은 설치 시점의 `buf[SEQ]`(세션 리셋 뒤 같은 버퍼를 재사용해도
    이전 세션의 재전송이 새 세션을 끊지 않는다). `ack`/`seq`가 없으면 번호·ack 없이 동작한다.
@@ -88,7 +97,9 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
 - REPL 루프 직전에 켜고, 루프가 끝나면(`exit()`) 끈다. 세션 리셋은 worker 교체라 함께 사라진다.
 
 ## 2.6 연결 순서와 시작 코드 보호
-- `connectInterrupts(pyodide, pyconsole, buffer)`가 유일한 진입점이다. **핸들러를 먼저 설치하고 그다음
+- `connectInterrupts(pyodide, pyconsole, buffer, { ack, seq, discard })`가 유일한 진입점이다. `worker/`는
+  `protocol/`을 import하지 않으므로 세 함수는 `boot.ts`가 클로저로 넣는다(`stdin-callback.ts`와 같은 패턴).
+  부팅 순서에서 위치는 `createConsole` 뒤·`setStdin` 앞이고 `try` 안이라 실패하면 `loadFailed`다. **핸들러를 먼저 설치하고 그다음
   `attachInterruptBuffer`**(= `discardPendingInterrupt` → `setInterruptBuffer`). 폴링은 연결 뒤에야
   시작하므로 순서가 반대이면 그 사이(Node 3.5~6.6ms)의 눌림을 pyodide 기본 핸들러가 받아 시작 코드가 죽는다.
 - REPL 루프는 `readLine`이 줄을 돌려준 직후, `runner.run` **전에** `discardPendingInterrupt(buffer)`로
@@ -97,8 +108,18 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
   치운다(재전송이 새 worker에 도착하면 같은 사고).
 
 ## 2.7 main 쪽 Ctrl+C 처리
-- `readline.setCtrlCHandler(...)`는 읽는 중이 아닐 때(= Python 실행 중)만 불린다. 눌림마다 `^C`를
-  **sink `write`로** 에코하고(꼬리에 들어가야 한다) `interruptSender.send()`를 부른다.
+- `readline.setCtrlCHandler(...)`는 읽는 중이 아닐 때만 불린다. 눌림마다 `^C`를 **sink `write`로**
+  에코하고(꼬리에 들어가야 한다) `interruptSender.send()`를 부른다.
+- **게이트 `pythonRunning = alive && !readLinePending && inputReadsPending === 0`**. 거짓이면 에코도 전송도
+  하지 않는다. 각 항의 뜻:
+  - `alive`: worker 생성부터 `sessionTerminated`·`loadFailed`·`dispose()` 전까지. 그 뒤에는 눌림이 닿을
+    코드가 없다(3.14에도 프로세스가 없으므로 편차가 아니다).
+  - `!readLinePending`: 수락한 `readLine`의 읽기가 끝나기 전. 요청 도착부터 응답이 포트에 올라가기 전까지라
+    **읽기가 실제로 열리기 전의 갭(약 20ms)도 포함한다** — 그 사이 눌림은 에코 없이 버려진다(편차 32).
+  - `inputReadsPending === 0`: `readInput` 알림 도착부터 `deliver`/`fail`이 끝날 때까지. 값을 다 전달한
+    시점이 worker가 깨어나 실행을 재개하는 시점이다.
+- 로딩 중(`ready` 전)은 참이다. 부팅 중 눌림이 실제로 버퍼에 써지고 worker의 연결 단계가 폐기한다(2.6).
+  `readLine` 응답 뒤~다음 요청 전(배경 콜백이 CPU를 잡는 구간)도 참이다(편차 2).
 - 입력줄 편집 중 Ctrl+C는 `auto-indent-reader`의 `readKey` 래퍼가 처리한다(`04-stdin-input.md` 3.1, `06-editing.md` 6.3).
 
 ## 2.8 webloop 재보고 억제(`webloop-reraise.py`)
@@ -112,7 +133,7 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
 ## 2.9 텍스트 시퀀스
 ```
 (A) 실행 중 정상 중단
-main: Ctrl+C → sink.write("^C") → sender.send()
+main: Ctrl+C → pythonRunning() 확인 → sink.write("^C") → sender.send()
       SEQ+=1 → SIGNAL=2 → 5ms 타이머 시작
 worker: 폴링이 SIGNAL을 읽고 0으로 비움 → 핸들러 진입
         seq 확인(새 번호) → ACK+=1 → 스택에 <console> 있음 → KeyboardInterrupt

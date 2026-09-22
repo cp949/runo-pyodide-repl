@@ -127,7 +127,8 @@ const SEQ    = 2   // 요청 번호. 새 눌림마다 +1, 재전송은 같은 �
 
 - 초기화 프레임으로 worker에 넘기고 `pyodide.setInterruptBuffer(buffer)`에 **그대로**(접근자·Proxy 없이) 연결한다.
 - 세션 간 재사용한다. 새 worker를 만들기 직전 main이 송신기를 취소하고 `SIGNAL`을 0으로 비운다.
-- 쓰기·ack·재전송·핸들러 규칙 전체는 `03-ctrl-c.md`에 있다. 새 SIGINT를 쓰는 곳은 main 송신기와 worker의 stdin 콜백(취소 변환) 둘뿐이다.
+- 쓰기·ack·재전송·핸들러 규칙 전체는 `03-ctrl-c.md`에 있다. 새 SIGINT를 쓰는 곳은 main 송신기와 worker의 stdin 콜백(취소 변환, RD-008) 둘뿐이다.
+- 읽기 함수 `readRequestSeq(buffer)`(슬롯 `[2]`)는 핸들러가 재전송과 새 눌림을 구분할 때 쓴다. `worker/`는 `protocol/`을 import하지 않으므로 `boot.ts`가 클로저로 넣는다.
 
 ## 4. 초기화 프레임
 
@@ -175,8 +176,9 @@ worker: wait() = "abc" → 콜백 반환 → 실행 계속       |  wait() = nul
        (RD-006 시점: `Ctrl+C → cancel()` 경로와 `null` 변환은 RD-008. `null`은 그대로 EOFError)
 
 (S4) 실행 중 Ctrl+C
-main : setCtrlCHandler → ntf 없이 sink.write("^C") → sender.send(): SEQ+1, SIGNAL=2, 5ms 점검
+main : setCtrlCHandler → pythonRunning()이면 ntf 없이 sink.write("^C") → sender.send(): SEQ+1, SIGNAL=2, 5ms 점검
 worker: 폴링 → 핸들러 → ack → KeyboardInterrupt → ntf writeError(traceback) → req readLine
+main : readLine 요청 도착 → sender.cancel() (readInput 알림·sessionTerminated·loadFailed·dispose도 같다)
 
 (S5) Tab
 main : Tab → req complete(source, pending)   ←  worker: atPrompt이면 계산 → res {completions, start}

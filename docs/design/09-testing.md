@@ -14,7 +14,15 @@
 `complete-source.test.ts`, `import-gate.test.ts`, `tab-completion.test.ts`,
 `tab-completion-flow.test.ts`(main·worker 루프·실제 후보 계산 통합), `auto-indent-parity.test.ts`
 (pyodide에 든 `_pyrepl.readline` 함수와 차분 검증), `rpc.test.ts`(실제 `MessageChannel`).
-- 눌림은 `src/test/interrupt-presser.ts`가 `node:worker_threads`로 실제 스레드에서 버퍼에 쓴다.
+- 새 구현의 RD-007 시점 파일: `worker/sigint-handler.test.ts`(요청 번호 확인·ack·`<console>` 프레임 규칙·절단·
+  catch-loop·TLA 켜짐 연타), `worker/interrupt-buffer.test.ts`(`connectInterrupts`의 설치 → 폐기 → 연결 순서),
+  `worker/boot.test.ts`(연결이 `setStdin`·`ready`보다 먼저, 부팅 전 눌림).
+- 눌림은 눌림 스레드 역할 `src/test/roles/interrupt-presser.ts`가 `node:worker_threads`로 실제 스레드에서 버퍼에
+  쓴다. 시나리오 Python은 JS 전역 `started()`로 "실행에 들어갔다"를 알리고, 그 호출을 `try` **본문 안**에 둔다
+  (폴링 위상에 따라 호출 직후의 SIGINT가 `try` 진입 전에 처리되면 예외가 `except`를 벗어난다, TRP-012). 무한
+  루프 대신 상한 있는 루프를 쓴다(눌림이 소실되면 vitest가 멈출 수 없다).
+- 스레드가 저장소 **송신기**(`createInterruptSender`)를 쓸 때는 대기를 `Atomics.wait`로 하면 안 된다. 점검이
+  `setTimeout`이라 스레드를 막으면 재전송이 한 번도 돌지 않고 "소실 0"이 저절로 나온다(TRP-014).
 - pyodide private 의존(플래그, `run_sync`, `time.sleep.__wrapped__`, WebLoop 속성)은 **테스트가 깨지는 것이
   버전 업그레이드 알림**이라는 전제로 쓴다.
 - worker 스레드 시험(메일박스·프로토콜 통합 시나리오): `src/test/thread.ts`의 `spawnRole(name, workerData)`가
@@ -61,7 +69,7 @@
 `worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
 요청 거절 정책을 고정), `index.test.ts`(`createRepl`),
 `history-filter.test.ts`, `paste-tabs.test.ts`, `interrupt-protocol.test.ts`,
-`interrupt-sender.test.ts`(가짜 타이머로 전송·재전송·10회 상한·읽기 순서), `interrupt-watch.test.ts`,
+`interrupt-sender.test.ts`(주입 타이머로 전송·재전송·10회 상한·읽기 순서), `interrupt-watch.test.ts`,
 `App.test.tsx`(배선: 전송·재전송, `readLine`/`readInput` 진입, 세션 리셋, 언마운트).
 - 가짜 터미널(`src/test/fake-terminal.ts`)은 `write` 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다
   (동기만 쓰면 TRP-008을 놓친다). history는 ↑ 재호출로만 관찰한다.
@@ -91,7 +99,12 @@
 - SharedArrayBuffer/Atomics 동기 브리지 결합, `sync === true` 확인, COOP/COEP 의존 동작.
 - 실제 xterm의 **비동기 파싱**과 `isWrapped`·flush 타이밍(TRP-016/017 계열), 꼬리 재그리기 화면.
 - 눌림 간격·소실률·위험 구간 같은 타이밍 통계(연타 매트릭스 조합별 N=20, `while True: pass` 단일 눌림
-  N=200 등), 부팅 중 Ctrl+C(N=30), 정지한 실행 12조합.
+  N=200 등), 부팅 중 Ctrl+C(N=30), 정지한 실행 12조합. RD-007의 스크립트: `ctrl-c-check.mjs`·`press-loss.mjs`·
+  `burst-matrix.mjs`·`boot-press.mjs`·`positive-controls.py`(양성 대조 3건), node 통계는 `verify/node/`의
+  `press-loss.mjs`(N=3000)·`poll-overhead.mjs`.
+- 연타 화면 판정은 행 감김·스크롤 아웃·프롬프트 재그리기에 깨진다(TRP-016). `while True: pass`·`for …: pass`는
+  **한 줄 복합문**이라 빈 줄 Enter가 있어야 실행이 시작된다(3.14와 같다) — 그 단계를 빼면 Ctrl+C가 `... `
+  프롬프트의 활성 읽기로 가 벤더 경로에서 `... ^C`만 남는다.
 - StrictMode 이중 마운트 거동.
 - 화면 행 텍스트(`.xterm-rows > div`)만 비교하면 출력 끝의 여분 빈 줄이 보이지 않는다. 개행 수는 커서 행 번호로
   단언한다(`docs/traps/TRP-006`).

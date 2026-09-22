@@ -57,7 +57,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - interrupt buffer: `signalInterrupt`(SEQ 먼저, SIGNAL 나중), `acknowledgeInterrupt`, `discardPendingInterrupt`(지운 경우만 ack), `hasProtocolSlots` 시험.
 - 변이 검사: `readInput` 알림을 `wait()` 뒤로 옮기면 시험이 멈춤을 잡는다. `FLAG_LAST` 누락, SEQ/SIGNAL 순서 뒤집기가 각각 실패한다.
 
-인계: `protocol/`의 공개 표면은 `createRpc`(`call`·`notify`·`dispose`), `createStdinMailbox`·`createMailboxWriter`(`deliver`·`cancel`·`fail`)·`createMailboxReader`(`wait`), `createInterruptBuffer`·`signalInterrupt`·`acknowledgeInterrupt`·`discardPendingInterrupt`·`hasProtocolSlots`, `InitFrame`·`parseInitFrame`·`postInitFrame`이다. `readInput` 알림 → `wait()` 순서는 이 RD에서 시험용 worker 역할(`src/test/roles/repl-worker.ts`)만 가졌다. RD-006이 `stdin-callback.ts`에 그 순서를 프로덕션 코드로 옮기고 같은 변이 검사(알림을 `wait()` 뒤로 이동)를 걸었다(`worker/stdin-callback.test.ts`). SEQ/SIGNAL 메모리 순서는 단위 시험(`Atomics.store` 가로채기)만 잡으므로 RD-007이 눌림 주입 스레드로 다시 본다. worker 스레드 시험 하니스(`src/test/thread.ts`)와 규칙은 `09-testing.md` 9.1. `runReplWorker()`는 `parseInitFrame`으로 프레임을 검증하고 에코까지만 했으며(RD-004에서 본문을 채웠다), 데모의 임시 프레임(`apps/demo/src/App.tsx`)은 검증을 통과하는 형태로 바뀌었고 RD-004에서 `createRepl`(`createWorker`·채널 생성)이 대체했다. 비격리 페이지에서는 `createRepl`이 worker를 만들지 않고 경고만 낸다(RD-004, ADR-0004). 함정: `docs/traps/` TRP-002·TRP-003.
+인계: `protocol/`의 공개 표면은 `createRpc`(`call`·`notify`·`dispose`), `createStdinMailbox`·`createMailboxWriter`(`deliver`·`cancel`·`fail`)·`createMailboxReader`(`wait`), `createInterruptBuffer`·`signalInterrupt`·`acknowledgeInterrupt`·`discardPendingInterrupt`·`hasProtocolSlots`, `InitFrame`·`parseInitFrame`·`postInitFrame`이다. `readInput` 알림 → `wait()` 순서는 이 RD에서 시험용 worker 역할(`src/test/roles/repl-worker.ts`)만 가졌다. RD-006이 `stdin-callback.ts`에 그 순서를 프로덕션 코드로 옮기고 같은 변이 검사(알림을 `wait()` 뒤로 이동)를 걸었다(`worker/stdin-callback.test.ts`). SEQ/SIGNAL 메모리 순서는 단위 시험(`Atomics.store` 가로채기)만 잡아, RD-007이 눌림 주입 스레드(`src/test/roles/interrupt-presser.ts`)와 N=3000 통계로 다시 봤다(소실 0). worker 스레드 시험 하니스(`src/test/thread.ts`)와 규칙은 `09-testing.md` 9.1. `runReplWorker()`는 `parseInitFrame`으로 프레임을 검증하고 에코까지만 했으며(RD-004에서 본문을 채웠다), 데모의 임시 프레임(`apps/demo/src/App.tsx`)은 검증을 통과하는 형태로 바뀌었고 RD-004에서 `createRepl`(`createWorker`·채널 생성)이 대체했다. 비격리 페이지에서는 `createRepl`이 worker를 만들지 않고 경고만 낸다(RD-004, ADR-0004). 함정: `docs/traps/` TRP-002·TRP-003.
 
 ### RD-003 — 터미널 마운트와 줄 편집
 
@@ -125,22 +125,31 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008에서 완성), ma
 
 ### RD-007 — 실행 중 Ctrl+C: 기본 중단, 요청 번호·ack·재전송, 연타 보호, 시작 코드 보호
 
-상태: 대기 · 이전: RD-012, RD-012d, RD-012e, RD-012h(b) · 설계: `03-ctrl-c.md` 2.1~2.4, 2.6, 2.7
+상태: 완료 · 이전: RD-012, RD-012d, RD-012e, RD-012h(b) · 설계: `03-ctrl-c.md` 2.1~2.4, 2.6, 2.7
 
-`interrupt-sender.ts`(5ms 점검, 최대 10회 재전송), `sigint-handler.py`(요청 번호 확인·ack·`<console>` 프레임 규칙·`formattraceback` 절단), `interrupt-buffer.ts`(`connectInterrupts`: 핸들러 → 연결), REPL 루프의 `discardPendingInterrupt`, main의 `^C` 에코와 `setCtrlCHandler`.
+`protocol/interrupt-sender.ts`(5ms 점검, 최대 10회 재전송), `worker/sigint-handler.ts`(요청 번호 확인·ack·`<console>` 프레임 규칙·`formattraceback` 절단; Python 소스는 TS 문자열), `worker/interrupt-buffer.ts`(`connectInterrupts`: 설치 → 폐기 → 연결), REPL 루프의 `discardPendingInterrupt`, main의 `^C` 에코와 `setCtrlCHandler`(게이트 `pythonRunning`).
 
 시나리오: `while True: pass` 중 Ctrl+C → `^C` + `KeyboardInterrupt` 트레이스백 → `>>> `. Ctrl+C를 누르고 있어도(키 반복 30회) 프롬프트가 돌아온다. 새 worker 로드 중 Ctrl+C를 눌러도 시작 코드가 죽지 않는다. `KeyboardInterrupt`를 잡고 계속 도는 프로그램은 눌림 한 번에 한 번만 중단된다.
 
-완료 기준:
-- 단일 눌림 소실 0: node `worker_threads` 눌림 주입 N=3000, 브라우저 `while True: pass` N=200(이전: 각각 141·31건 → 0, 5건 → 0). 누락·이중 0. 재전송 복구 지연 최대 20ms 안팎.
-- 연타 매트릭스: 콜드 0ms 30회, 1·5·20·50ms 30회, 키 반복, 0ms 2·5회, 웜 0ms, TLA 켜짐 0ms 각 N=20 → 전부 프롬프트 복귀, 대상 `pageerror` 0.
-- 부팅 중 Ctrl+C `boot-press` N=30 전부 정상.
-- 폴링 경로에 접근자·Proxy를 넣지 않는다(`str(i)` 루프 plain 대비 1.03 이내).
-- 변이 검사: SEQ/SIGNAL 순서 뒤집기, 송신기가 ACK를 먼저 읽기, 핸들러 ack 위치 이동, 연결이 무조건 ack하기가 각각 시험을 실패시킨다.
+완료 기준(전부 충족, 실측):
+- 단일 눌림 소실 0: node 눌림 주입 N=3000 **소실 0**(자연 발생 소실 76건을 재전송이 전부 복구했다 — 재전송 1회 74건·2회 2건), 브라우저 N=200 **HANG 0**. catch-loop 3000회 **누락 0·이중 0**. 재전송 복구 지연 p50 5.2ms·**max 10.3ms**(기준 20ms 안팎).
+- 연타 매트릭스: 0ms 30회, 1·5·20·50ms 30회, 키 반복, 2·5회, 웜 0ms 각 N=20 → **9셀 180시행 전부 프롬프트 복귀**, 대상 `pageerror` 0. TLA 켜짐 0ms 30회는 node 시험(`sigint-handler.test.ts`)이 본다(브라우저 TLA 셀은 RD-012).
+- 부팅 중 Ctrl+C `boot-press` dev N=30·preview N=10 **전부 정상**(시행당 60~64회가 실제 부팅 중에 들어갔다).
+- 폴링 비용: `loop_i` **1.001**, `str(i)` **0.9943**(plain 대비, 잡음 대조 0.9945·0.9965).
+- 변이 검사: SEQ/SIGNAL 순서 뒤집기, 송신기가 ACK를 먼저 읽기, 핸들러 ack 위치 이동, 연결이 무조건 ack하기가 각각 시험을 실패시킨다(DELTA-01~04에서 총 79종 검사, 동치 1종 외 전부 killed).
+- 양성 대조 3/3: `^C`를 `readline.print`로 → S1만 실패, 재전송 제거 → 브라우저 HANG 12/200, 핸들러 프레임 규칙 제거 → 연타 HANG.
 
-인계(RD-005): `discardPendingInterrupt`는 `worker/repl-loop.ts`에서 `readLine` 응답 직후·`run` 전에 넣는다(루프가 `protocol/`을 import하지 않으므로 주입 함수로 받는다). 프롬프트에서 Ctrl+C는 벤더 `Readline`이 `^C`를 찍고 프롬프트를 다시 그릴 뿐 worker에 알리지 않는다(`setCtrlCHandler`는 활성 읽기가 없을 때만 불린다). 건너뛴 이전 시나리오: RD-006b의 F×5·G1·G2, RD-011a의 S08(`while True: pass` 중 Ctrl+C).
+인계(RD-008): F×5(다섯 건 모두 `input()` 읽기 중 연타가 전제라 RD-007에서 재분류했다)와 G3·W2는 취소가 들어온 뒤에 본다. main 게이트 `pythonRunning`은 `readInput` 알림 도착부터 `deliver`/`fail`이 끝날 때까지 닫혀 있어 그 구간의 Ctrl+C는 에코도 전송도 하지 않는다 — 취소로 바꿀 때 `inputReadsPending`을 내리는 자리(`deliver` **뒤**)를 유지해야 worker가 깨어나는 시점과 어긋나지 않는다. `stdin-callback`이 `signalInterrupt`를 쓰면 그 번호를 핸들러의 `last_seq`가 어떻게 보는지 확인한다(TRP-035).
 
-인계(RD-006): `setStdin`은 `boot.ts`에서 `createConsole` 뒤·`ready` 알림 전에 걸려 있다. SIGINT 핸들러 설치·interrupt buffer 연결은 그 앞에 끼운다(`00-architecture.md` 3.1). 건너뛴 이전 시나리오: RD-006b의 S1(실행 중 Ctrl+C의 `^C` 에코를 `except`로 잡은 뒤 `input()` → `t^Cx: abc`).
+인계(RD-009): 핸들러는 현재 `<console>` 프레임이 없는 SIGINT를 **사용자 실행 중이라도 버린다**(ack는 한다). 그래서 `while True: time.sleep(0.1)`·`asyncio.run` 대기 중 Ctrl+C는 아직 무효다(TRP-020). `install(console, ack, seq)`에 `warn`과 `interrupt_idle` 반환을 더하고, `own_codes` 확장·`webloop.py` 프레임 제거·감시 타이머(`connectInterrupts` 뒤·루프 앞, `atPrompt`)를 넣는다. 정상 중단마다 webloop 재보고 `pageerror`가 **시행당 2건** 난다(RD-007 실측, 200시행 → 400건). `packages/pyodide-repl/vitest.config.ts`의 `onUnhandledError` 필터는 현재 `SystemExit|KeyboardInterrupt` 둘을 거른다 — 억제를 넣은 뒤 필터를 지우고 `sigint-handler.test.ts`가 필터 없이 통과하는지 본다.
+
+인계(RD-010): 새 worker를 만들기 직전 `sender.cancel()` → `Atomics.store(buffer, SIGNAL, 0)` 순서로 치운다. `index.ts`의 `interruptBuffer`는 세션마다 새로 만들지 않고 상수로 잡혀 있으므로 리셋이 재사용한다(핸들러의 `last_seq` 초기값이 이전 세션 번호를 이어받아 재전송을 무시한다). `endSession()`이 닫은 게이트(`alive`)를 리셋에서 다시 참으로 만든다.
+
+인계(RD-012): 브라우저 연타 매트릭스에 TLA 켜짐 셀을 더한다(RD-007은 node 시험에서만 봤다). `createRepl({ topLevelAwait })`와 데모 토글이 들어온 뒤다.
+
+인계(RD-015): Tab 취소도 `sender.send()`를 쓴다.
+
+인계(RD-018): 확인 스크립트는 `_works/_completed/20260922-07-rd-007-ctrl-c-running/verify/`에 있다 — `ctrl-c-check.mjs`(RM1~RM3·G1·G2·S1a·S1·S08), `press-loss.mjs`, `burst-matrix.mjs`, `boot-press.mjs`, `positive-controls.py`, node 통계는 `verify/node/`. 74개 복원 표는 그 폴더의 `skipped-ids.md`.
 
 ### RD-008 — 입력줄 Ctrl+C(미완성 블록 취소)와 `input()` 중 Ctrl+C
 
