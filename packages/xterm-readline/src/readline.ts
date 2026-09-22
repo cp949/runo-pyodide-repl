@@ -365,6 +365,13 @@ export class Readline implements ITerminalAddon {
       if (it.inputType === InputType.Enter) {
         return { inputType: InputType.Text, data: ["\n"] };
       }
+      if (
+        it.inputType === InputType.UnsupportedControlChar &&
+        it.data.length === 1 &&
+        it.data[0] === "\t"
+      ) {
+        return { inputType: InputType.Text, data: ["\t"] };
+      }
       return it;
     });
 

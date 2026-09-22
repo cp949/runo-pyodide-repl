@@ -105,6 +105,30 @@ test("typing through onData drives State and updates the screen", async () => {
   expect(await promise).toBe("hello");
 });
 
+test("붙여넣은 탭을 버퍼에 보존한다", async () => {
+  const term = new StubTerminal(40, 8);
+  const rl = new Readline();
+  rl.activate(term as unknown as Parameters<typeof rl.activate>[0]);
+
+  rl.read("> ");
+  await Promise.resolve();
+
+  term.feedData("if x:\r\tpass");
+  expect(rl.getLine()).toBe("if x:\n\tpass");
+});
+
+test("단독 탭 키는 여전히 무시한다", async () => {
+  const term = new StubTerminal(40, 8);
+  const rl = new Readline();
+  rl.activate(term as unknown as Parameters<typeof rl.activate>[0]);
+
+  rl.read("> ");
+  await Promise.resolve();
+
+  term.feedData("\t");
+  expect(rl.getLine()).toBe("");
+});
+
 test("onResize re-fits Tty and re-renders the active read", () => {
   const term = new StubTerminal(40, 8);
   const rl = new Readline();
