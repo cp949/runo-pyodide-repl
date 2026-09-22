@@ -219,6 +219,7 @@ function startResettableSession(
 async function startRead(
   session: Pick<ReturnType<typeof startSession>, "fake" | "workerRpc">,
   prompt = ">>> ",
+  pending: string | undefined = undefined,
 ): Promise<{ line: Promise<string | null> }> {
   const { fake, workerRpc } = session;
   const flushRequests = () => fake.written.filter((text) => text === "").length;
@@ -226,7 +227,7 @@ async function startRead(
   const line = workerRpc.call<string | null>(
     "readLine",
     prompt,
-    undefined,
+    pending,
     true,
   );
   // 시험이 읽기 결과를 기다리지 않고 끝나도 afterEach의 rpc 정리가 처리되지 않은 rejection을 만들지 않게 한다.
@@ -408,6 +409,42 @@ describe.each([
     session.fake.type("\r");
 
     await expect(line).resolves.toBe("");
+  });
+
+  test("readLine 요청의 pending은 자동 들여쓰기 프리필로 리더까지 전달된다(RD-013)", async () => {
+    const session = startSession({}, { asyncWrite });
+
+    const { line } = await startRead(session, "... ", "for i in range(2):");
+    session.fake.type("print(i)\r");
+
+    await expect(line).resolves.toBe("    print(i)");
+  });
+
+  test("공백뿐인 제출은 history에 남지 않는다(skipBlankHistory)", async () => {
+    const session = startSession({}, { asyncWrite });
+    const { line: first } = await startRead(session);
+    session.fake.type("real\r");
+    await first;
+
+    const { line: second } = await startRead(session);
+    session.fake.type("   \r");
+    await expect(second).resolves.toBe("   ");
+
+    // 공백뿐인 제출이 history에 남았다면 ↑는 "   "을 먼저 불러온다. 기록되지 않았으니 바로 "real"이다.
+    const { line: third } = await startRead(session);
+    session.fake.type("\x1b[A\r");
+
+    await expect(third).resolves.toBe("real");
+  });
+
+  test("stdin 읽기(input())에는 프리필도 onKey도 없다(확정 4)", async () => {
+    const session = startSession({}, { asyncWrite });
+    const readSpy = vi.spyOn(Readline.prototype, "read");
+
+    await startInputRead(session);
+
+    const lastCall = readSpy.mock.calls.at(-1);
+    expect(lastCall?.[1]).toEqual({ cancelable: true });
   });
 
   test("읽기가 열려 있는 동안 readLine을 다시 요청하면 Error로 reject하고 첫 읽기는 정상 완료된다", async () => {
@@ -1425,6 +1462,21 @@ describe("reset()(RD-010)", () => {
     session.fake.type("ok\r");
 
     await expect(newLine).resolves.toBe("ok");
+  });
+
+  test("리셋 뒤 새 세션의 prefill은 4칸이다(옛 세션이 2칸 블록을 본 뒤에도, RD-013)", async () => {
+    const session = startResettableSession();
+    // 옛 세션에 2칸 들여쓰기 블록을 보여 lastUsedIndentation을 "  "로 만든다(worker가 보낼 pending을 하니스가 직접 준다).
+    const { line: old } = await startRead(session, "... ", "if True:\n  x=1");
+    session.fake.type("\r");
+    await old;
+
+    session.handle.reset();
+
+    const { line: fresh } = await startRead(session, "... ", "for i in range(2):");
+    session.fake.type("print(i)\r");
+
+    await expect(fresh).resolves.toBe("    print(i)");
   });
 
   test("reset은 열린 input() 읽기를 끝내되 옛 메일박스에 fail을 쓰지 않는다(TRP-003)", async () => {

@@ -8,6 +8,7 @@
 import { Readline } from "@cp949/runo-xterm-readline";
 import { describe, expect, test, vi } from "vitest";
 import { createFakeTerminal } from "../test/fake-terminal";
+import { createAutoIndent } from "./auto-indent";
 import { createReadGuard } from "./read-guard";
 import { createReplReader } from "./repl-reader";
 import { createTerminalSinks } from "./sinks";
@@ -60,7 +61,11 @@ function createGuarded() {
   const replReads: Deferred[] = [];
   const inputReads: Deferred[] = [];
   const rawReadLine = vi.fn<
-    (prompt: string, cancelable: boolean) => Promise<string | null>
+    (
+      prompt: string,
+      pending: string | undefined,
+      cancelable: boolean,
+    ) => Promise<string | null>
   >(() => {
     const read = deferred<string | null>();
     replReads.push(read);
@@ -95,7 +100,7 @@ function createGuarded() {
 describe("createReadGuard: stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 시작한다", () => {
   test("활성 REPL 읽기가 있으면 stdin 읽기는 그 읽기가 끝난 뒤에 시작하고 두 결과는 그대로 전달된다", async () => {
     const { guard, rawReadInput, replReadAt, inputReadAt } = createGuarded();
-    const repl = guard.readLine(">>> ", true);
+    const repl = guard.readLine(">>> ", undefined, true);
     const input = guard.readInput(true);
     await tick();
     expect(rawReadInput).not.toHaveBeenCalled();
@@ -124,7 +129,7 @@ describe("createReadGuard: stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 �
   test("REPL 읽기가 reject돼도 stdin 읽기는 시작하고 reject는 REPL 호출자에게 그대로 간다", async () => {
     const { guard, rawReadInput, replReadAt, inputReadAt } = createGuarded();
     const error = new Error("읽기 실패");
-    const repl = observe(guard.readLine(">>> ", true));
+    const repl = observe(guard.readLine(">>> ", undefined, true));
     const input = observe(guard.readInput(true));
 
     replReadAt(0).reject(error);
@@ -139,7 +144,7 @@ describe("createReadGuard: stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 �
 
   test("REPL 읽기가 끝난 뒤에는 stdin 읽기가 연달아 와도 앞 읽기를 기다리지 않고 각각 바로 시작한다", async () => {
     const { guard, rawReadInput, replReadAt } = createGuarded();
-    void guard.readLine(">>> ", true);
+    void guard.readLine(">>> ", undefined, true);
     replReadAt(0).resolve("f()");
     await tick();
 
@@ -153,10 +158,10 @@ describe("createReadGuard: stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 �
 
   test("다음 프롬프트의 새 REPL 읽기가 시작되면 끝난 옛 읽기가 아니라 새 읽기를 기다린다", async () => {
     const { guard, rawReadInput, replReadAt } = createGuarded();
-    void guard.readLine(">>> ", true);
+    void guard.readLine(">>> ", undefined, true);
     replReadAt(0).resolve("a = 1");
     await tick();
-    void guard.readLine(">>> ", true);
+    void guard.readLine(">>> ", undefined, true);
     void guard.readInput(true);
     await tick();
     expect(rawReadInput).not.toHaveBeenCalled();
@@ -170,16 +175,16 @@ describe("createReadGuard: stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 �
   test("REPL 읽기는 가드를 거쳐도 즉시 시작된다(시작 타이밍 불변)", () => {
     const { guard, rawReadLine } = createGuarded();
 
-    void guard.readLine(">>> ", true);
+    void guard.readLine(">>> ", undefined, true);
 
     // 동기로 확인한다. 마이크로태스크라도 미루면 시작 타이밍이 바뀐 것이다.
     expect(rawReadLine).toHaveBeenCalledTimes(1);
-    expect(rawReadLine).toHaveBeenCalledWith(">>> ", true);
+    expect(rawReadLine).toHaveBeenCalledWith(">>> ", undefined, true);
   });
 
   test("REPL 읽기가 취소(`null`)로 끝나도 stdin 읽기는 시작한다", async () => {
     const { guard, rawReadInput, replReadAt, inputReadAt } = createGuarded();
-    const repl = guard.readLine(">>> ", true);
+    const repl = guard.readLine(">>> ", undefined, true);
     const input = guard.readInput(true);
     await tick();
     expect(rawReadInput).not.toHaveBeenCalled();
@@ -197,14 +202,28 @@ describe("createReadGuard: stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 �
   test("`cancelable` 인자를 그대로 원본 읽기에 넘긴다", async () => {
     const { guard, rawReadLine, rawReadInput, replReadAt } = createGuarded();
 
-    void guard.readLine(">>> ", false);
+    void guard.readLine(">>> ", undefined, false);
     void guard.readInput(false);
     // stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 시작한다.
     replReadAt(0).resolve("x = 1");
     await tick();
 
-    expect(rawReadLine).toHaveBeenCalledWith(">>> ", false);
+    expect(rawReadLine).toHaveBeenCalledWith(">>> ", undefined, false);
     expect(rawReadInput).toHaveBeenCalledWith(false);
+  });
+
+  test("`pending`을 그대로 원본 REPL 읽기에 넘긴다", async () => {
+    const { guard, rawReadLine, replReadAt } = createGuarded();
+
+    void guard.readLine("... ", "for i in range(2):", true);
+    replReadAt(0).resolve("    print(i)");
+    await tick();
+
+    expect(rawReadLine).toHaveBeenCalledWith(
+      "... ",
+      "for i in range(2):",
+      true,
+    );
   });
 
   test("stdin 읽기가 reject되면 가드가 삼키지 않고 호출자에게 그대로 전달한다", async () => {
@@ -235,11 +254,15 @@ describe.each([
       const sinks = createTerminalSinks(readline);
       // 실제 `read`를 그대로 호출하면서 받은 프롬프트를 기록한다.
       const read = vi.spyOn(readline, "read");
-      const replReader = createReplReader(readline, fake.term, sinks);
+      const autoIndent = createAutoIndent(readline);
+      const replReader = createReplReader(readline, fake.term, sinks, autoIndent);
       const inputReader = createInputReader(readline, fake.term, sinks);
       const guard = createReadGuard({
-        readLine: (prompt: string, cancelable: boolean) =>
-          replReader.read(prompt, cancelable),
+        readLine: (
+          prompt: string,
+          pending: string | undefined,
+          cancelable: boolean,
+        ) => replReader.read(prompt, pending, cancelable),
         readInput: (cancelable: boolean) => inputReader.read(cancelable),
       });
       /** write 콜백을 배출하고 대기 중인 마이크로태스크·타이머를 지나가게 한다. 비동기 모드는 flush 전에 읽기가 시작되지 않는다. */
@@ -256,7 +279,7 @@ describe.each([
 
     test("REPL 읽기 중 배경 input()이 들어와도 REPL 줄은 REPL 읽기가, 그다음 줄은 stdin 읽기가 받는다", async () => {
       const { fake, sinks, guard, prompts, settle } = setup();
-      const repl = observe(guard.readLine(">>> ", true));
+      const repl = observe(guard.readLine(">>> ", undefined, true));
       await settle();
 
       // 프롬프트를 기다리는 사이 배경 콜백의 `input("bg> ")`가 프롬프트를 쓰고 stdin 읽기를 요청한다.

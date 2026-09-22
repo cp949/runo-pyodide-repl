@@ -68,7 +68,7 @@ function normalizeIndexUrl(url: string): string {
 
 export function createRepl(options: ReplOptions): ReplHandle {
   // history는 세션(마운트) 동안 메모리에만 둔다. 새로고침 뒤에는 비어 있어야 한다. 세션을 넘어 산다(리셋은 RD-010).
-  const readline = new Readline({ persist: false });
+  const readline = new Readline({ persist: false, skipBlankHistory: true });
   options.terminal.loadAddon(readline);
   const onStatus = options.onStatus ?? (() => {});
   const isolated = globalThis.crossOriginIsolated === true;

@@ -14,6 +14,7 @@ import {
   createMailboxWriter,
   createStdinMailbox,
 } from "./protocol/stdin-mailbox";
+import { createAutoIndent } from "./terminal/auto-indent";
 import { createReadGuard } from "./terminal/read-guard";
 import { createReplReader } from "./terminal/repl-reader";
 import type { RewindTerminal } from "./terminal/rewind-tail";
@@ -96,14 +97,17 @@ export function startSession(options: StartSessionOptions): ReplSession {
           }),
       ),
   };
-  const replReader = createReplReader(readline, liveTerminal, sinks);
+  // 세션 소유: lastUsedIndentation은 이 세션 동안 유지되고, reset()이 새 세션(새 객체)을 만들면 4칸으로
+  // 돌아간다(08-session.md 8.1, 확정 3).
+  const autoIndent = createAutoIndent(readline);
+  const replReader = createReplReader(readline, liveTerminal, sinks, autoIndent);
   // stdin 리더도 같은 뷰를 받는다: `rewindTail`의 flush 콜백이 해제된 터미널의 buffer를 읽지 않게(TRP-004).
   const inputReader = createInputReader(readline, liveTerminal, sinks);
   // 프롬프트를 기다리는 동안 worker의 배경 콜백이 `input()`을 부르면 stdin 읽기가 REPL 읽기를 교체해 REPL 읽기가
   // 고아가 된다. stdin 읽기를 활성 REPL 읽기가 끝난 뒤로 미룬다(04-stdin-input.md 3.2).
   const guard = createReadGuard({
-    readLine: (prompt: string, cancelable: boolean) =>
-      replReader.read(prompt, cancelable),
+    readLine: (prompt: string, pending: string | undefined, cancelable: boolean) =>
+      replReader.read(prompt, pending, cancelable),
     readInput: (cancelable: boolean) => inputReader.read(cancelable),
   });
   // 벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다. worker 루프는 응답을 받은 뒤에만 다시
@@ -165,10 +169,10 @@ export function startSession(options: StartSessionOptions): ReplSession {
     writeOutput: (text: string) => sinks.writeOutput(text),
     writeError: (text: string) => sinks.writeError(text),
     // 꼬리 + 프롬프트를 그리고 Enter까지 한 줄을 읽어 응답한다. 취소(Ctrl+C)는 `null` 응답이고, worker의 루프가
-    // `run(null)`로 `KeyboardInterrupt`를 낸다. `pending`은 후속 RD(RD-013·014·015)가 쓰는 위치 인자다.
+    // `run(null)`로 `KeyboardInterrupt`를 낸다. `pending`은 자동 들여쓰기 프리필의 재료다(RD-013).
     readLine: (
       prompt: string,
-      _pending: string | undefined,
+      pending: string | undefined,
       cancelable: boolean,
     ): Promise<string | null> => {
       // 요청이 온 순간 worker는 실행을 멈추고 줄을 기다린다. 보낸 눌림의 재전송은 여기서 멈춘다(03-ctrl-c.md 2.3).
@@ -179,7 +183,7 @@ export function startSession(options: StartSessionOptions): ReplSession {
       if (reading) return Promise.reject(new Error("이미 읽는 중"));
       reading = true;
       readLinePending = true;
-      return guard.readLine(prompt, cancelable).then(
+      return guard.readLine(prompt, pending, cancelable).then(
         (line) => {
           reading = false;
           // 응답이 포트에 올라가기 전에 내린다: worker는 응답을 받는 대로 실행을 재개한다.

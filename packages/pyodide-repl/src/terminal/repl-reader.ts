@@ -9,6 +9,7 @@
  * 행 처음으로 가므로 꼬리가 없다. 비우지 않으면 다음 읽기가 앞 꼬리를 물려받는다.
  */
 import type { Readline } from "@cp949/runo-xterm-readline";
+import type { AutoIndent } from "./auto-indent";
 import { rewindTail, type RewindTerminal } from "./rewind-tail";
 import type { TerminalSinks } from "./sinks";
 
@@ -16,8 +17,14 @@ export interface ReplReader {
   /**
    * 꼬리 + `\x1b[0m` + prompt를 그 자리에 그리고 Enter까지 한 줄을 돌려준다. 꼬리가 없으면 prompt 그대로.
    * `cancelable`이면 읽기 중 Ctrl+C가 `^C` 없이 줄만 바꾸고 `null`로 끝난다(취소, 06-editing.md 6.3).
+   * `pending`은 worker가 보낸, 아직 제출되지 않은 블록 줄들이다(자동 들여쓰기 프리필의 재료,
+   * `06-editing.md` 6.3).
    */
-  read(prompt: string, cancelable: boolean): Promise<string | null>;
+  read(
+    prompt: string,
+    pending: string | undefined,
+    cancelable: boolean
+  ): Promise<string | null>;
 }
 
 /** 세션(sink 세트)마다 하나. 순서: rewindTail(flush) → 꼬리 재조회 → resetTail → readline.read(합성 프롬프트). */
@@ -25,15 +32,17 @@ export function createReplReader(
   readline: Pick<Readline, "read">,
   term: RewindTerminal,
   sinks: Pick<TerminalSinks, "tail" | "resetTail">,
+  autoIndent: AutoIndent
 ): ReplReader {
   return {
-    async read(prompt, cancelable) {
+    async read(prompt, pending, cancelable) {
       await rewindTail(term, sinks.tail());
       // flush를 기다리는 사이에 온 출력을 반영하려고 꼬리를 다시 읽는다.
       const tail = sinks.tail();
       sinks.resetTail();
       return readline.read(tail === "" ? prompt : `${tail}\x1b[0m${prompt}`, {
         cancelable,
+        ...autoIndent.readOptions(pending),
       });
     },
   };

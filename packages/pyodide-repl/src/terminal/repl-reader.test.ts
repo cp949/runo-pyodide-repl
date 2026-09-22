@@ -7,6 +7,7 @@
 import { Readline } from "@cp949/runo-xterm-readline";
 import { describe, expect, test, vi } from "vitest";
 import { createFakeTerminal } from "../test/fake-terminal";
+import { createAutoIndent } from "./auto-indent";
 import { createReplReader } from "./repl-reader";
 import { createTerminalSinks } from "./sinks";
 
@@ -27,17 +28,19 @@ describe.each([
     const sinks = createTerminalSinks(readline);
     // 실제 `read`를 그대로 호출하면서 받은 합성 프롬프트를 기록한다.
     const read = vi.spyOn(readline, "read");
-    const reader = createReplReader(readline, fake.term, sinks);
+    const autoIndent = createAutoIndent(readline);
+    const reader = createReplReader(readline, fake.term, sinks, autoIndent);
     /**
      * 읽기를 시작하고 `readline.read`가 불릴 때까지 기다린 뒤 write 콜백을 배출한다. 꼬리가 길면 `rewindTail`이 flush를
      * 기다리므로 먼저 배출해야 `read`가 시작된다. 읽기가 끝나기를 기다리지 않도록(async 함수는 반환한 Promise를 풀어
-     * 버린다) 시작한 읽기의 Promise를 객체에 담아 돌려준다.
+     * 버린다) 시작한 읽기의 Promise를 객체에 담아 돌려준다. `pending`은 자동 들여쓰기 시험만 준다.
      */
     async function startRead(
       prompt: string,
       cancelable = true,
+      pending: string | undefined = undefined,
     ): Promise<{ line: Promise<string | null> }> {
-      const line = reader.read(prompt, cancelable);
+      const line = reader.read(prompt, pending, cancelable);
       fake.flush();
       await tick();
       fake.flush();
@@ -47,7 +50,7 @@ describe.each([
     const lastPrompt = () => read.mock.calls.at(-1)?.[0];
     /** 마지막 `readline.read`가 받은 옵션. */
     const lastOptions = () => read.mock.calls.at(-1)?.[1];
-    return { fake, sinks, reader, startRead, lastPrompt, lastOptions };
+    return { fake, sinks, readline, reader, startRead, lastPrompt, lastOptions };
   }
 
   test("꼬리가 없으면 프롬프트를 그대로 읽는다(SGR 리셋 없음)", async () => {
@@ -134,12 +137,14 @@ describe.each([
     await expect(line).resolves.toBe("abc");
   });
 
-  test("`cancelable`을 벤더 읽기 옵션으로 그대로 넘긴다", async () => {
+  test("`cancelable`을 벤더 읽기 옵션으로 그대로 넘긴다(자동 들여쓰기 `onKey`는 항상 붙는다)", async () => {
     const { startRead, lastOptions } = setup();
 
     await startRead(">>> ", false);
 
-    expect(lastOptions()).toEqual({ cancelable: false });
+    expect(lastOptions()).toMatchObject({ cancelable: false });
+    expect(lastOptions()?.prefill).toBeUndefined();
+    expect(typeof lastOptions()?.onKey).toBe("function");
   });
 
   test("cancelable 읽기 중 Ctrl+C는 `^C` 없이 `null`을 돌려준다", async () => {
@@ -185,7 +190,7 @@ describe.each([
     sinks.write("x".repeat(100));
 
     // 100자 꼬리는 짧지 않아 `rewindTail`이 flush를 기다린다. 그 사이 출력 `Z`가 온다.
-    void reader.read(">>> ", true);
+    void reader.read(">>> ", undefined, true);
     sinks.write("Z");
     fake.flush();
     await tick();
@@ -206,5 +211,32 @@ describe.each([
     const promptDraw = fake.written.findIndex((text) => text.includes(">>> "));
     expect(up).toBeGreaterThan(-1);
     expect(promptDraw).toBeGreaterThan(up);
+  });
+
+  test("pending이 있는 읽기는 flush 뒤 `... ` 다음에 prefill이 그려지고 getLine()에 남는다", async () => {
+    const { readline, startRead } = setup();
+
+    await startRead("... ", true, "for i in range(2):");
+
+    expect(readline.getLine()).toBe("    ");
+  });
+
+  test("prefill 뒤 Enter는 prefill + 입력을 돌려준다", async () => {
+    const { fake, startRead } = setup();
+
+    const { line } = await startRead("... ", true, "for i in range(2):");
+    fake.type("print(i)\r");
+
+    await expect(line).resolves.toBe("    print(i)");
+  });
+
+  test("꼬리가 있는 합성 프롬프트에서도 prefill이 프롬프트 뒤에 온다", async () => {
+    const { sinks, readline, startRead, lastPrompt } = setup();
+    sinks.write("t");
+
+    await startRead("... ", true, "for i in range(2):");
+
+    expect(lastPrompt()).toBe("t\x1b[0m... ");
+    expect(readline.getLine()).toBe("    ");
   });
 });

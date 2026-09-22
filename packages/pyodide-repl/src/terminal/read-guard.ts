@@ -15,14 +15,25 @@
 const ignore = () => {};
 
 export interface ReadGuardDeps<L, I> {
-  /** REPL 읽기(`repl-reader`). 즉시 부른다. `cancelable`은 그대로 리더에 넘긴다. */
-  readLine(prompt: string, cancelable: boolean): Promise<L>;
+  /**
+   * REPL 읽기(`repl-reader`). 즉시 부른다. `pending`·`cancelable`은 그대로 리더에 넘긴다.
+   * `pending`은 자동 들여쓰기 프리필의 재료다(`06-editing.md` 6.3).
+   */
+  readLine(
+    prompt: string,
+    pending: string | undefined,
+    cancelable: boolean
+  ): Promise<L>;
   /** stdin 읽기(`stdin-reader`). 활성 REPL 읽기가 끝난 뒤 부른다. */
   readInput(cancelable: boolean): Promise<I>;
 }
 
 export interface ReadGuard<L, I> {
-  readLine(prompt: string, cancelable: boolean): Promise<L>;
+  readLine(
+    prompt: string,
+    pending: string | undefined,
+    cancelable: boolean
+  ): Promise<L>;
   readInput(cancelable: boolean): Promise<I>;
 }
 
@@ -37,8 +48,8 @@ export function createReadGuard<L, I>(
   // 활성 REPL 읽기가 끝나면(줄·취소·실패 어느 쪽이든) 이행된다. 읽기가 없거나 끝났으면 이미 이행된 promise다.
   let replRead: Promise<void> = Promise.resolve();
   return {
-    readLine(prompt, cancelable) {
-      const read = deps.readLine(prompt, cancelable);
+    readLine(prompt, pending, cancelable) {
+      const read = deps.readLine(prompt, pending, cancelable);
       // 가드 내부 체인만 실패를 삼킨다. 호출자가 받는 `read`는 그대로다.
       replRead = read.then(ignore, ignore);
       return read;

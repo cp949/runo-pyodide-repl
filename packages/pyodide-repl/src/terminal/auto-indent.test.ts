@@ -1,5 +1,11 @@
+import { InputType, type Input } from "@cp949/runo-xterm-readline";
 import { describe, expect, it } from "vitest";
-import { backspaceCount, indentUnitWidth, nextIndentation } from "./auto-indent";
+import {
+  backspaceCount,
+  createAutoIndent,
+  indentUnitWidth,
+  nextIndentation,
+} from "./auto-indent";
 
 // 커서가 버퍼 끝에 있을 때 Enter 뒤 개행 다음에 들어갈 공백.
 function indentationAfter(buffer: string, lastUsed: string | null = null): string {
@@ -104,5 +110,126 @@ describe("backspaceCount", () => {
     const buffer = `if x:\n${" ".repeat(8)}pass`;
 
     expect(backspaceCount(buffer, 6 + 6, 4, false)).toBe(2);
+  });
+});
+
+/** `createAutoIndent`가 받는 `readline`의 가짜. 버퍼·커서를 실제로 편집해 `onKey`의 결과를 관찰한다. */
+function createFakeReadline(initial: { buffer?: string; cursor?: number } = {}) {
+  let buffer = initial.buffer ?? "";
+  let cursor = initial.cursor ?? buffer.length;
+  const backspaceCalls: number[] = [];
+  return {
+    getLine: () => buffer,
+    getCursor: () => cursor,
+    editInsert: (text: string) => {
+      buffer = buffer.slice(0, cursor) + text + buffer.slice(cursor);
+      cursor += text.length;
+    },
+    editBackspace: (n: number) => {
+      backspaceCalls.push(n);
+      buffer = buffer.slice(0, cursor - n) + buffer.slice(cursor);
+      cursor -= n;
+    },
+    get backspaceCalls() {
+      return backspaceCalls;
+    },
+  };
+}
+
+function key(inputType: InputType): Input {
+  return { inputType, data: [] };
+}
+
+describe("createAutoIndent", () => {
+  it("pending이 있으면 직전 줄 들여쓰기 + `:` 뒤 단위를 prefill로 준다", () => {
+    const autoIndent = createAutoIndent(createFakeReadline());
+
+    const options = autoIndent.readOptions("for i in range(2):");
+
+    expect(options.prefill).toBe("    ");
+  });
+
+  it("pending이 없으면 prefill이 없다", () => {
+    const autoIndent = createAutoIndent(createFakeReadline());
+
+    const options = autoIndent.readOptions(undefined);
+
+    expect(options.prefill).toBeUndefined();
+    expect(typeof options.onKey).toBe("function");
+  });
+
+  it("2칸 블록 뒤 새 블록 prefill은 2칸이다(세션 동안 유지)", () => {
+    const autoIndent = createAutoIndent(createFakeReadline());
+
+    autoIndent.readOptions("if True:\n  x=1"); // lastUsedIndentation = "  "로 갱신된다.
+    const options = autoIndent.readOptions("if True:");
+
+    expect(options.prefill).toBe("  ");
+  });
+
+  it("Shift+Enter는 pending을 앞에 붙여 계산해 개행 + 들여쓰기를 한 번에 넣는다", () => {
+    const readline = createFakeReadline({ buffer: "", cursor: 0 });
+    const autoIndent = createAutoIndent(readline);
+    const { onKey } = autoIndent.readOptions("for i in range(2):");
+
+    const consumed = onKey!(key(InputType.ShiftEnter));
+
+    expect(consumed).toBe(true);
+    expect(readline.getLine()).toBe("\n    ");
+    expect(readline.getCursor()).toBe(5);
+  });
+
+  it("Alt+Enter도 같다", () => {
+    const readline = createFakeReadline({ buffer: "", cursor: 0 });
+    const autoIndent = createAutoIndent(readline);
+    const { onKey } = autoIndent.readOptions("for i in range(2):");
+
+    const consumed = onKey!(key(InputType.AltEnter));
+
+    expect(consumed).toBe(true);
+    expect(readline.getLine()).toBe("\n    ");
+  });
+
+  it("Backspace는 단위 배수까지 지울 때만 소비한다", () => {
+    const readline = createFakeReadline({ buffer: "    ", cursor: 4 });
+    const autoIndent = createAutoIndent(readline);
+    // pending이 있는(연속 줄) 읽기로 continuation을 켠다.
+    const { onKey } = autoIndent.readOptions("if x:");
+
+    const consumed = onKey!(key(InputType.Backspace));
+
+    expect(consumed).toBe(true);
+    expect(readline.backspaceCalls).toEqual([4]);
+    expect(readline.getLine()).toBe("");
+  });
+
+  it("`>>> ` 첫 줄의 Backspace는 소비하지 않는다", () => {
+    const readline = createFakeReadline({ buffer: "    ", cursor: 4 });
+    const autoIndent = createAutoIndent(readline);
+    // pending 없는(새 `>>> ` 줄) 읽기라 continuation이 꺼진다.
+    const { onKey } = autoIndent.readOptions(undefined);
+
+    const consumed = onKey!(key(InputType.Backspace));
+
+    expect(consumed).toBe(false);
+    expect(readline.backspaceCalls).toEqual([]);
+  });
+
+  it("Enter·Ctrl+C는 소비하지 않는다", () => {
+    const autoIndent = createAutoIndent(createFakeReadline());
+    const { onKey } = autoIndent.readOptions("if x:");
+
+    expect(onKey!(key(InputType.Enter))).toBe(false);
+    expect(onKey!(key(InputType.CtrlC))).toBe(false);
+  });
+
+  it("취소 뒤에도(readOptions를 pending 없이 다시 불러도) 단위는 유지된다", () => {
+    const autoIndent = createAutoIndent(createFakeReadline());
+
+    autoIndent.readOptions("if True:\n  x=1"); // lastUsedIndentation = "  "
+    autoIndent.readOptions(undefined); // 취소·새 프롬프트 흉내 — pending 없음
+    const options = autoIndent.readOptions("if True:");
+
+    expect(options.prefill).toBe("  ");
   });
 });

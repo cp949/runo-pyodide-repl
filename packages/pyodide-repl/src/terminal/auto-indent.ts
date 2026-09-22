@@ -1,6 +1,8 @@
 // 자동 들여쓰기 순수 로직. CPython 3.14 `_pyrepl/readline.py`의 `maybe_accept`가 개행을 넣은 뒤
-// 채우는 들여쓰기 규칙을 옮긴 것이다(docs/design/06-editing.md 6.3). 키 입력 배선(`createAutoIndent`)은
-// DELTA-04에서 다른 함수로 두고, 여기서는 문자열만 다룬다.
+// 채우는 들여쓰기 규칙을 옮긴 것이다(docs/design/06-editing.md 6.3). `createAutoIndent`가 이 순수
+// 함수를 세션 소유 상태(`lastUsedIndentation`)와 묶어 벤더 `ReadOptions`로 바꾼다.
+
+import { InputType, type Input, type ReadOptions, type Readline } from "@cp949/runo-xterm-readline";
 
 export interface NextIndentation {
   // 개행 바로 뒤에 넣을 공백(직전 줄에서 이어받은 들여쓰기 + `:` 뒤 추가분).
@@ -110,4 +112,71 @@ export function nextIndentation(
     ? (unit ?? DEFAULT_UNIT)
     : "";
   return { indentation: kept + extra, lastUsedIndentation: unit };
+}
+
+export interface AutoIndent {
+  /** REPL 읽기 하나의 옵션. `pending`이 없으면 prefill 없음(`onKey`는 항상 있다). */
+  readOptions(pending: string | undefined): Pick<ReadOptions, "prefill" | "onKey">;
+}
+
+/**
+ * `pending`(worker가 보낸, 아직 제출되지 않은 블록 줄들)을 프리필·Shift+Enter·Alt+Enter·Backspace
+ * 정책으로 바꾼다. `lastUsedIndentation`은 이 객체가 사는 동안(세션 하나) 유지된다 — 새 세션은
+ * `createAutoIndent`를 다시 불러 4칸(`DEFAULT_UNIT`)으로 되돌아간다(`08-session.md` 8.1).
+ */
+export function createAutoIndent(
+  readline: Pick<Readline, "getLine" | "getCursor" | "editInsert" | "editBackspace">
+): AutoIndent {
+  let lastUsedIndentation: string | null = null;
+  // 마지막 `readOptions` 호출의 `pending`(`""`는 "블록 없음"과 "빈 블록 첫 줄"을 구분하지 않는다 —
+  // 둘 다 continuation이 아니라는 점에서 같다).
+  let pendingBlock = "";
+
+  const onKey = (input: Input): boolean => {
+    if (
+      input.inputType === InputType.ShiftEnter ||
+      input.inputType === InputType.AltEnter
+    ) {
+      const buf = readline.getLine();
+      const pos = readline.getCursor();
+      const prefix = pendingBlock ? pendingBlock + "\n" : "";
+      const next = nextIndentation(
+        prefix + buf,
+        prefix.length + pos,
+        lastUsedIndentation
+      );
+      lastUsedIndentation = next.lastUsedIndentation;
+      readline.editInsert("\n" + next.indentation);
+      return true;
+    }
+    if (input.inputType === InputType.Backspace) {
+      const buf = readline.getLine();
+      const pos = readline.getCursor();
+      const count = backspaceCount(
+        buf,
+        pos,
+        indentUnitWidth(lastUsedIndentation),
+        pendingBlock !== ""
+      );
+      if (count > 1) {
+        readline.editBackspace(count);
+        return true;
+      }
+      return false;
+    }
+    // Enter·Ctrl+C를 포함한 나머지는 소비하지 않는다 — 취소·제출은 벤더 그대로.
+    return false;
+  };
+
+  return {
+    readOptions(pending) {
+      pendingBlock = pending ?? "";
+      if (pending === undefined) return { onKey };
+      const next = nextIndentation(pending, pending.length, lastUsedIndentation);
+      lastUsedIndentation = next.lastUsedIndentation;
+      return next.indentation === ""
+        ? { onKey }
+        : { prefill: next.indentation, onKey };
+    },
+  };
 }
