@@ -66,6 +66,15 @@ export class History {
     this.cursor = -1;
   }
 
+  /**
+   * 스냅샷(`entries.slice()`)으로 되돌린다. 복사본을 넣어 호출자 배열과 공유하지 않는다.
+   */
+  public restore(entries: string[]) {
+    this.entries = entries.slice();
+    this.resetCursor();
+    this.saveToLocalStorage();
+  }
+
   public next(): string | undefined {
     if (this.cursor === -1) {
       return undefined;

@@ -22,3 +22,20 @@ test("cursor", () => {
   expect(history.next()).toEqual("c");
   expect(history.next()).toBeUndefined();
 });
+
+test("restore는 복사본으로 되돌리고 cursor를 -1로 한다", () => {
+  const history = new History(3);
+  history.append("a");
+  history.append("b");
+  history.prev();
+  expect(history.cursor).toBe(0);
+
+  const snapshot = ["x", "y"];
+  history.restore(snapshot);
+
+  expect(history.entries).toEqual(["x", "y"]);
+  expect(history.cursor).toBe(-1);
+
+  snapshot.push("z");
+  expect(history.entries).toEqual(["x", "y"]);
+});

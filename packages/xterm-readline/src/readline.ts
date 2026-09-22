@@ -11,6 +11,7 @@ interface ActiveRead {
   reject: (e: unknown) => void;
   cancelable: boolean;
   onKey?: (input: Input) => boolean;
+  historyEntry?: (line: string) => string;
 }
 
 /** write 콜백을 기다리는 읽기 하나. `cancelled`는 콜백 도착 전에 `cancelRead()`가 먼저 끝냈는지 표시한다. */
@@ -56,6 +57,12 @@ export interface ReadOptions {
    * 넣는 `Text` 토큰은 거치지 않는다(코드로 흘러들어온 텍스트에는 훅이 반응하지 않는다).
    */
   onKey?: (input: Input) => boolean;
+  /**
+   * Enter로 제출된 줄을 history에 넣기 직전에 부른다. 돌려준 문자열이 기록된다.
+   * `skipBlankHistory`가 거른 공백뿐인 제출에는 부르지 않는다. 취소(`cancelable` Ctrl+C)에도
+   * 부르지 않는다.
+   */
+  historyEntry?: (line: string) => string;
 }
 
 export class Readline implements ITerminalAddon {
@@ -155,6 +162,13 @@ export class Readline implements ITerminalAddon {
    */
   public appendHistory(text: string) {
     this.history.append(text);
+  }
+
+  /**
+   * history 객체 그대로. 코어의 블록 history(RD-014)가 `entries` 스냅샷·`restore`에 쓴다.
+   */
+  public getHistory(): History {
+    return this.history;
   }
 
   /**
@@ -378,6 +392,7 @@ export class Readline implements ITerminalAddon {
           reject,
           cancelable,
           onKey: options.onKey,
+          historyEntry: options.historyEntry,
         };
       });
     });
@@ -467,7 +482,8 @@ export class Readline implements ITerminalAddon {
           if (this.skipBlankHistory && this.state.buffer().trim() === "") {
             this.history.resetCursor();
           } else {
-            this.history.append(this.state.buffer());
+            const line = this.state.buffer();
+            this.history.append(this.activeRead?.historyEntry?.(line) ?? line);
           }
           this.activeRead?.resolve(this.state.buffer());
           this.activeRead = undefined;
