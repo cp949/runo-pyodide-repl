@@ -138,6 +138,25 @@ def install(console, ack, seq, warn, extra_own_codes=()):
         original_run_sync = webloop.run_sync
         original_runcode = console.runcode
 
+        def trim(exc):
+            """나르는 예외의 트레이스백을 사용자 쪽 프레임까지만 남긴다: 머리의 우리 프레임(guard)을 떼고, 첫 우리
+            프레임(sleep·poll·핸들러)부터 안쪽 전부를 자른다. 그 안쪽에는 JS 가짜 프레임(pyodide.asm.mjs·wasm://)도 있다."""
+            tb = exc.__traceback__
+            while tb is not None and tb.tb_frame.f_code in own_codes:
+                tb = tb.tb_next
+            prev = None
+            entry = tb
+            while entry is not None:
+                if entry.tb_frame.f_code in own_codes:
+                    if prev is None:
+                        tb = None
+                    else:
+                        prev.tb_next = None
+                    break
+                prev = entry
+                entry = entry.tb_next
+            return exc.with_traceback(tb)
+
         async def guard(awaitable):
             try:
                 return await awaitable
@@ -146,7 +165,7 @@ def install(console, ack, seq, warn, extra_own_codes=()):
                 # 뒤에야 여기에 도착한다. 사용자 코드가 낸 CancelledError는 다른 예외와 같이 나른다.
                 if asyncio.current_task() in woken:
                     return WOKEN
-                return Raised(exc)
+                return Raised(trim(exc))
             except GeneratorExit:
                 # 코루틴 close()의 신호다. 값으로 바꾸면 RuntimeError("coroutine ignored GeneratorExit")가 된다.
                 raise
@@ -154,7 +173,7 @@ def install(console, ack, seq, warn, extra_own_codes=()):
                 # KeyboardInterrupt(조각 폴링·바쁜 루프의 핸들러가 코루틴 프레임에서 올린 것, 사용자가 직접 올린 것)·
                 # SystemExit·일반 예외 전부. 예외로 끝난 Task는 pyodide가 Promise로 바꾸며 sys.excepthook으로 한 번 더
                 # 찍고 콘솔 실행 중에는 그것이 화면에 새므로(TRP-021) 값으로 나른다.
-                return Raised(exc)
+                return Raised(trim(exc))
 
         def run_sync(awaitable):
             nonlocal pending
@@ -211,15 +230,30 @@ def install(console, ack, seq, warn, extra_own_codes=()):
         while tb is not None:
             entries.append(tb)
             tb = tb.tb_next
-        cut_at = next((i for i, entry in enumerate(entries) if entry.tb_frame.f_code in own_codes), None)
-        if cut_at is not None:
+        ours = lambda entry: entry.tb_frame.f_code in own_codes
+        is_webloop = lambda entry: entry.tb_frame.f_code.co_filename.endswith('pyodide/webloop.py')
+        if entries and ours(entries[-1]):
+            # 예외가 우리 코드에서 시작했다(핸들러·래퍼·조각): 첫 우리 프레임부터 안쪽 전부를 자른다. 그 안쪽은 우리가
+            # 부른 라이브러리·JS 가짜 프레임·핸들러다(연타면 핸들러 프레임이 겹친다). 나른 예외(guard가 다듬은 것)는
+            # 안쪽 끝이 사용자·라이브러리 프레임이라 여기에 걸리지 않는다.
+            cut_at = next(i for i, entry in enumerate(entries) if ours(entry))
             entries = entries[:cut_at]
-            # 자른 자리 앞에 낀 pyodide webloop 프레임(`run_until_complete`)도 뗀다. runcode 래퍼는 사용자 프레임보다
-            # 바깥이라 pyodide가 `<console>` 이전 프레임을 이미 걸러 준다.
-            while entries and entries[-1].tb_frame.f_code.co_filename.endswith('pyodide/webloop.py'):
+            # 자른 자리 바로 바깥에 붙은 pyodide webloop 프레임(run_until_complete)도 뗀다(지금 규칙 그대로).
+            while entries and is_webloop(entries[-1]):
                 entries.pop()
-            if entries:
-                entries[-1].tb_next = None
+        kept = []
+        for entry in entries:
+            if ours(entry):
+                # 우리 프레임(run_sync 래퍼)과 그 바로 바깥에 붙은 pyodide webloop 프레임(_run·run_until_complete)을
+                # 뗀다. awaitable 안에서 난 webloop.py 프레임(call_later 등)은 우리 프레임 바깥이 아니라 남는다.
+                while kept and is_webloop(kept[-1]):
+                    kept.pop()
+                continue
+            kept.append(entry)
+        if kept:
+            for outer, inner in zip(kept, kept[1:]):
+                outer.tb_next = inner
+            kept[-1].tb_next = None
         return format_traceback(exc)
 
     console.formattraceback = formattraceback

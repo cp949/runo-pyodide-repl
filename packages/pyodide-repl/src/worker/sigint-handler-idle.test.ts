@@ -108,6 +108,16 @@ function expectWoken(outcome: Outcome, wakeAt = WAKE_AT_MS): void {
 const frames = (stderr: string) =>
   stderr.split("\n").filter((line) => line.startsWith("  File "));
 
+/** `asyncio.run`·`run_until_complete`·`run_sync` 3종에 같은 코루틴 식을 태운다(모두 같은 `run_sync` 래퍼를 거친다). */
+const RUNNERS: [string, (coroutineExpr: string) => string][] = [
+  ["asyncio.run", (c) => `asyncio.run(${c})`],
+  [
+    "run_until_complete",
+    (c) => `asyncio.get_event_loop().run_until_complete(${c})`,
+  ],
+  ["run_sync", (c) => `run_sync(${c})`],
+];
+
 describe("정지한 대기 중 Ctrl+C", () => {
   it.each([
     ["asyncio.run", `asyncio.run(asyncio.sleep(${IDLE_WAIT}))`],
@@ -583,48 +593,37 @@ async def main():
     time.sleep(5)
 `;
 
+/** `SLEEPER_SOURCE`의 `time.sleep(5)` 눌림이 끝났을 때의 정확한 화면. `main` 프레임(5행)이 남는다. */
+const CONSOLE_MAIN_SLEEP_TRACEBACK =
+  'Traceback (most recent call last):\n  File "<console>", line 1, in <module>\n  File "<console>", line 5, in main\nKeyboardInterrupt\n';
+
 describe("time.sleep과 정지한 대기의 조합", () => {
-  it("asyncio.run 코루틴 안의 time.sleep 중 눌림도 webloop 프레임 없이 끊는다", async () => {
-    const runner = await setup();
-    pyodide.runPython(SLEEPER_SOURCE, {
-      globals: pyodide.globals,
-      filename: "<console>",
-    });
-    const presser = runner.presser();
-    presser.press({ offsets: [300] });
-    const startedAt = performance.now();
+  it.each(RUNNERS)(
+    "%s 코루틴 안의 time.sleep 중 눌림도 webloop 프레임 없이 끊고 main 프레임을 남긴다",
+    async (_title, wrap) => {
+      const runner = await setup();
+      pyodide.runPython(SLEEPER_SOURCE, {
+        globals: pyodide.globals,
+        filename: "<console>",
+      });
+      const presser = runner.presser();
+      presser.press({ offsets: [300] });
+      const startedAt = performance.now();
 
-    expect(await runner.run("asyncio.run(main())")).toEqual(READY);
+      expect(await runner.run(wrap("main()"))).toEqual(READY);
 
-    expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
-    // 콘솔이 만드는 마지막 트레이스백에는 `pyodide/webloop.py`의 `_run`·`run_until_complete` 프레임이 없다. 그 앞에
-    // pyodide가 코루틴의 KeyboardInterrupt를 sys.stderr에 한 번 더 찍는 것(TRP-022 계열)은 이 작업 범위 밖이라
-    // `endsWith`로 본다(DELTA-02가 `toBe`로 조인다).
-    expect(runner.screen.stderr.endsWith(CONSOLE_TRACEBACK)).toBe(true);
-    expect(runner.screen.stderr).not.toContain("webloop.py");
-    // DELTA-01: 코루틴이 낸 예외가 값으로 나르므로 트레이스백은 한 번뿐이고 우리 프레임도 없다.
-    expect(
-      runner.screen.stderr.match(/Traceback \(most recent call last\):/g),
-    ).toHaveLength(1);
-    expect(runner.screen.stderr).not.toContain("<sleep-slice>");
-    expect(runner.screen.stderr).not.toContain(SIGINT_HANDLER_FILENAME);
-    await presser.done();
-  }, 20_000);
+      expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
+      expect(runner.screen.stderr).toBe(CONSOLE_MAIN_SLEEP_TRACEBACK);
+      await presser.done();
+    },
+    20_000,
+  );
 });
 
 // RD-009a: run_sync 계열 대기 안 코루틴이 예외로 끝났을 때 excepthook 이중 인쇄를 없앤다(guard가 값으로 나른다).
 describe("run_sync 계열 대기에서 코루틴이 낸 예외", () => {
-  const RUNNERS: [string, (coroutineExpr: string) => string][] = [
-    ["asyncio.run", (c) => `asyncio.run(${c})`],
-    [
-      "run_until_complete",
-      (c) => `asyncio.get_event_loop().run_until_complete(${c})`,
-    ],
-    ["run_sync", (c) => `run_sync(${c})`],
-  ];
-
   it.each(RUNNERS)(
-    "%s: 코루틴이 낸 ValueError는 트레이스백이 한 번만 찍히고 우리 프레임이 없다",
+    "%s: 코루틴이 낸 ValueError는 트레이스백이 한 번만 찍히고 main 프레임이 남는다",
     async (_title, wrap) => {
       const runner = await setup();
       pyodide.runPython("async def main():\n    raise ValueError('boom')\n", {
@@ -634,11 +633,9 @@ describe("run_sync 계열 대기에서 코루틴이 낸 예외", () => {
 
       expect(await runner.run(wrap("main()"))).toEqual(READY);
 
-      expect(
-        runner.screen.stderr.match(/Traceback \(most recent call last\):/g),
-      ).toHaveLength(1);
-      expect(runner.screen.stderr).not.toContain(SIGINT_HANDLER_FILENAME);
-      expect(runner.screen.stderr).toMatch(/ValueError: boom\n$/);
+      expect(runner.screen.stderr).toBe(
+        'Traceback (most recent call last):\n  File "<console>", line 1, in <module>\n  File "<console>", line 2, in main\nValueError: boom\n',
+      );
     },
     20_000,
   );
@@ -739,5 +736,80 @@ async def main():
     });
 
     expect(runner.screen.stderr).toBe("");
+  }, 20_000);
+
+  // 사용자가 잡은 예외의 __traceback__에도 나르며 다듬은 결과가 그대로 보인다: guard·sleep 조각·핸들러·JS 가짜
+  // 프레임이 없다. run_sync 래퍼(<sigint-handler>)와 pyodide webloop.py는 실제 호출 경로라 남아도 허용 편차다.
+  it("사용자가 잡은 KeyboardInterrupt의 __traceback__에는 우리 헬퍼 프레임이 없다", async () => {
+    const runner = await setup();
+    pyodide.runPython(SLEEPER_SOURCE, {
+      globals: pyodide.globals,
+      filename: "<console>",
+    });
+    pyodide.runPython(
+      `def catcher():
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt as e:
+        import traceback
+        print([(f.filename, f.name) for f in traceback.extract_tb(e.__traceback__)])
+`,
+      { globals: pyodide.globals, filename: "<console>" },
+    );
+    const presser = runner.presser();
+    presser.press({ offsets: [300] });
+    const startedAt = performance.now();
+
+    expect(await runner.run("catcher()")).toEqual(READY);
+
+    expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
+    expect(runner.screen.stdout).not.toMatch(/'guard'|'sleep'|'poll'|'sigint_handler'/);
+    expect(runner.screen.stdout).not.toContain("<sleep-slice>");
+    expect(runner.screen.stdout).not.toContain("wasm://");
+    expect(runner.screen.stdout).not.toContain("pyodide.asm.mjs");
+    expect(runner.screen.stderr).toBe("");
+    await presser.done();
+  }, 20_000);
+
+  it("코루틴이 부른 <console> 함수의 프레임도 남는다(중첩)", async () => {
+    const runner = await setup();
+    pyodide.runPython(
+      `async def main():
+    helper()
+
+def helper():
+    started()
+    time.sleep(5)
+`,
+      { globals: pyodide.globals, filename: "<console>" },
+    );
+    const presser = runner.presser();
+    presser.press({ offsets: [300] });
+    const startedAt = performance.now();
+
+    expect(await runner.run("asyncio.run(main())")).toEqual(READY);
+
+    expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
+    expect(runner.screen.stderr).toBe(
+      'Traceback (most recent call last):\n  File "<console>", line 1, in <module>\n  File "<console>", line 2, in main\n  File "<console>", line 6, in helper\nKeyboardInterrupt\n',
+    );
+    await presser.done();
+  }, 20_000);
+
+  // 코루틴 안에 사용자 프레임이 없는 경우(라이브러리가 낸 예외)의 규칙 검증: 안쪽 끝이 우리 코드가 아니므로 절단하지
+  // 않고, 래퍼 프레임만 떼며 라이브러리 프레임(asyncio/tasks.py)은 남는다.
+  it("코루틴 안에 사용자 프레임이 없으면 라이브러리 프레임이 남는다(TypeError)", async () => {
+    const runner = await setup();
+
+    expect(await runner.run("asyncio.run(asyncio.sleep('x'))")).toEqual(
+      READY,
+    );
+
+    expect(
+      runner.screen.stderr.match(/Traceback \(most recent call last\):/g),
+    ).toHaveLength(1);
+    expect(runner.screen.stderr).toContain("asyncio/tasks.py");
+    expect(runner.screen.stderr).toMatch(/TypeError/);
+    expect(runner.screen.stderr).not.toContain(SIGINT_HANDLER_FILENAME);
   }, 20_000);
 });
