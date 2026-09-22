@@ -288,6 +288,7 @@ function setupConsole() {
   installSigintHandler(pyodide, repl.pyconsole, {
     ack: () => acknowledgeInterrupt(buffer),
     seq: () => readRequestSeq(buffer),
+    warn: (message) => console.warn(message),
   });
   pyodide.setInterruptBuffer(buffer);
   connected = buffer;

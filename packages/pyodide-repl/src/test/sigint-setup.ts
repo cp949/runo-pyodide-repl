@@ -7,15 +7,20 @@
  * 미리 만드는 시험이 폐기에 지워지면 안 된다. `connectInterrupts` 자체의 순서는 `worker/interrupt-buffer.test.ts`가 본다.
  */
 import type { PyodideInterface } from "pyodide";
+import type { PyProxy } from "pyodide/ffi";
 import {
   acknowledgeInterrupt,
   createInterruptBuffer,
   discardPendingInterrupt,
   readRequestSeq,
+  SIGNAL,
   signalInterrupt,
 } from "../protocol/interrupt-protocol";
 import { createConsole, type PyodideConsoleProxy } from "../worker/console";
-import { installSigintHandler } from "../worker/sigint-handler";
+import {
+  type InterruptIdle,
+  installSigintHandler,
+} from "../worker/sigint-handler";
 import { installSleepSlice } from "../worker/sleep-slice";
 import {
   createSubmissionRunner,
@@ -51,8 +56,13 @@ export interface SetupOptions {
   prepare?: (buffer: Int32Array) => void;
   /** 기본 `true`. 거짓이면 `time.sleep` 조각 교체를 하지 않는다(대조·가드 시험용). */
   sleepSlice?: boolean;
-  /** 조각 교체가 건너뛴 이유를 받는다. 기본은 `console.warn`이다. */
+  /** 조각 교체·정지한 실행 깨우기가 건너뛴 이유를 받는다. 기본은 `console.warn`이다. */
   warn?: (message: string) => void;
+}
+
+/** `wakeAfter`의 결과. `woke`는 `interruptIdle()`이 깨울 것을 찾았는지다. */
+export interface WakeOutcome {
+  woke: boolean;
 }
 
 /** 눌림 스레드 조종기. `presser()`가 돌려준다. */
@@ -76,6 +86,51 @@ export interface ConsoleRunner {
   pyconsole: PyodideConsoleProxy;
   /** 눌림 스레드를 띄운다. 시험이 끝나면 종료된다. */
   presser: () => Presser;
+  /** 설치가 돌려준 Python `interrupt_idle`. `teardownConsoleRunner`가 destroy한다. */
+  interruptIdle: InterruptIdle;
+  /**
+   * `ms` 뒤에 감시 타이머(03-ctrl-c.md 2.5)의 한 틱을 흉내낸다: `signalInterrupt` → `interruptIdle()` → 깨웠으면
+   * SIGINT를 소비하고(`compareExchange(2 → 0)`) 소비에 성공했을 때만 ack. 깨우지 못했으면 SIGINT를 남겨 재개한
+   * 사용자 스택의 폴링이 받게 한다. JSPI로 정지한 동안에는 JS 이벤트 루프가 비어 같은 스레드 타이머로 충분하다.
+   */
+  wakeAfter: (ms: number) => Promise<WakeOutcome>;
+}
+
+/** `wakeAfter`가 건 타이머와 설치가 돌려준 proxy. `teardownConsoleRunner`가 치운다. */
+const pendingWakes: ReturnType<typeof setTimeout>[] = [];
+const liveInterruptIdles: InterruptIdle[] = [];
+
+// 설치는 pyodide 모듈 전역 `pyodide.ffi.run_sync`·`pyodide.webloop.run_sync`를 래퍼로 바꾼다. 파일 하나가 pyodide
+// 인스턴스를 공유하므로 되돌리지 않으면 setup마다 래퍼가 겹쌓인다. 첫 설치 전 값을 모듈 속성에 한 번 붙잡아 두고
+// 해체가 그것으로 되돌린다.
+const SAVE_RUN_SYNC = `import pyodide.ffi
+
+if not hasattr(pyodide.ffi, '_test_original_run_sync'):
+    pyodide.ffi._test_original_run_sync = pyodide.ffi.run_sync
+`;
+const RESTORE_RUN_SYNC = `import pyodide.ffi
+import pyodide.webloop
+
+original = getattr(pyodide.ffi, '_test_original_run_sync', None)
+if original is not None:
+    pyodide.ffi.run_sync = original
+    pyodide.webloop.run_sync = original
+`;
+
+/** 사용자 globals를 오염시키지 않도록 버리는 namespace에서 돌린다. */
+function runInScratch(
+  pyodide: Pick<PyodideInterface, "runPython" | "toPy">,
+  source: string,
+): void {
+  const namespace = pyodide.toPy({}) as PyProxy;
+  try {
+    pyodide.runPython(source, {
+      globals: namespace,
+      filename: "<sigint-setup>",
+    });
+  } finally {
+    namespace.destroy();
+  }
 }
 
 /**
@@ -109,17 +164,20 @@ export function setupConsoleRunner(
   suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
   const buffer = createInterruptBuffer();
   prepare?.(buffer);
+  runInScratch(pyodide, SAVE_RUN_SYNC);
   // 조각 래퍼의 코드 객체를 핸들러의 절단 목록에 넘겨야 하므로 조각 교체가 핸들러보다 먼저다(`connectInterrupts`와 같다).
   const codes = sleepSlice ? installSleepSlice(pyodide, { warn }) : undefined;
-  installSigintHandler(
+  const interruptIdle = installSigintHandler(
     pyodide,
     repl.pyconsole,
     {
       ack: () => acknowledgeInterrupt(buffer),
       seq: () => readRequestSeq(buffer),
+      warn,
     },
     codes,
   );
+  liveInterruptIdles.push(interruptIdle);
   codes?.destroy();
   pyodide.setInterruptBuffer(buffer);
 
@@ -164,17 +222,44 @@ export function setupConsoleRunner(
     };
   }
 
-  return { run, screen, buffer, pyconsole: repl.pyconsole, presser };
+  function wakeAfter(ms: number): Promise<WakeOutcome> {
+    return new Promise<WakeOutcome>((resolve) => {
+      pendingWakes.push(
+        setTimeout(() => {
+          signalInterrupt(buffer);
+          const woke = interruptIdle();
+          // 깨웠을 때만 소비한다. 소비에 성공한 틱만 ack한다(03-ctrl-c.md 2.2의 ack 지점 ②).
+          if (woke && Atomics.compareExchange(buffer, SIGNAL, 2, 0) === 2) {
+            acknowledgeInterrupt(buffer);
+          }
+          resolve({ woke });
+        }, ms),
+      );
+    });
+  }
+
+  return {
+    run,
+    screen,
+    buffer,
+    pyconsole: repl.pyconsole,
+    presser,
+    interruptIdle,
+    wakeAfter,
+  };
 }
 
 /**
  * `afterEach`용 해체. 남은 SIGINT가 다음 시험의 Python 실행을 끊지 않도록 버퍼를 먼저 떼고 비운 뒤 핸들러를
- * 기본으로 되돌린다.
+ * 기본으로 되돌린다. 아직 터지지 않은 `wakeAfter` 타이머와 살아 있는 `interrupt_idle` proxy도 함께 치운다.
  */
 export function teardownConsoleRunner(
   pyodide: PyodideInterface,
   buffer: Int32Array | undefined,
 ): void {
+  for (const timer of pendingWakes.splice(0)) clearTimeout(timer);
+  for (const idle of liveInterruptIdles.splice(0)) idle.destroy();
+  runInScratch(pyodide, RESTORE_RUN_SYNC);
   pyodide.setInterruptBuffer(
     undefined as unknown as Parameters<
       PyodideInterface["setInterruptBuffer"]

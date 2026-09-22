@@ -16,6 +16,7 @@ import { createMailboxReader } from "../protocol/stdin-mailbox";
 import { createConsole, type ConsoleSinks, type ReplConsole } from "./console";
 import { connectInterrupts } from "./interrupt-buffer";
 import { runReplLoop } from "./repl-loop";
+import type { InterruptIdle } from "./sigint-handler";
 import { createStdinCallback } from "./stdin-callback";
 import { createSubmissionRunner } from "./submission-runner";
 import { suppressWebLoopReraise } from "./webloop-reraise";
@@ -44,6 +45,7 @@ export async function bootReplWorker(
   };
   let repl: ReplConsole;
   let pyodide: PyodideInterface;
+  let interruptIdle: InterruptIdle;
   try {
     pyodide = await deps.loadPyodide(frame.pyodide.indexURL);
     repl = createConsole(pyodide, sinks, {
@@ -56,12 +58,17 @@ export async function bootReplWorker(
     // time.sleep 조각 교체 → SIGINT 핸들러 설치 → 폐기 → 버퍼 연결. 폴링은 연결 뒤에 시작하므로 이 순서가 부팅 중
     // 눌림으로부터 시작 코드를 지킨다.
     // `worker/`가 `protocol/`을 import하지 않도록 프로토콜 함수는 여기서 클로저로 넣는다. 실패는 loadFailed다.
-    connectInterrupts(pyodide, repl.pyconsole, interruptBuffer, {
-      ack: () => acknowledgeInterrupt(interruptBuffer),
-      seq: () => readRequestSeq(interruptBuffer),
-      discard: () => discardPendingInterrupt(interruptBuffer),
-      warn: (message) => console.warn(message),
-    });
+    interruptIdle = connectInterrupts(
+      pyodide,
+      repl.pyconsole,
+      interruptBuffer,
+      {
+        ack: () => acknowledgeInterrupt(interruptBuffer),
+        seq: () => readRequestSeq(interruptBuffer),
+        discard: () => discardPendingInterrupt(interruptBuffer),
+        warn: (message) => console.warn(message),
+      },
+    );
     const mailbox = createMailboxReader({
       ctrl: frame.stdinCtrl,
       data: frame.stdinData,
@@ -88,20 +95,25 @@ export async function bootReplWorker(
     writeOutput: (text) => rpc.notify("writeOutput", text),
     writeError: (text) => rpc.notify("writeError", text),
   });
-  await runReplLoop({
-    readLine: (prompt, pending) =>
-      rpc.call<string | null>("readLine", prompt, pending, true),
-    discardPendingInterrupt: () => discardPendingInterrupt(interruptBuffer),
-    run: (line) => runner.run(line),
-    onTerminated: () => rpc.notify("sessionTerminated"),
-    onError: (error) => {
-      console.error("[repl.worker] 루프 오류", error);
-      rpc.notify("writeError", `repl 내부 오류: ${String(error)}`);
-      try {
-        repl.clearPending();
-      } catch {
-        // 콘솔 상태를 읽을 수 없으면 다음 push가 새 상태를 만든다.
-      }
-    },
-  });
+  // 루프가 끝나면(`exit()`) 세션이 끝난 것이다. 깨우기 proxy는 여기서 놓아 준다.
+  try {
+    await runReplLoop({
+      readLine: (prompt, pending) =>
+        rpc.call<string | null>("readLine", prompt, pending, true),
+      discardPendingInterrupt: () => discardPendingInterrupt(interruptBuffer),
+      run: (line) => runner.run(line),
+      onTerminated: () => rpc.notify("sessionTerminated"),
+      onError: (error) => {
+        console.error("[repl.worker] 루프 오류", error);
+        rpc.notify("writeError", `repl 내부 오류: ${String(error)}`);
+        try {
+          repl.clearPending();
+        } catch {
+          // 콘솔 상태를 읽을 수 없으면 다음 push가 새 상태를 만든다.
+        }
+      },
+    });
+  } finally {
+    interruptIdle.destroy();
+  }
 }
