@@ -59,6 +59,8 @@ export interface ReplConsole {
   pending(): string | undefined;
   /** 미완성 블록을 버린다(`buffer.clear()`). 블록이 없어도 안전하다. */
   clearPending(): void;
+  /** `pyconsole._compile.compiler.flags`에서 `INCOMPLETE_INPUT_FLAGS`를 뺀 값. `split_paste`의 2차 `compile`에 넘긴다. */
+  compilerFlags(): number;
 }
 
 /** `formatted_error`의 마지막 줄이 이것이면 재컴파일로 정규화한다. */
@@ -164,6 +166,9 @@ export function createConsole(
       } finally {
         buffer.destroy();
       }
+    },
+    compilerFlags() {
+      return pyconsole._compile.compiler.flags & ~INCOMPLETE_INPUT_FLAGS;
     },
     async runLine(source) {
       const pendingBefore = pending();

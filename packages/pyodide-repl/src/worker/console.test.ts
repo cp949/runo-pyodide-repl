@@ -163,6 +163,16 @@ describe("createConsole", () => {
     expect(pyodide.runPython("'await_fut' in globals()")).toBe(false);
     expect(pyodide.runPython("'format_syntax_error' in globals()")).toBe(false);
   });
+
+  test("`compilerFlags()`는 INCOMPLETE_INPUT_FLAGS(0x4200) 비트를 빼고 TLA 토글에 따라 0x2000 비트가 바뀐다", () => {
+    const { repl: withoutTla } = setup(false);
+    const { repl: withTla } = setup(true);
+
+    expect(withoutTla.compilerFlags() & 0x4200).toBe(0);
+    expect(withTla.compilerFlags() & 0x4200).toBe(0);
+    expect(withoutTla.compilerFlags() & 0x2000).toBe(0);
+    expect(withTla.compilerFlags() & 0x2000).toBe(0x2000);
+  });
 });
 
 describe("값 에코(`echo`)", () => {
