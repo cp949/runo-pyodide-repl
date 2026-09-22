@@ -2,6 +2,7 @@ import { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
 import { postInitFrame, type InitFrame } from "./protocol/init-frame";
 import { createInterruptBuffer } from "./protocol/interrupt-protocol";
+import { createInterruptSender } from "./protocol/interrupt-sender";
 import { createRpc, type Rpc } from "./protocol/rpc";
 import {
   createMailboxWriter,
@@ -71,7 +72,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
   const isolated = globalThis.crossOriginIsolated === true;
 
   let disposed = false;
-  let session: { worker: Worker; rpc: Rpc } | undefined;
+  let session: { worker: Worker; rpc: Rpc; endSession: () => void } | undefined;
 
   if (!isolated) {
     // SharedArrayBuffer가 없어 초기화 프레임을 만들 수 없다(ADR-0004, TRP-002). 폴백은 없다.
@@ -110,13 +111,44 @@ export function createRepl(options: ReplOptions): ReplHandle {
     // 벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다. worker 루프는 응답을 받은 뒤에만 다시
     // 요청하므로 겹치는 요청은 오류로 거절한다.
     let reading = false;
+    // 프레임에 넣는 것과 같은 SharedArrayBuffer 뷰를 송신기도 쓴다(RD-010 리셋이 이 버퍼를 재사용한다).
+    const interruptBuffer = createInterruptBuffer();
+    const interruptSender = createInterruptSender(interruptBuffer);
+    // worker가 살아 있다. `sessionTerminated`·`loadFailed`·`dispose()`에서 거짓이 된다(리셋은 RD-010).
+    let alive = true;
+    // 수락한 `readLine` 요청의 읽기가 끝나기 전(응답이 포트에 올라가기 전).
+    let readLinePending = false;
+    // `readInput` 알림이 도착한 뒤 `deliver`/`fail`이 끝나기 전. worker는 그동안 메일박스에 정지해 있다.
+    let inputReadsPending = 0;
+    /**
+     * main이 보는 "Python 실행 중"(03-ctrl-c.md 2.7). 거짓이면 눌림이 닿을 대상 코드가 없으므로 Ctrl+C를 에코도
+     * 전송도 하지 않는다. 로딩 중(`ready` 전)은 참이다 — 부팅 중 눌림은 버퍼에 남고 worker의 연결 단계가 폐기한다(2.6).
+     * `readLine` 응답 뒤~다음 요청 전(배경 콜백이 CPU를 잡는 구간)도 참이다(편차 2).
+     */
+    const pythonRunning = () =>
+      alive && !readLinePending && inputReadsPending === 0;
+    /**
+     * 이 worker에서 실행할 코드가 더 없어진 지점(`exit()`·로드 실패·`dispose()`). 게이트를 닫고 재전송을 멈춘다.
+     * 닫지 않으면 잔류 SIGNAL 2를 아무도 소비하지 않아 송신기가 5ms마다 영원히 점검한다(RD-012h(a)).
+     */
+    const endSession = () => {
+      alive = false;
+      interruptSender.cancel();
+    };
+    // 벤더 `Readline`은 활성 읽기가 없을 때만 부른다(읽기 중 Ctrl+C는 벤더가 같은 프롬프트를 다시 그린다).
+    readline.setCtrlCHandler(() => {
+      if (!pythonRunning()) return;
+      // tty 로컬 에코 흉내. 개행 없이 꼬리에 남아 다음 프롬프트·`input()` 프롬프트가 이어 그려진다(`t^Cx: `).
+      sinks.write("^C");
+      interruptSender.send();
+    });
     const channel = new MessageChannel();
     const mailbox = createStdinMailbox();
     const mailboxWriter = createMailboxWriter(mailbox);
     const frame: InitFrame = {
       kind: "init",
       rpcPort: channel.port2,
-      interruptBuffer: createInterruptBuffer(),
+      interruptBuffer,
       stdinCtrl: mailbox.ctrl,
       stdinData: mailbox.data,
       topLevelAwait: false, // 옵션은 RD-012가 추가한다
@@ -134,16 +166,24 @@ export function createRepl(options: ReplOptions): ReplHandle {
       // 꼬리 + 프롬프트를 그리고 Enter까지 한 줄을 읽어 응답한다. 요청의 나머지 인자(pending, cancelable)는 후속
       // RD(RD-013·014·015, RD-008)가 쓴다. 지금은 받지 않고 버린다.
       readLine: (prompt: string): Promise<string | null> => {
+        // 요청이 온 순간 worker는 실행을 멈추고 줄을 기다린다. 보낸 눌림의 재전송은 여기서 멈춘다(03-ctrl-c.md 2.3).
+        interruptSender.cancel();
         // 거절은 가드 바깥에서 한다. 거절된 promise를 가드가 활성 읽기로 추적하면 진짜 활성 REPL 읽기를 잃는다.
         if (reading) return Promise.reject(new Error("이미 읽는 중"));
         reading = true;
+        readLinePending = true;
         return guard.readLine(prompt).finally(() => {
           reading = false;
+          // 응답이 포트에 올라가기 전에 내린다: worker는 응답을 받는 대로 실행을 재개한다.
+          readLinePending = false;
         });
       },
       // stdin 콜백 진입(worker는 이 알림 직후 메일박스에 정지한다). 응답 통로가 메일박스뿐이라 반환값이 없다.
       // `cancelable` 인자는 받지 않는다(RD-008이 취소를 넣을 때 쓴다).
       readInput: () => {
+        // 이 알림 직후 worker는 메일박스에 정지한다. 보낸 눌림의 재전송을 멈춘다(03-ctrl-c.md 2.3).
+        interruptSender.cancel();
+        inputReadsPending += 1;
         void guard
           .readInput()
           .then(
@@ -154,23 +194,31 @@ export function createRepl(options: ReplOptions): ReplHandle {
           )
           .catch((error: unknown) =>
             console.error("[repl] stdin 응답 실패", error),
-          );
+          )
+          .finally(() => {
+            // `deliver`/`fail`이 끝난 뒤에 내린다: 그 시점이 worker가 깨어나 실행을 재개하는 시점이다.
+            inputReadsPending -= 1;
+          });
       },
       // 종료는 터미널에 쓰지 않는다(3.14도 종료 메시지가 없다). worker는 살려 두고 복구는 RD-010 `reset()`이다.
-      sessionTerminated: () => onStatus("terminated"),
+      sessionTerminated: () => {
+        endSession();
+        onStatus("terminated");
+      },
       ready: ({ pyodideVersion }: { pyodideVersion: string }) => {
         console.info("[repl] pyodide 준비", pyodideVersion);
         onStatus("ready");
       },
       // worker는 죽지 않는다. 접두사는 main이 붙이고 빨강 한 줄로 낸다(01-protocols.md 1.2).
       loadFailed: (message: string) => {
+        endSession();
         sinks.writeError(`pyodide 로드 실패: ${message}`);
         onStatus("load-failed");
       },
     });
     const worker = options.createWorker();
     postInitFrame(worker, frame);
-    session = { worker, rpc };
+    session = { worker, rpc, endSession };
     onStatus("loading");
   }
 
@@ -178,6 +226,8 @@ export function createRepl(options: ReplOptions): ReplHandle {
     dispose() {
       if (disposed) return;
       disposed = true;
+      // 게이트를 닫고 재전송을 멈춘다. 이후 도착하는 키·알림은 눌림을 보내지 않는다.
+      session?.endSession();
       // 알림 핸들러가 dispose된 줄 편집기에 쓰지 않도록 RPC를 먼저 끊는다.
       session?.rpc.dispose();
       session?.worker.terminate();
