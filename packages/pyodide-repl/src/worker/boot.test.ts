@@ -9,7 +9,11 @@
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import type { InitFrame } from "../protocol/init-frame";
-import { createInterruptBuffer } from "../protocol/interrupt-protocol";
+import {
+  SIGNAL,
+  createInterruptBuffer,
+  signalInterrupt,
+} from "../protocol/interrupt-protocol";
 import { createRpc } from "../protocol/rpc";
 import {
   createMailboxWriter,
@@ -28,6 +32,12 @@ const cleanups: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   vi.restoreAllMocks();
+  // 부팅이 `connectInterrupts`로 프레임의 버퍼를 연결한다. 공유 인스턴스에 남으면 다음 시험의 실행이 그 버퍼를 폴링한다.
+  pyodide.setInterruptBuffer(
+    undefined as unknown as Parameters<
+      PyodideInterface["setInterruptBuffer"]
+    >[0],
+  );
 });
 
 const NOTIFICATIONS = [
@@ -101,6 +111,16 @@ function createMainSide(script: unknown[] = []) {
 }
 
 const PROMPT_REQUEST = ["readLine", ">>> ", undefined, true];
+
+/** 각본 `["1 + 1", "exit()"]`이 눌림의 영향 없이 끝났을 때의 알림·요청 타임라인. */
+const CLEAN_SESSION = [
+  ["ready", { pyodideVersion: "314.0.7" }],
+  ["writeOutput", expect.stringMatching(/^Python 3\.14\.2 \(.*[^\n]$/s)],
+  PROMPT_REQUEST,
+  ["writeOutput", "2"],
+  PROMPT_REQUEST,
+  ["sessionTerminated"],
+];
 
 describe("bootReplWorker", () => {
   test("배너 뒤 readLine 요청에 답하면 출력이 다음 요청보다 먼저 오고 exit()로 끝난다", async () => {
@@ -293,5 +313,142 @@ describe("bootReplWorker", () => {
     await sleep(100);
 
     expect(events).toEqual([["loadFailed", "Error: bad stdin"]]);
+  });
+
+  test("SIGINT 핸들러 설치·프레임 버퍼 연결은 setStdin·ready 알림보다 먼저다", async () => {
+    const { frame, events, waitFor } = createMainSide(["exit()"]);
+    const postMessage = vi.spyOn(frame.rpcPort, "postMessage");
+    let setInterruptBufferSpy: ReturnType<
+      typeof vi.spyOn<PyodideInterface, "setInterruptBuffer">
+    >;
+    let setStdinSpy: ReturnType<typeof vi.spyOn<PyodideInterface, "setStdin">>;
+
+    await bootReplWorker(frame, {
+      loadPyodide: async () => {
+        const instance = await loadPyodide();
+        setInterruptBufferSpy = vi.spyOn(instance, "setInterruptBuffer");
+        setStdinSpy = vi.spyOn(instance, "setStdin");
+        return instance;
+      },
+    });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    // 세 호출의 호출 전역 순번(invocationCallOrder)을 비교한다. `ready`는 포트로 나간 알림 메시지에서 찾는다.
+    const readyIndex = postMessage.mock.calls.findIndex(
+      ([message]) => (message as { name?: string }).name === "ready",
+    );
+    expect(readyIndex).toBeGreaterThanOrEqual(0);
+    const connectOrder = setInterruptBufferSpy!.mock.invocationCallOrder[0]!;
+    const stdinOrder = setStdinSpy!.mock.invocationCallOrder[0]!;
+    const readyOrder = postMessage.mock.invocationCallOrder[readyIndex]!;
+    expect(connectOrder).toBeLessThan(stdinOrder);
+    expect(stdinOrder).toBeLessThan(readyOrder);
+    // main이 쓰는 버퍼와 같은 것을 연결해야 눌림이 worker에 닿는다.
+    expect(setInterruptBufferSpy!).toHaveBeenCalledTimes(1);
+    expect(setInterruptBufferSpy!.mock.calls[0]![0]).toBe(
+      frame.interruptBuffer,
+    );
+  }, 30_000);
+
+  test("부팅 전에 쓰인 눌림은 시작 코드를 죽이지 않고 폐기·ack된다", async () => {
+    const { frame, events, waitFor } = createMainSide(["1 + 1", "exit()"]);
+    signalInterrupt(frame.interruptBuffer); // SEQ 1, SIGNAL 2
+    // 연결 단계가 끝난 시점을 그 다음 단계인 `setStdin` 호출에서 잡는다.
+    let atSetStdin: number[] | undefined;
+
+    await bootReplWorker(frame, {
+      loadPyodide: async () => {
+        const instance = await loadPyodide();
+        const setStdin = instance.setStdin.bind(instance);
+        vi.spyOn(instance, "setStdin").mockImplementation((...args) => {
+          atSetStdin = [...frame.interruptBuffer];
+          setStdin(...args);
+        });
+        return instance;
+      },
+    });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    expect(events).toEqual(CLEAN_SESSION);
+    // [SIGNAL, ACK, SEQ, 예약]: 눌림이 지워졌고 ack됐다. 첫 `readLine` 뒤 루프의 폐기에 미루지 않고 연결 단계에서 끝난다.
+    expect(atSetStdin).toEqual([0, 1, 1, 0]);
+    expect([...frame.interruptBuffer]).toEqual([0, 1, 1, 0]);
+  }, 30_000);
+
+  test("readLine 응답 뒤 남은 SIGINT는 실행 전에 폐기되고 ack된다", async () => {
+    const { frame, events, waitFor } = createMainSide([
+      // 읽는 동안 쓰인 눌림은 대상 코드가 없다(TRP-009). `readLine` 요청이 도착한 때 쓰고 줄을 돌려준다.
+      () => {
+        signalInterrupt(frame.interruptBuffer);
+        return "1 + 1";
+      },
+      "exit()",
+    ]);
+
+    await bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    expect(events).toEqual(CLEAN_SESSION);
+    expect([...frame.interruptBuffer]).toEqual([0, 1, 1, 0]);
+  }, 30_000);
+
+  test("readLine 응답 뒤 남은 SIGINT는 핸들러가 무시할 번호여도 실행 전에 지우고 ack한다", async () => {
+    const { frame, events, waitFor } = createMainSide([
+      // 이미 처리한 번호의 재전송 잔여를 흉내 낸다: 요청 번호는 두고 SIGNAL만 2로 쓴다. 핸들러는 같은 번호를 ack 없이
+      // 무시하므로 폴링에 맡기면 ack 없이 지워져 송신기가 소실로 오판한다(TRP-027). 루프의 폐기가 지우면서 ack해야 한다.
+      () => {
+        Atomics.store(frame.interruptBuffer, SIGNAL, 2);
+        return "1 + 1";
+      },
+      "exit()",
+    ]);
+
+    await bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    expect(events).toEqual(CLEAN_SESSION);
+    expect([...frame.interruptBuffer]).toEqual([0, 1, 0, 0]);
+  }, 30_000);
+
+  test("부팅한 worker에서 실행 중 눌림은 핸들러 프레임 없는 KeyboardInterrupt 트레이스백으로 끝나고 ack된다", async () => {
+    const { frame, events, waitFor } = createMainSide([
+      // 프로그램이 스스로 눌림을 써 같은 스레드에서 결정적으로 만든다(sigint-handler.test.ts와 같은 방식).
+      'exec("press()\\nfor _ in range(10**7): pass")',
+      "exit()",
+    ]);
+
+    await bootReplWorker(frame, {
+      loadPyodide: async () => {
+        const instance = await loadPyodide();
+        instance.globals.set("press", () =>
+          signalInterrupt(frame.interruptBuffer),
+        );
+        return instance;
+      },
+    });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    // `exec` 실행은 프레임이 정확히 둘이다(`<console>` + `<string>`). 핸들러 프레임은 절단돼 나오지 않는다.
+    expect(events.find((e) => e[0] === "writeError")).toEqual([
+      "writeError",
+      expect.stringMatching(
+        /^Traceback \(most recent call last\):\n {2}File "<console>", line 1, in <module>\n {2}File "<string>", line [12], in <module>\nKeyboardInterrupt$/,
+      ),
+    ]);
+    // 핸들러가 프레임 버퍼의 요청 번호를 읽고 ack했다.
+    expect([...frame.interruptBuffer]).toEqual([0, 1, 1, 0]);
+  }, 30_000);
+
+  test("버퍼 연결이 던지면 loadFailed만 오고 ready·배너·readLine 요청은 오지 않는다", async () => {
+    const { frame, events, waitFor } = createMainSide(["1 + 1"]);
+    vi.spyOn(pyodide, "setInterruptBuffer").mockImplementation(() => {
+      throw new Error("bad interrupt buffer");
+    });
+
+    await bootReplWorker(frame, { loadPyodide: async () => pyodide });
+    await waitFor(() => events.length >= 1);
+    await sleep(100);
+
+    expect(events).toEqual([["loadFailed", "Error: bad interrupt buffer"]]);
   });
 });

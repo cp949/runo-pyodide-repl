@@ -47,7 +47,13 @@ describe("runReplLoop", () => {
     ]);
     const onTerminated = vi.fn();
 
-    await runReplLoop({ readLine, run, onTerminated, onError: vi.fn() });
+    await runReplLoop({
+      readLine,
+      discardPendingInterrupt: vi.fn(),
+      run,
+      onTerminated,
+      onError: vi.fn(),
+    });
 
     // 두 번째 결과에는 pending이 없으므로 세 번째 요청에서 이전 pending이 지워진다.
     expect(readLine.mock.calls).toEqual([
@@ -63,7 +69,13 @@ describe("runReplLoop", () => {
     const { readLine, run } = script([{ line: "exit()", result: EXIT }]);
     const onTerminated = vi.fn();
 
-    await runReplLoop({ readLine, run, onTerminated, onError: vi.fn() });
+    await runReplLoop({
+      readLine,
+      discardPendingInterrupt: vi.fn(),
+      run,
+      onTerminated,
+      onError: vi.fn(),
+    });
 
     expect(onTerminated).toHaveBeenCalledTimes(1);
     expect(readLine).toHaveBeenCalledTimes(1);
@@ -82,7 +94,13 @@ describe("runReplLoop", () => {
     const onError = vi.fn();
     const onTerminated = vi.fn();
 
-    await runReplLoop({ readLine, run, onTerminated, onError });
+    await runReplLoop({
+      readLine,
+      discardPendingInterrupt: vi.fn(),
+      run,
+      onTerminated,
+      onError,
+    });
 
     expect(onError.mock.calls).toEqual([[boom]]);
     // 오류가 난 줄은 블록 입력 중이었다: 다음 요청은 `... `가 아니라 `>>> `이고 pending이 없다.
@@ -105,7 +123,13 @@ describe("runReplLoop", () => {
     const onError = vi.fn();
     const onTerminated = vi.fn();
 
-    await runReplLoop({ readLine, run, onTerminated, onError });
+    await runReplLoop({
+      readLine,
+      discardPendingInterrupt: vi.fn(),
+      run,
+      onTerminated,
+      onError,
+    });
 
     expect(run).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
@@ -124,6 +148,7 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine: vi.fn<ReadLine>().mockRejectedValue(boom),
+      discardPendingInterrupt: vi.fn(),
       run,
       onTerminated,
       onError,
@@ -142,11 +167,61 @@ describe("runReplLoop", () => {
 
     await runReplLoop({
       readLine,
+      discardPendingInterrupt: vi.fn(),
       run,
       onTerminated: vi.fn(),
       onError: vi.fn(),
     });
 
     expect(run.mock.calls).toEqual([[null]]);
+  });
+
+  test("readLine 응답 직후·run 전에 discardPendingInterrupt를 부른다(`null`에도)", async () => {
+    const { readLine, run } = script([
+      { line: "1+1", result: READY },
+      { line: null, result: EXIT },
+    ]);
+    const discardPendingInterrupt = vi.fn();
+
+    await runReplLoop({
+      readLine,
+      discardPendingInterrupt,
+      run,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    // 호출 전역 순번(invocationCallOrder)으로 세 함수의 호출을 한 줄로 펴서 순서를 본다.
+    const timeline = [
+      ...readLine.mock.invocationCallOrder.map((n) => [n, "readLine"] as const),
+      ...discardPendingInterrupt.mock.invocationCallOrder.map(
+        (n) => [n, "discard"] as const,
+      ),
+      ...run.mock.invocationCallOrder.map((n) => [n, "run"] as const),
+    ]
+      .sort(([a], [b]) => a - b)
+      .map(([, name]) => name);
+    expect(timeline).toEqual([
+      "readLine",
+      "discard",
+      "run",
+      "readLine",
+      "discard",
+      "run",
+    ]);
+  });
+
+  test("readLine이 reject되면 폐기하지 않고 끝난다", async () => {
+    const discardPendingInterrupt = vi.fn();
+
+    await runReplLoop({
+      readLine: vi.fn<ReadLine>().mockRejectedValue(new Error("rpc disposed")),
+      discardPendingInterrupt,
+      run: vi.fn<Run>(),
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(discardPendingInterrupt).not.toHaveBeenCalled();
   });
 });

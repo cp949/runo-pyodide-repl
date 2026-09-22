@@ -1,13 +1,19 @@
 /**
  * worker 부팅 시퀀스(01-protocols.md 5절 S1의 RD-004~RD-006 부분, 00-architecture.md 3.1). 초기화 프레임을 받은 뒤
- * pyodide 로드 → 콘솔 생성 → stdin 배선 → `ready` → 배너 → REPL 루프 순서로 진행한다. 로더는 주입해 node에서 npm
+ * pyodide 로드 → 콘솔 생성 → Ctrl+C 연결 → stdin 배선 → `ready` → 배너 → REPL 루프 순서로 진행한다. 로더는 주입해 node에서 npm
  * `loadPyodide`로 시험하고 브라우저에서는 CDN 로더(`loadPyodideFromCdn`)를 쓴다.
  */
 import type { PyodideInterface } from "pyodide";
 import type { InitFrame } from "../protocol/init-frame";
+import {
+  acknowledgeInterrupt,
+  discardPendingInterrupt,
+  readRequestSeq,
+} from "../protocol/interrupt-protocol";
 import { createRpc } from "../protocol/rpc";
 import { createMailboxReader } from "../protocol/stdin-mailbox";
 import { createConsole, type ConsoleSinks, type ReplConsole } from "./console";
+import { connectInterrupts } from "./interrupt-buffer";
 import { runReplLoop } from "./repl-loop";
 import { createStdinCallback } from "./stdin-callback";
 import { createSubmissionRunner } from "./submission-runner";
@@ -17,14 +23,17 @@ export interface BootDeps {
 }
 
 /**
- * 순서: RPC 생성 → loadPyodide → createConsole → setStdin → ntf ready → ntf writeOutput(BANNER) → REPL 루프 실행.
- * 로드·콘솔 생성·stdin 배선 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아 있다).
+ * 순서: RPC 생성 → loadPyodide → createConsole → connectInterrupts → setStdin → ntf ready → ntf writeOutput(BANNER) →
+ * REPL 루프 실행. `connectInterrupts`(SIGINT 핸들러 설치 → 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중 눌림이 시작 코드를 죽이지
+ * 않도록 `setStdin`보다 앞이다(03-ctrl-c.md 2.6).
+ * 로드·콘솔 생성·Ctrl+C 연결·stdin 배선 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아 있다).
  */
 export async function bootReplWorker(
   frame: InitFrame,
   deps: BootDeps,
 ): Promise<void> {
   const rpc = createRpc(frame.rpcPort); // 이 RD에는 main→worker 요청 핸들러가 없다(complete는 RD-015)
+  const interruptBuffer = frame.interruptBuffer;
   const sinks: ConsoleSinks = {
     write: (text) => rpc.notify("write", text),
     writeErrorRaw: (text) => rpc.notify("writeErrorRaw", text),
@@ -35,6 +44,13 @@ export async function bootReplWorker(
     pyodide = await deps.loadPyodide(frame.pyodide.indexURL);
     repl = createConsole(pyodide, sinks, {
       topLevelAwait: frame.topLevelAwait,
+    });
+    // SIGINT 핸들러 설치 → 폐기 → 버퍼 연결. 폴링은 연결 뒤에 시작하므로 이 순서가 부팅 중 눌림으로부터 시작 코드를 지킨다.
+    // `worker/`가 `protocol/`을 import하지 않도록 프로토콜 함수는 여기서 클로저로 넣는다. 실패는 loadFailed다.
+    connectInterrupts(pyodide, repl.pyconsole, interruptBuffer, {
+      ack: () => acknowledgeInterrupt(interruptBuffer),
+      seq: () => readRequestSeq(interruptBuffer),
+      discard: () => discardPendingInterrupt(interruptBuffer),
     });
     const mailbox = createMailboxReader({
       ctrl: frame.stdinCtrl,
@@ -62,6 +78,7 @@ export async function bootReplWorker(
   await runReplLoop({
     readLine: (prompt, pending) =>
       rpc.call<string | null>("readLine", prompt, pending, true),
+    discardPendingInterrupt: () => discardPendingInterrupt(interruptBuffer),
     run: (line) => runner.run(line),
     onTerminated: () => rpc.notify("sessionTerminated"),
     onError: (error) => {
