@@ -70,12 +70,7 @@ export const INCOMPLETE_INPUT_FLAGS = 0x4200;
 /** pyodide.globals에서 실행한다. `sys`가 사용자 전역에 남는 편차 22는 유지한다(10-parity-deviations.md). */
 const PROMPT_SETUP = 'import sys\nsys.ps1 = ">>> "\nsys.ps2 = "... "\n';
 
-// ConsoleFuture를 JS에서 직접 await하지 않는다(TRAP-02). 결과는 [echo, exited, error] 세 값이다(None은 JS의 undefined).
-// SystemExit은 [None, True, None]으로 돌려 exit()/quit()를 구분한다. 값이 None이 아니면 repr() 전체를 echo로 만들고
-// 성공한 뒤에만 builtins._를 갱신한다. repr가 예외를 내면 error에 트레이스백을 담고 _는 건드리지 않는다.
-// format_syntax_error는 pyrepl처럼 끝 개행을 붙여(없으면 캐럿 줄이 사라진다) codeop의 최종 컴파일과 같은 플래그로 재컴파일한다.
-// retrieve_exception은 await하지 않는 문법 오류 future의 예외를 회수한다. 그대로 두면 사이클 GC 때 asyncio가
-// "ConsoleFuture exception was never retrieved"를 sys.stderr로 내 터미널에 끼어든다(JS에서 부르면 예외 proxy를 destroy해야 해 Python에 둔다).
+// await_fut·format_syntax_error·retrieve_exception 본체와 설명은 console-helpers.py에 있다(DELTA-00에서 이전).
 
 /** `await_fut`가 돌려주는 세 값. Python `None`은 JS `undefined`로 온다. */
 type AwaitFutResult = [

@@ -49,7 +49,7 @@ export async function bootReplWorker(
   };
   let repl: ReplConsole;
   let pyodide: PyodideInterface;
-  let interruptIdle: InterruptIdle;
+  let interruptIdle: InterruptIdle | undefined;
   try {
     pyodide = await deps.loadPyodide(frame.pyodide.indexURL);
     repl = createConsole(pyodide, sinks, {
@@ -90,6 +90,9 @@ export async function bootReplWorker(
     });
     rpc.notify("ready", { pyodideVersion: pyodide.version });
   } catch (error) {
+    // connectInterrupts는 성공했지만 이후(setStdin·ready 알림 등)에서 던지면 SIGINT 핸들러·time.sleep 조각이 이미
+    // 설치돼 있다. loadFailed를 알리기 전에 interrupt_idle(PyProxy)을 destroy해 부분 설치 상태를 정리한다.
+    interruptIdle?.destroy();
     rpc.notify("loadFailed", String(error));
     return;
   }

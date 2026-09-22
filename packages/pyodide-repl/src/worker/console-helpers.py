@@ -1,6 +1,10 @@
 import builtins, traceback
 from pyodide.ffi import to_js
 
+# ConsoleFuture를 JS에서 직접 await하지 않는다(TRAP-02, worker/console.ts가 이 함수로만 await한다).
+# 결과는 [echo, exited, error] 세 값이다(None은 JS의 undefined). SystemExit은 [None, True, None]으로
+# 돌려 exit()/quit()를 구분한다. 값이 None이 아니면 repr() 전체를 echo로 만들고 성공한 뒤에만
+# builtins._를 갱신한다. repr가 예외를 내면 error에 트레이스백을 담고 _는 건드리지 않는다.
 async def await_fut(fut):
     try:
         res = await fut
@@ -17,6 +21,8 @@ async def await_fut(fut):
     builtins._ = res
     return to_js([text, False, None], depth=1)
 
+# pyrepl처럼 끝 개행을 붙여(없으면 캐럿 줄이 사라진다) codeop의 최종 컴파일과 같은 플래그로 재컴파일해
+# 표준 문구의 문법 오류를 만든다.
 def format_syntax_error(source, flags):
     try:
         compile(source + "\n", "<console>", "single", flags, True)
@@ -24,5 +30,8 @@ def format_syntax_error(source, flags):
         return "".join(traceback.format_exception_only(type(e), e))
     return None
 
+# await하지 않는 문법 오류 future의 예외를 회수한다. 그대로 두면 사이클 GC 때 asyncio가
+# "ConsoleFuture exception was never retrieved"를 sys.stderr로 내 터미널에 끼어든다
+# (JS에서 부르면 예외 proxy를 destroy해야 해 Python에 둔다).
 def retrieve_exception(fut):
     fut.exception()

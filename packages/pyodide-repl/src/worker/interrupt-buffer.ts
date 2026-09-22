@@ -39,8 +39,13 @@ export function connectInterrupts(
 ): InterruptIdle {
   // 조각 교체가 실패해도(가드) 핸들러는 그대로 설치한다. 그 경우 코드 객체가 없어 절단 목록만 짧아진다.
   const codes = installSleepSlice(pyodide, { warn: deps.warn });
-  const interruptIdle = installSigintHandler(pyodide, pyconsole, deps, codes);
-  codes?.destroy();
+  let interruptIdle: InterruptIdle;
+  try {
+    interruptIdle = installSigintHandler(pyodide, pyconsole, deps, codes);
+  } finally {
+    // installSigintHandler가 던져도 조각 래퍼를 원래 time.sleep으로 되돌린다.
+    codes?.destroy();
+  }
   deps.discard();
   pyodide.setInterruptBuffer(buffer);
   return interruptIdle;
