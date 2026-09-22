@@ -1609,3 +1609,66 @@ describe("크래시 감지(RD-010)", () => {
     );
   });
 });
+
+describe("top-level await 옵션(RD-012)", () => {
+  test("`topLevelAwait: true`로 만들면 첫 프레임의 topLevelAwait가 true다", () => {
+    const { fakeWorker } = startSession({ topLevelAwait: true });
+
+    expect(fakeWorker.frame().topLevelAwait).toBe(true);
+  });
+
+  test("생략·false·boolean이 아닌 값은 첫 프레임의 topLevelAwait가 false다", () => {
+    expect(startSession().fakeWorker.frame().topLevelAwait).toBe(false);
+    expect(
+      startSession({ topLevelAwait: false }).fakeWorker.frame().topLevelAwait,
+    ).toBe(false);
+    expect(
+      startSession({ topLevelAwait: "yes" as unknown as boolean }).fakeWorker.frame()
+        .topLevelAwait,
+    ).toBe(false);
+  });
+
+  test("reset({ topLevelAwait: true }) 뒤 새 worker의 프레임은 true다", () => {
+    const session = startResettableSession();
+    expect(must(session.workers[0]).frame().topLevelAwait).toBe(false);
+
+    session.handle.reset({ topLevelAwait: true });
+
+    expect(session.workers).toHaveLength(2);
+    const newWorker = must(session.workers[1]);
+    expect(newWorker.frame().topLevelAwait).toBe(true);
+    expect(() => parseInitFrame(newWorker.frame())).not.toThrow();
+  });
+
+  test("그 뒤 무인자 reset()의 프레임도 true를 유지한다(sticky)", () => {
+    const session = startResettableSession();
+    session.handle.reset({ topLevelAwait: true });
+
+    session.handle.reset();
+
+    expect(session.workers).toHaveLength(3);
+    expect(must(session.workers[2]).frame().topLevelAwait).toBe(true);
+  });
+
+  test("reset({ topLevelAwait: undefined })·reset({})도 직전 값을 유지한다", () => {
+    const session = startResettableSession();
+    session.handle.reset({ topLevelAwait: true });
+
+    session.handle.reset({ topLevelAwait: undefined });
+    session.handle.reset({});
+
+    expect(session.workers).toHaveLength(4);
+    expect(must(session.workers[2]).frame().topLevelAwait).toBe(true);
+    expect(must(session.workers[3]).frame().topLevelAwait).toBe(true);
+  });
+
+  test("reset({ topLevelAwait: false })는 false로 되돌린다", () => {
+    const session = startResettableSession();
+    session.handle.reset({ topLevelAwait: true });
+
+    session.handle.reset({ topLevelAwait: false });
+
+    expect(session.workers).toHaveLength(3);
+    expect(must(session.workers[2]).frame().topLevelAwait).toBe(false);
+  });
+});

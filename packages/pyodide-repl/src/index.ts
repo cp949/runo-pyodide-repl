@@ -29,10 +29,6 @@ export type ReplStatus =
   | "terminated"
   | "crashed";
 
-/**
- * RD-004 시점의 부분 구현이다. 나머지 옵션(`topLevelAwait`)은 그것을 쓰는 RD(RD-012)가 추가한다(`00-architecture.md`
- * 4.1).
- */
 export interface ReplOptions {
   /** 호출자가 소유하는 xterm `Terminal`. 코어는 줄 편집기를 붙이기만 하고 dispose하지 않는다. */
   terminal: Terminal;
@@ -44,6 +40,8 @@ export interface ReplOptions {
   onStatus?: (status: ReplStatus) => void;
   /** worker `error` 이벤트 또는 `crashed` 알림(첫 신호만) 뒤 `onStatus("crashed")` 다음에 부른다(RD-010). */
   onCrash?: (message: string) => void;
+  /** 기본 `false`. `=== true`일 때만 켠다. 바꾸려면 `reset({ topLevelAwait })`(RD-012, `02-console-core.md` 5.4). */
+  topLevelAwait?: boolean;
 }
 
 export interface ReplHandle {
@@ -56,9 +54,10 @@ export interface ReplHandle {
    * 화면·history를 유지한 채 worker를 새로 만든다(변수·import는 사라진다). 청록 안내 줄(`RESET_NOTICE`) 뒤 새 배너가
    * 뜬다. `dispose()` 뒤·`!isolated`면 no-op. 그 외 상태(`ready`·`terminated`·`crashed`·`load-failed`·`loading`)는
    * 전부 허용한다. 동기이며 안에서 `loading`을 동기로 발행하고 이후 새 worker의 `ready`/`load-failed`가 재발행한다.
-   * 인자는 없다(옵션은 RD-012). 확인 대화상자·디바운스 없음.
+   * `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면 마지막으로 적용한 값을 유지한다(RD-012).
+   * 확인 대화상자·디바운스 없음.
    */
-  reset(): void;
+  reset(options?: { topLevelAwait?: boolean }): void;
   /** `globalThis.crossOriginIsolated === true`. 거짓이면 worker가 없다. */
   readonly crossOriginIsolated: boolean;
 }
@@ -80,7 +79,9 @@ export function createRepl(options: ReplOptions): ReplHandle {
   let disposed = false;
   let session: ReplSession | undefined;
   // isolated일 때만 있다. not-isolated에서 reset()은 no-op(ReplHandle.reset 문서).
-  let resetSession: (() => void) | undefined;
+  let resetSession:
+    | ((next?: { topLevelAwait?: boolean }) => void)
+    | undefined;
 
   if (!isolated) {
     // SharedArrayBuffer가 없어 초기화 프레임을 만들 수 없다(ADR-0004, TRP-002). 폴백은 없다.
@@ -90,6 +91,8 @@ export function createRepl(options: ReplOptions): ReplHandle {
     // 프레임에 넣는 것과 같은 SharedArrayBuffer 뷰를 송신기도 쓴다. reset()이 새 세션에도 같은 버퍼를 싣는다.
     const interruptBuffer = createInterruptBuffer();
     const interruptSender = createInterruptSender(interruptBuffer);
+    // 마지막으로 적용한 값(sticky). 무인자 reset()·reset({})·reset({ topLevelAwait: undefined })는 이 값을 그대로 쓴다.
+    let topLevelAwait = options.topLevelAwait === true;
     // 벤더 `Readline`은 활성 읽기가 없을 때만 부른다(읽기 중 Ctrl+C는 벤더가 같은 프롬프트를 다시 그린다).
     // 현재 세션을 `session` 변수로 늦게 읽는다: 리셋이 세션을 바꿔도 다시 등록할 필요가 없다.
     readline.setCtrlCHandler(() => {
@@ -106,6 +109,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
         interruptSender,
         createWorker: options.createWorker,
         indexURL,
+        topLevelAwait,
         onStatus,
         onCrash: options.onCrash,
       });
@@ -113,7 +117,10 @@ export function createRepl(options: ReplOptions): ReplHandle {
     spawnSession();
     onStatus("loading");
 
-    resetSession = () => {
+    resetSession = (next) => {
+      // boolean이 명시된 경우에만 바꾼다. 생략·undefined는 마지막 값을 유지한다(sticky).
+      if (typeof next?.topLevelAwait === "boolean")
+        topLevelAwait = next.topLevelAwait;
       // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
       // rpc.dispose() → worker.terminate()(session.terminate()).
       session?.terminate();
@@ -139,9 +146,9 @@ export function createRepl(options: ReplOptions): ReplHandle {
       // 벤더 dispose가 멱등이라 term.dispose()가 addon을 다시 dispose해도 안전하다.
       readline.dispose();
     },
-    reset() {
+    reset(options) {
       if (disposed) return;
-      resetSession?.();
+      resetSession?.(options);
     },
     get crossOriginIsolated() {
       return isolated;

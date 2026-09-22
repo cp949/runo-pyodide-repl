@@ -33,6 +33,8 @@ export interface StartSessionOptions {
   createWorker: () => Worker;
   /** 끝 `/`가 붙은 pyodide CDN 위치. */
   indexURL: string;
+  /** 초기화 프레임에 그대로 싣는다. 값을 바꾸려면 새 세션(RD-012). */
+  topLevelAwait: boolean;
   /** 상태가 바뀔 때 부른다. */
   onStatus: (status: ReplStatus) => void;
   /** worker `error` 이벤트 또는 `crashed` 알림(첫 신호만) 뒤 부른다. */
@@ -66,6 +68,7 @@ export function startSession(options: StartSessionOptions): ReplSession {
     interruptSender,
     createWorker,
     indexURL,
+    topLevelAwait,
     onStatus,
     onCrash,
   } = options;
@@ -153,7 +156,7 @@ export function startSession(options: StartSessionOptions): ReplSession {
     interruptBuffer,
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
-    topLevelAwait: false, // 옵션은 RD-012가 추가한다
+    topLevelAwait,
     pyodide: { indexURL },
   };
   const rpc: Rpc = createRpc(channel.port1, {

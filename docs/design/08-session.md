@@ -29,8 +29,8 @@ sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들�
    `ready`/`load-failed`를 재발행한다.
 
 `dispose()` 뒤 `reset()`은 no-op. `!isolated`(worker가 없다)에서도 no-op. 그 외 상태(`ready`·
-`terminated`·`load-failed`·`loading`)는 전부 허용한다. 인자 없음(옵션은 RD-012), 확인 대화상자·디바운스
-없음.
+`terminated`·`load-failed`·`loading`)는 전부 허용한다. `{ topLevelAwait? }` 옵션은 새 프레임에
+실린다. 생략하면 마지막 값을 유지한다(RD-012). 확인 대화상자·디바운스 없음.
 
 세션 소유 vs 핸들 소유(`session.ts`): 세션은 게이트 4종(`alive`·`readLinePending`·`inputReadsPending`·
 `cancelSettling`)·`reading`·`ended`·sink·리더·가드·메일박스·RPC·worker를 소유한다. 리셋마다 전부
