@@ -10,6 +10,7 @@ interface ActiveRead {
   resolve: (input: string | null) => void;
   reject: (e: unknown) => void;
   cancelable: boolean;
+  onKey?: (input: Input) => boolean;
 }
 
 /** write 콜백을 기다리는 읽기 하나. `cancelled`는 콜백 도착 전에 `cancelRead()`가 먼저 끝냈는지 표시한다. */
@@ -33,6 +34,11 @@ type PauseHandler = (resume: boolean) => void;
 export interface ReadlineOptions {
   /** false면 history를 localStorage에 저장·복원하지 않는다. 기본값은 true(원본 동작). */
   persist?: boolean;
+  /**
+   * true면 공백뿐인(trim 결과 빈 문자열) 제출을 history에 넣지 않고 cursor만 처음으로 되돌린다.
+   * 기본값은 false(원본 동작 — 공백뿐인 제출도 그대로 기록).
+   */
+  skipBlankHistory?: boolean;
 }
 
 export interface ReadOptions {
@@ -44,6 +50,12 @@ export interface ReadOptions {
    * 넣는다.
    */
   prefill?: string;
+  /**
+   * 활성 읽기의 키마다 벤더 처리 앞에서 부른다. `true`를 돌려주면 벤더 처리를 생략한다(소비).
+   * 활성 읽기가 없을 때(write 콜백 대기 중 포함)는 부르지 않는다. `readPaste`가 `editInsert`로 바로
+   * 넣는 `Text` 토큰은 거치지 않는다(코드로 흘러들어온 텍스트에는 훅이 반응하지 않는다).
+   */
+  onKey?: (input: Input) => boolean;
 }
 
 export class Readline implements ITerminalAddon {
@@ -59,6 +71,7 @@ export class Readline implements ITerminalAddon {
   private lowWatermark = 1000;
   private highWater = false;
   private state: State;
+  private skipBlankHistory: boolean;
   private checkHandler: CheckHandler = () => true;
   private ctrlCHandler: CtrlCHandler = () => {
     return;
@@ -73,6 +86,7 @@ export class Readline implements ITerminalAddon {
     this.history = new History(50, { persist: options.persist });
     this.state = new State(">", this.tty(), this.highlighter, this.history);
     this.history.restoreFromLocalStorage();
+    this.skipBlankHistory = options.skipBlankHistory ?? false;
   }
 
   /**
@@ -262,6 +276,24 @@ export class Readline implements ITerminalAddon {
   }
 
   /**
+   * 현재 버퍼의 커서 위치(UTF-16 인덱스)를 돌려준다. `getLine`/`updateLine`과 같은 수준으로 활성
+   * 읽기가 없어도 현재 state에 작용한다.
+   */
+  public getCursor(): number {
+    return this.state.cursor();
+  }
+
+  /** 현재 커서 위치에 텍스트를 끼워 넣는다(원본 편집 경로와 같은 `State.editInsert`). */
+  public editInsert(text: string): void {
+    this.state.editInsert(text);
+  }
+
+  /** 커서 앞 n글자를 지운다(원본 편집 경로와 같은 `State.editBackspace`). */
+  public editBackspace(n: number): void {
+    this.state.editBackspace(n);
+  }
+
+  /**
    * Obtain an output interface to this terminal.
    *
    * @returns Output
@@ -340,7 +372,13 @@ export class Readline implements ITerminalAddon {
         } else {
           this.state.refresh();
         }
-        this.activeRead = { prompt, resolve, reject, cancelable };
+        this.activeRead = {
+          prompt,
+          resolve,
+          reject,
+          cancelable,
+          onKey: options.onKey,
+        };
       });
     });
   }
@@ -407,6 +445,10 @@ export class Readline implements ITerminalAddon {
       return;
     }
 
+    if (this.activeRead.onKey?.(input)) {
+      return;
+    }
+
     switch (input.inputType) {
       case InputType.Text:
         this.state.editInsert(input.data.join(""));
@@ -422,7 +464,11 @@ export class Readline implements ITerminalAddon {
           // before committing so the line frozen in scrollback is plain.
           this.state.refreshUnhighlighted();
           this.term?.write("\r\n");
-          this.history.append(this.state.buffer());
+          if (this.skipBlankHistory && this.state.buffer().trim() === "") {
+            this.history.resetCursor();
+          } else {
+            this.history.append(this.state.buffer());
+          }
           this.activeRead?.resolve(this.state.buffer());
           this.activeRead = undefined;
         } else {

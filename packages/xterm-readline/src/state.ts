@@ -70,6 +70,11 @@ export class State {
     return this.line.buffer();
   }
 
+  /** 현재 커서 위치(UTF-16 인덱스). */
+  public cursor(): number {
+    return this.line.pos;
+  }
+
   public getTty(): Tty {
     return this.tty;
   }
