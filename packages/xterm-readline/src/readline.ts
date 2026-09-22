@@ -38,6 +38,12 @@ export interface ReadlineOptions {
 export interface ReadOptions {
   /** true면 활성 읽기 중 Ctrl+C가 읽기를 null로 끝낸다(줄 바꿈만, ^C·history 없음). 기본 false = 원본 동작. */
   cancelable?: boolean;
+  /**
+   * write 콜백 안에서 새 입력 상태(State)를 만든 직후 1회 채워 넣는 텍스트. 커서는 끝에 놓인다.
+   * `read()` 호출 직후(콜백 밖)의 `updateLine()`은 이 타이밍보다 앞서 실행되어 사라지므로 이 옵션으로만
+   * 넣는다.
+   */
+  prefill?: string;
 }
 
 export class Readline implements ITerminalAddon {
@@ -329,7 +335,11 @@ export class Readline implements ITerminalAddon {
           this.highlighter,
           this.history
         );
-        this.state.refresh();
+        if (options.prefill !== undefined && options.prefill !== "") {
+          this.state.update(options.prefill);
+        } else {
+          this.state.refresh();
+        }
         this.activeRead = { prompt, resolve, reject, cancelable };
       });
     });
