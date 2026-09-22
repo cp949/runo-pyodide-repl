@@ -2,7 +2,8 @@
 // 채우는 들여쓰기 규칙을 옮긴 것이다(docs/design/06-editing.md 6.3). `createAutoIndent`가 이 순수
 // 함수를 세션 소유 상태(`lastUsedIndentation`)와 묶어 벤더 `ReadOptions`로 바꾼다.
 
-import { InputType, type Input, type ReadOptions, type Readline } from "@cp949/runo-xterm-readline";
+import { InputType, type Input, type Readline } from "@cp949/runo-xterm-readline";
+import type { ReplReadOptions } from "./read-options";
 
 export interface NextIndentation {
   // 개행 바로 뒤에 넣을 공백(직전 줄에서 이어받은 들여쓰기 + `:` 뒤 추가분).
@@ -116,7 +117,7 @@ export function nextIndentation(
 
 export interface AutoIndent {
   /** REPL 읽기 하나의 옵션. `pending`이 없으면 prefill 없음(`onKey`는 항상 있다). */
-  readOptions(pending: string | undefined): Pick<ReadOptions, "prefill" | "onKey">;
+  readOptions(pending: string | undefined): ReplReadOptions;
 }
 
 /**

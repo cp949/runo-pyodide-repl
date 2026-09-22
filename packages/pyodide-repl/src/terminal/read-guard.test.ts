@@ -255,7 +255,9 @@ describe.each([
       // 실제 `read`를 그대로 호출하면서 받은 프롬프트를 기록한다.
       const read = vi.spyOn(readline, "read");
       const autoIndent = createAutoIndent(readline);
-      const replReader = createReplReader(readline, fake.term, sinks, autoIndent);
+      const replReader = createReplReader(readline, fake.term, sinks, (pending) =>
+        autoIndent.readOptions(pending),
+      );
       const inputReader = createInputReader(readline, fake.term, sinks);
       const guard = createReadGuard({
         readLine: (

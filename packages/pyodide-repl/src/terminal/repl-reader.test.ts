@@ -29,7 +29,9 @@ describe.each([
     // 실제 `read`를 그대로 호출하면서 받은 합성 프롬프트를 기록한다.
     const read = vi.spyOn(readline, "read");
     const autoIndent = createAutoIndent(readline);
-    const reader = createReplReader(readline, fake.term, sinks, autoIndent);
+    const reader = createReplReader(readline, fake.term, sinks, (pending) =>
+      autoIndent.readOptions(pending),
+    );
     /**
      * 읽기를 시작하고 `readline.read`가 불릴 때까지 기다린 뒤 write 콜백을 배출한다. 꼬리가 길면 `rewindTail`이 flush를
      * 기다리므로 먼저 배출해야 `read`가 시작된다. 읽기가 끝나기를 기다리지 않도록(async 함수는 반환한 Promise를 풀어

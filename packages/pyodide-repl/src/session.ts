@@ -15,6 +15,7 @@ import {
   createStdinMailbox,
 } from "./protocol/stdin-mailbox";
 import { createAutoIndent } from "./terminal/auto-indent";
+import { mergeReadOptions } from "./terminal/read-options";
 import { createReadGuard } from "./terminal/read-guard";
 import { createReplReader } from "./terminal/repl-reader";
 import type { RewindTerminal } from "./terminal/rewind-tail";
@@ -100,7 +101,9 @@ export function startSession(options: StartSessionOptions): ReplSession {
   // 세션 소유: lastUsedIndentation은 이 세션 동안 유지되고, reset()이 새 세션(새 객체)을 만들면 4칸으로
   // 돌아간다(08-session.md 8.1, 확정 3).
   const autoIndent = createAutoIndent(readline);
-  const replReader = createReplReader(readline, liveTerminal, sinks, autoIndent);
+  const replReader = createReplReader(readline, liveTerminal, sinks, (pending) =>
+    mergeReadOptions(autoIndent.readOptions(pending)),
+  );
   // stdin 리더도 같은 뷰를 받는다: `rewindTail`의 flush 콜백이 해제된 터미널의 buffer를 읽지 않게(TRP-004).
   const inputReader = createInputReader(readline, liveTerminal, sinks);
   // 프롬프트를 기다리는 동안 worker의 배경 콜백이 `input()`을 부르면 stdin 읽기가 REPL 읽기를 교체해 REPL 읽기가

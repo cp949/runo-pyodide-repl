@@ -7,9 +7,11 @@
  *
  * 읽기를 시작하며 꼬리를 비운다: 읽는 동안 Python은 멈춰 있어 새 출력이 없고, 읽기가 끝나면(Enter, Ctrl+C 취소) 커서가 다음
  * 행 처음으로 가므로 꼬리가 없다. 비우지 않으면 다음 읽기가 앞 꼬리를 물려받는다.
+ *
+ * 읽기 옵션은 세션이 합성해 넘긴다(`read-options.ts`).
  */
 import type { Readline } from "@cp949/runo-xterm-readline";
-import type { AutoIndent } from "./auto-indent";
+import type { ReadOptionsProvider } from "./read-options";
 import { rewindTail, type RewindTerminal } from "./rewind-tail";
 import type { TerminalSinks } from "./sinks";
 
@@ -32,7 +34,7 @@ export function createReplReader(
   readline: Pick<Readline, "read">,
   term: RewindTerminal,
   sinks: Pick<TerminalSinks, "tail" | "resetTail">,
-  autoIndent: AutoIndent
+  readOptions: ReadOptionsProvider
 ): ReplReader {
   return {
     async read(prompt, pending, cancelable) {
@@ -42,7 +44,7 @@ export function createReplReader(
       sinks.resetTail();
       return readline.read(tail === "" ? prompt : `${tail}\x1b[0m${prompt}`, {
         cancelable,
-        ...autoIndent.readOptions(pending),
+        ...readOptions(pending),
       });
     },
   };
