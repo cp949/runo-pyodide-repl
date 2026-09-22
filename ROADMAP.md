@@ -91,7 +91,7 @@ worker 진입점 `runReplWorker()`: 초기화 프레임 수신 → CDN `loadPyod
 
 상태: 완료 · 이전: RD-007, RD-011, RD-014(종료 감지) · 설계: `02-console-core.md`(5.1의 `runLine` 포함), `00-architecture.md` 3.2
 
-worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 `repl-reader`(꼬리 + `>>> ` 합성). 한 줄 제출만 다룬다(여러 줄은 RD-011).
+worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 `repl-reader`(꼬리 + `>>> ` 합성). 한 줄 제출만 다룬다(여러 줄 제출은 RD-011이 더했다).
 
 시나리오: `>>> 1 + 1` Enter → `2` → `>>> `. 빈 줄 Enter는 무해하다. `if True:` Enter → `... ` → `    print(1)` Enter → 빈 줄 Enter → `1`. `1 +` Enter → SyntaxError 즉시 표시. `1/0` → 트레이스백에 `__repl_run`/`push`/`runcode` 프레임이 없다. `print("t", end="")` 실행 뒤 다음 프롬프트가 `t>>> `로 같은 줄에 붙는다. `exit()` → "Python session terminated." 안내, 이후 입력 무응답.
 
@@ -102,7 +102,7 @@ worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 
 - REPL 프롬프트 이어붙임: `t>>> `, 빈 Enter 뒤 열 0의 `>>> `, 블록 실행 뒤 `012>>> `, stderr 꼬리 뒤 `e>>> `(`e`만 빨강), 닫히지 않은 색 뒤 기본색, `\r30%`→`\r100%` 뒤 `100%>>> `, 100·130·200자·전각·정확히 80자 꼬리에서 앞 행 중복 없음(이전 RD-006b 브라우저 74개 시나리오를 옮겨 같은 결과).
 - 값 에코 뒤·트레이스백 뒤·SyntaxError 뒤·배너 뒤에 빈 줄이 없다(이전 RD-011a 16개 시나리오).
 
-인계: worker 루프는 `worker/repl-loop.ts`의 `runReplLoop(deps)`(`readLine(prompt, pending)` → `run(line)` → `exit`면 `onTerminated` 후 종료)이고 `protocol/`을 import하지 않는다(`boot.ts`가 rpc 래퍼를 주입한다). 한 줄 실행은 `worker/submission-runner.ts`의 `createSubmissionRunner(pyodide, repl, io).run(line | null)`이다(`PS1`/`PS2`, 값 에코, 오류 표시에서 끝 개행 하나 제거, `null` 선분기, `KeyboardInterrupt` 안전망). `ReplConsole`에 `pending()`/`clearPending()`이 생겼고 `RunLineResult.complete`는 `{ echo, exited }`다(`echo`는 Python이 만든 `repr()` 전체, `None`은 `null`). 예상 밖 오류는 `repl 내부 오류: …`(빨강) + `clearPending()` 후 `>>> `로 계속하고, `readLine` reject는 `rpc disposed`면 조용히·아니면 `console.error` 후 루프가 끝난다. main은 `terminal/repl-reader.ts`의 `createReplReader`(`rewindTail` → 꼬리 재조회 → `resetTail` → `readline.read(꼬리 + "\x1b[0m" + 프롬프트)`)와 `terminal/rewind-tail.ts`를 쓰고, `createRepl`은 RPC `readLine` 핸들러(겹치는 요청은 `Error("이미 읽는 중")`로 거절, `pending`·`cancelable`은 받지 않는다)와 `sessionTerminated` → `onStatus('terminated')`(터미널 무출력, worker는 살려 둔다)를 처리한다. `ReplHandle`은 `dispose`·`crossOriginIsolated`만 남았다. 리더는 dispose 뒤 write 콜백을 전달하지 않는 터미널 뷰(`createRepl`의 `liveTerminal`)를 받는다(`docs/traps/TRP-004`). 데모는 `terminated`일 때 `Python session terminated.`를 보인다. **중간 상태**: 개행이 든 붙여넣기·Shift+Enter 제출은 통째로 `push`되어 대개 SyntaxError다(RD-011이 분기를 추가한다). 값 에코가 `sys.displayhook`을 거치지 않는 것은 편차 33이다. 브라우저 확인 스크립트(`lib.mjs` 하니스, `repl-check.mjs`, `prompt-join-check.mjs`, `trailing-newline-check.mjs`, `carryover-check.mjs`, `keys-after-enter-probe.mjs`, 양성 대조 드라이버 `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있고 RD-018이 보관한다. 결과: dev `repl-check normal` 15/15(preview 15/15), `prompt-join-check` 20/20, `trailing-newline-check` 13/13, `carryover-check` 4/4, 양성 대조 4/4. 편차 32 재측정(N=10)의 창은 약 20ms로 worker 왕복이 더해지기 전과 같다(`10-parity-deviations.md` 32). `exit()` 뒤 브라우저 `pageerror` 1건(webloop `run_handle`의 `SystemExit` 재보고)은 **RD-009에서 해소**됐다(억제 뒤 `repl-check.mjs normal` ⑦ 0건). 건너뛴 이전 브라우저 시나리오 ID는 아래 각 RD의 인계에 있다. 함정: 하니스에서 Enter 뒤 `waitPrompt`가 화면 갱신 전의 낡은 프롬프트 행에 통과한다(`TRP-005`), 변조·원복을 반복하며 vite dev를 재시작하지 않으면 원복한 파일의 다음 변조가 반영되지 않는다(`TRP-007`), "로그가 없다"는 확인은 화면을 지우고 직후 정확한 행 목록으로 단언한다(`TRP-008`).
+인계: worker 루프는 `worker/repl-loop.ts`의 `runReplLoop(deps)`(`readLine(prompt, pending)` → `run(line)` → `exit`면 `onTerminated` 후 종료)이고 `protocol/`을 import하지 않는다(`boot.ts`가 rpc 래퍼를 주입한다). 한 줄 실행은 `worker/submission-runner.ts`의 `createSubmissionRunner(pyodide, repl, io).run(line | null)`이다(`PS1`/`PS2`, 값 에코, 오류 표시에서 끝 개행 하나 제거, `null` 선분기, `KeyboardInterrupt` 안전망). `ReplConsole`에 `pending()`/`clearPending()`이 생겼고 `RunLineResult.complete`는 `{ echo, exited }`다(`echo`는 Python이 만든 `repr()` 전체, `None`은 `null`). 예상 밖 오류는 `repl 내부 오류: …`(빨강) + `clearPending()` 후 `>>> `로 계속하고, `readLine` reject는 `rpc disposed`면 조용히·아니면 `console.error` 후 루프가 끝난다. main은 `terminal/repl-reader.ts`의 `createReplReader`(`rewindTail` → 꼬리 재조회 → `resetTail` → `readline.read(꼬리 + "\x1b[0m" + 프롬프트)`)와 `terminal/rewind-tail.ts`를 쓰고, `createRepl`은 RPC `readLine` 핸들러(겹치는 요청은 `Error("이미 읽는 중")`로 거절, `pending`·`cancelable`은 받지 않는다)와 `sessionTerminated` → `onStatus('terminated')`(터미널 무출력, worker는 살려 둔다)를 처리한다. `ReplHandle`은 `dispose`·`crossOriginIsolated`만 남았다. 리더는 dispose 뒤 write 콜백을 전달하지 않는 터미널 뷰(`createRepl`의 `liveTerminal`)를 받는다(`docs/traps/TRP-004`). 데모는 `terminated`일 때 `Python session terminated.`를 보인다. 개행이 든 붙여넣기·Shift+Enter·히스토리 재호출 제출을 분할·실행하는 분기는 RD-011이 더했다. 값 에코가 `sys.displayhook`을 거치지 않는 것은 편차 33이다. 브라우저 확인 스크립트(`lib.mjs` 하니스, `repl-check.mjs`, `prompt-join-check.mjs`, `trailing-newline-check.mjs`, `carryover-check.mjs`, `keys-after-enter-probe.mjs`, 양성 대조 드라이버 `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있고 RD-018이 보관한다. 결과: dev `repl-check normal` 15/15(preview 15/15), `prompt-join-check` 20/20, `trailing-newline-check` 13/13, `carryover-check` 4/4, 양성 대조 4/4. 편차 32 재측정(N=10)의 창은 약 20ms로 worker 왕복이 더해지기 전과 같다(`10-parity-deviations.md` 32). `exit()` 뒤 브라우저 `pageerror` 1건(webloop `run_handle`의 `SystemExit` 재보고)은 **RD-009에서 해소**됐다(억제 뒤 `repl-check.mjs normal` ⑦ 0건). 건너뛴 이전 브라우저 시나리오 ID는 아래 각 RD의 인계에 있다. 함정: 하니스에서 Enter 뒤 `waitPrompt`가 화면 갱신 전의 낡은 프롬프트 행에 통과한다(`TRP-005`), 변조·원복을 반복하며 vite dev를 재시작하지 않으면 원복한 파일의 다음 변조가 반영되지 않는다(`TRP-007`), "로그가 없다"는 확인은 화면을 지우고 직후 정확한 행 목록으로 단언한다(`TRP-008`).
 
 ### RD-006 — `input()` 읽기: 메일박스·꼬리 프롬프트·read-guard
 
@@ -307,13 +307,41 @@ cursorX=4) 실사용 경로로는 재현되지 않았다(Enter와 리셋 클릭�
 
 ### RD-011 — 여러 줄 입력 제출(붙여넣기·Shift+Enter·히스토리 재호출)
 
-상태: 대기 · 이전: RD-017 · 설계: `02-console-core.md` 5.2·5.3
+상태: 완료 · 이전: RD-017 · 설계: `02-console-core.md` 5.2·5.3
 
 시나리오: `def add(a, b):\n    return a + b\n\nprint(add(1, 2))`를 붙여넣고 Enter 한 번 → `3`, SyntaxError 없음. 클래스 메서드 사이 빈 줄이 블록을 끊지 않는다. 붙여넣은 탭이 보존된다. `1\n2\n3` → `3`만 에코. 파싱 오류가 있으면 아무 문장도 실행하지 않는다.
 
 완료 기준: 위 시나리오 + `split_paste` 코퍼스 27개 전부 일치(node + 실제 pyodide). 블록 입력 중(`... `) 붙여넣기는 한 줄씩 흘려 넣는다. 예외·`exit()` 뒤 나머지 문장 미실행. 한 줄 입력·빈 줄·`input()` 기존 동작 유지. 붙여넣은 탭 보존은 벤더 `packages/xterm-readline`의 `readPaste` 소스에서 고친다(`06-editing.md` 6.1·6.2 TRP-006 — 현재 벤더 원본은 Text가 아닌 입력을 `readKey`로 넘겨 `\t`를 버린다). 코어에서 `readPaste`를 감싸지 않는다. 벤더 시험에 붙여넣기 `\t` 보존 케이스를 추가한다(RED 확인).
 
-인계(RD-005): RD-005의 러너(`submission-runner.run`)에는 개행 분기가 없다. 이 RD가 `/[\r\n]/` 분기·`replayLines`·`multiline.py`·`.py` raw import 관례를 추가한다. 그 전까지 개행이 든 붙여넣기·Shift+Enter 제출은 통째로 `push`되어 대개 SyntaxError다. 건너뛴 이전 시나리오: RD-011a의 S03·S07(붙여넣기 분할).
+결과: 벤더 `readPaste`(`packages/xterm-readline`)에 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격하는
+분기를 추가(`readline.test.ts` 94건, 탭 보존 시험 RED→GREEN 확인). worker에 `split_paste(source, flags)`
+(`multiline.py?raw` + `multiline.ts`)를 추가했다 — `ast.parse`(TLA 켜짐이면 `compile(...,
+PyCF_ONLY_AST)`)로 top-level 문장 경계를 구하고 얻은 AST를 2차 `compile(tree, ..., flags)`에 다시 넣어 함수
+밖 `return` 같은 컴파일 단계 오류도 잡는다(`multiline.test.ts` 24건). `ReplConsole.compilerFlags()`가
+`split_paste`에 넘길 플래그를 준다. 러너(`submission-runner.ts`)에 `null`(취소) → `pending()`(줄 흘림) →
+`/[\r\n]/`(분할) → 한 줄 분기를 추가하고, `await_fut(fut, echo)`로 마지막 청크의 마지막 문장에서만 값 에코·
+`builtins._` 갱신이 나오게 했다(`submission-runner.test.ts` 69건, 코퍼스 27개 node+실제 pyodide 차등 검증
+포함). `apps/demo/e2e/lib.mjs`에 `paste(text)`를 추가했다(headless Chromium은 `Control+V`·
+`page.keyboard.insertText()` 모두 여러 줄 붙여넣기에 쓸 수 없어 합성 `ClipboardEvent("paste")` dispatch로
+대체, 실측). 브라우저 확인(`multiline-check.mjs`) dev 8절(18개 확인) + preview 3절 전부 PASS, 총
+`pageerror` 0, 변이 4건 전부 killed. 루트 4종(`pnpm check-types`·`lint`·`test`·`build`) 통과.
+
+인계(RD-005): RD-005의 러너(`submission-runner.run`)에는 개행 분기가 없었다. 이 RD가 `/[\r\n]/` 분기·
+`replayLines`·`multiline.py`·`.py?raw` 관례를 추가했다. 건너뛴 이전 시나리오: RD-011a의 S03·S07(붙여넣기
+분할) — 둘 다 브라우저 `paste`·`parse` 절에서 확인했다.
+
+인계(RD-013): `shift` 절(Shift+Enter로 블록 진행)은 RD-013의 프리필이 아직 없는 채로 들여쓰기를 직접 쳐서
+확인했다(`for i in range(2):` Shift+Enter `    print(i)` Enter 1회 → `0`·`1`). RD-013이 프리필을 넣으면
+`multiline-check.mjs`의 `shift` 절 기대 입력(들여쓰기를 직접 치는 부분)을 프리필 뒤 기대값으로 되돌린다.
+
+인계(RD-014): 블록 입력 중(`... `) 붙여넣은 여러 줄은 `replayLines`가 한 줄씩 흘려 넣는다 — 각 줄이 벤더
+`history.append`를 그대로 타므로, 흘려 넣은 텍스트가 history에 (블록으로 묶이지 않은) 들여쓴 항목 여러 개로
+남는다. RD-014가 블록을 항목 하나로 묶을 때 이 경로도 함께 다뤄야 한다.
+
+인계(RD-018): 확인 스크립트(`lib.mjs`의 `paste(text)` 포함)·변이 기록은
+`_works/_completed/20260923-12-rd-011-multiline-submit/verify/`(`multiline-check.mjs`·`mutate-safe.mjs`·
+`positive-controls.md`)에 있다. `paste()`는 RD-010이 이미 저장소로 옮긴 `apps/demo/e2e/lib.mjs`에 이 RD가
+추가한 것이라 별도 이관이 필요 없다.
 
 ### RD-012 — top-level await 옵션(기본 꺼짐)
 

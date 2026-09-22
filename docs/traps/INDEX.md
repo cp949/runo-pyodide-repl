@@ -28,3 +28,4 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-022](./TRP-022-node-side-polling-inflates-browser-latency.md) | 브라우저 지연을 Node 쪽 폴링으로 재면 문턱 근처에서 5~8ms 과대 측정된다 | ACTIVE | Playwright 하니스가 키 입력 → 화면 변화 지연을 재고 판정선이 수십 ms일 때 |
 | [TRP-023](./TRP-023-new-notification-name-missing-from-harness-list-is-dropped.md) | 하니스의 알림 이름 목록에 새 ntf를 안 넣으면 조용히 버려진다 | ACTIVE | `worker/boot.test.ts` 스타일 하니스에 새 RPC 알림을 추가할 때, 실제 배선은 고쳤는데 하니스 이름 목록은 안 고쳤을 때 |
 | [TRP-024](./TRP-024-notice-row-count-check-hangs-after-repeated-resets.md) | 안내 줄 개수로 "다시 준비됐다"를 판정하면 여러 번 반복한 뒤 무한 대기한다 | ACTIVE | 세션 리셋처럼 같은 문구가 반복 찍히는 동작을 여러 번(N≥4) 거치며 "문구 개수 증가"로 완료를 판정하는 브라우저 하니스 |
+| [TRP-025](./TRP-025-async-return-without-await-escapes-try-catch.md) | `try` 안에서 async 함수를 `await` 없이 `return`하면 그 `catch`가 못 잡는다 | ACTIVE | `try { return asyncFn() } catch { ... }` 형태의 안전망 코드를 추가·수정할 때, 그 안에서 부르는 함수가 async일 때 |

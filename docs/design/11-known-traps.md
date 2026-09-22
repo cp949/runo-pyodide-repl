@@ -142,7 +142,9 @@ TRAP-12는 공개 `read(prompt)`만 쓰지만 `refreshLineInner`의 재그리기
 
 - 증상: 붙여넣기 자체는 성공해 보이고(글자가 나오고 오류 없음) 들여쓰기만 사라져 `IndentationError`나 블록 구조가 바뀐 실행으로 뒤늦게 드러난다.
 - 원인: `keymap.js`의 `parseInput`이 0x09를 `UnsupportedControlChar` 토큰으로 분류하고, `readPaste`가 Text·Enter가 아닌 토큰을 `readKey`로 넘기는데 `readKey`가 무시한다(`readline.js` 344-346).
-- 새 구현이 지킬 규칙: 붙여넣기 경로에서만 탭 토큰을 Text로 승격하는 래퍼를 둔다(직접 Tab 키 입력은 완성 기능이 먼저 가로챈다). 다른 제어 문자를 보존해야 하면 같은 방식으로 `readPaste`를 감싼다.
+- 새 구현이 지킬 규칙(RD-011 완료): 벤더 소스(`packages/xterm-readline/src/readline.ts`)의 `readPaste`에서
+  붙여넣기 경로의 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격한다 — 래퍼가 아니라 소스를 직접
+  고친다. 직접 Tab 키 입력(`readKey`의 `UnsupportedControlChar` 분기)은 그대로 무시한다(RD-015 몫).
 - 검증 방법: 탭으로 들여쓴 여러 줄을 실제 `Readline`에 붙여넣어 버퍼에 `\t`가 남는지 단언한다. `InputType` enum 값을 통합 시험으로 고정해 라이브러리 업그레이드 시 먼저 깨지게 한다.
 - 이전 우회: `preservePastedTabs`가 `readPaste`를 런타임 패치했다. 비공개 `InputType` enum 값과 `readPaste` 내부 흐름에 의존.
 

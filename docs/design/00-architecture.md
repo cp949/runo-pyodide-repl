@@ -170,11 +170,13 @@ packages/pyodide-repl/src/
     repl-loop.ts           REPL 루프(readLine → run, 종료·오류 정책)    ← 00 3.2
     load-pyodide.ts        CDN 동적 import(브라우저 전용, 시험은 npm loadPyodide 주입)
     console.ts             PyodideConsole 생성·runLine·await_fut·정규화  ← 02 5.1
-    submission-runner.ts   제출 실행 규칙(한 줄 제출, 여러 줄은 RD-011)   ← 02 5.2
-    multiline.ts           split_paste(Python 소스는 TS 문자열)
+    submission-runner.ts   제출 실행 규칙(한 줄 제출 + 여러 줄 분할·줄 흘림, RD-011)  ← 02 5.2
+    multiline.py           split_paste 본체(`.py?raw`, 파싱 + 2차 compile)         ← 02 5.2
+    multiline.ts           loadSplitPaste(pyodide) — multiline.py를 별도 namespace에서 실행
+    multiline-corpus.json  split_paste 코퍼스 27개(이름·소스, node + 실제 pyodide 차등 검증) ← 09 9.1
     top-level-await.ts
     interrupt-buffer.ts    connectInterrupts(설치 → 폐기 → 연결)       ← 03 2.6
-    sigint-handler.ts      SIGINT 핸들러(Python 소스는 TS 문자열)      ← 03 2.4
+    sigint-handler.ts      SIGINT 핸들러(`sigint-handler.py`, `.py?raw`)  ← 03 2.4
     interrupt-watch.ts     감시 타이머                                ← 03 2.5
     stdin-callback.ts      readInput 알림 → wait() → null이면 signal+check           ← 04 3.1
     sink-writer.ts         전역 stdout/stderr Writer                   ← 05 4.2
@@ -182,7 +184,7 @@ packages/pyodide-repl/src/
     webloop-reraise.ts                                                 ← 03 2.8
 ```
 
-Python 소스는 별도 `.py` 파일이 아니라 같은 이름 `.ts` 안의 템플릿 문자열이다(tsdown 0.23/rolldown 1.2.9가 `?raw`를 지원하지 않는다, RD-007).
+Python 소스는 `.py?raw`로 임포트한다(vite는 내장 지원, tsdown/rolldown은 `tsdown.config.ts`의 `raw-text` 플러그인 + `src/py-modules.d.ts` 타입 선언). 적용 파일: `console-helpers.py`·`sleep-slice.py`·`sigint-handler.py`·`webloop-reraise.py`·`multiline.py`(RD-011). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 `<…>` 꺾쇠 이름을 쓴다(트레이스백에 새면 알아보기 위한 것, 절단은 코드 객체로 한다).
 
 `terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 예외는 `worker/boot.ts`다. 부팅 시퀀스를 조립하는 모듈이라 `createRpc`·`createMailboxReader`·`InitFrame`과 `acknowledgeInterrupt`·`readRequestSeq`·`discardPendingInterrupt`를 import해 `connectInterrupts`의 `{ ack, seq, discard }`와 루프의 `discardPendingInterrupt`를 클로저로 넣고, pyodide 로더는 `worker.ts`가 주입한다(브라우저는 CDN 로더, node 시험은 npm `loadPyodide`). `console.ts`·`sink-writer.ts`·`top-level-await.ts`는 `protocol/`을 import하지 않고 sink 함수를 받는다. `repl-loop.ts`와 `submission-runner.ts`도 `readLine`·`run`·출력 함수를 주입받고, `stdin-callback.ts`도 `requestInput`·`wait`·`signalInterrupt`·`checkInterrupt`를 주입받으며(뒤 둘은 `boot.ts`가 `() => signalInterrupt(interruptBuffer)`·`() => pyodide.checkInterrupt()`로 넣는다), RPC 래퍼는 `boot.ts`가 만든다. 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
 

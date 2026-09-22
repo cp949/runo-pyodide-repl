@@ -68,6 +68,15 @@
   - 러너(`worker/submission-runner.test.ts`)는 실제 pyodide의 `createConsole`이 만든 `ReplConsole`을 `createSubmissionRunner`에
     물려 한 줄 제출·값 에코·오류 표시·끝 개행·`exit`·`null` 취소를 본다. 사용자 코드 밖에서 새는 `KeyboardInterrupt` 안전망은
     실제 SIGINT 없이 `runLine`·`clearPending`을 `KeyboardInterrupt`를 던지는 Python 함수로 바꿔 끼워 재현한다.
+  - `worker/multiline.test.ts`(RD-011, node + 실제 pyodide, 24건: 문장 단위 분할 11·입력 정규화 4·부작용 1·
+    파싱 오류 5·2차 `compile` 2·globals 오염 없음 1)는 `split_paste(source, flags)`(`multiline.py?raw`)를 실제
+    콘솔의 `compilerFlags()`로 얻은 플래그로 직접 부른다. 같은 파일의 `worker/submission-runner.test.ts`는
+    여러 줄 분할·줄 흘림·중단·무동작·`builtins._` 갱신 시험(신규 43건, 기존 26건 + 코퍼스 검증 포함 69건)과
+    `describe("코퍼스 27")`을 더한다 — 코퍼스는 `packages/pyodide-repl/src/worker/multiline-corpus.json`
+    (이름·소스 27개)을 순회하며, 새 콘솔+러너로 `run(source)`한 stdout과 같은 pyodide에서
+    `exec(compile(source, "<x>", "exec"), {"__name__": "__main__"})`를 돌려 캡처한 stdout을 비교한다
+    (stderr는 `""`이어야 한다). 값 에코 차이를 피하려고 코퍼스 소스는 모두 `print`로 끝나거나 값 문장이
+    없다.
   - stdin 콜백(`worker/stdin-callback.test.ts`)은 실제 pyodide에 `setStdin({ stdin: createStdinCallback(...) })`을 걸고 `input()`·`sys.stdin.readline()`·`read(3)`·`readlines(1)`·`for line in sys.stdin`이 같은 경로로 값을 받는지, 콜백 호출 수가 소비한 줄 수와 같은지 본다. `requestInput`과 `wait`의 앞뒤 순서는 호출 순서를 기록하는 주입 함수로 단언한다(알림을 `wait()` 뒤로 옮긴 변이가 이 시험에서 잡힌다). `setStdin` 없이 `input()`을 부르면 시험이 실패하지 않고 스위트가 멈추므로(외부 `timeout`이 필요하다) 시험 인스턴스에 `setStdin({ error: true })`를 먼저 걸고, `afterEach`에서 `sys.stdin`을 새 스트림으로 교체한다(`read(n)`이 남긴 `\n`이 다음 시험을 채운다, `docs/traps/TRP-010`).
   - 같은 파일의 **취소 변환**(RD-008)은 `runPython`이 아니라 **콘솔 러너 경로**로 돌린다: 핸들러는 스택에 `<console>` 프레임이 있을 때만 `KeyboardInterrupt`를 내므로 `runPython`의 파일명 `<exec>`에서는 취소가 버려지고 CPython이 읽기를 재시도한다. `sigint-handler.test.ts`의 `setup()`과 같은 순서로 `createConsole` → `createInterruptBuffer` → `installSigintHandler` → `setInterruptBuffer` → `createSubmissionRunner`를 만들어 제출하고 `screen.stderr`로 트레이스백 바이트를 단언한다. 보는 것: `input()`·`readline()`·`read()`·`for line in sys.stdin`·함수 프레임의 트레이스백, `try/except/finally/with`, 재시도 없음(`countWaits === 1`), 요청 번호를 올리지 않은 전송은 무시(TRP-035 검출), `checkInterrupt()`가 던지지 않으면 `EOFError` + `console.warn` 1회, 20회 반복 뒤 SIGINT 잔류 0.
   - **취소와 눌림의 경합**(같은 파일)은 눌림 스레드(`src/test/roles/interrupt-presser.ts`)를 띄운다. 읽기가 열린 순간을 기준으로 삼기 위해 `installStdin`에 `onRead` 훅을 두고 그 안에서 시작 표시(`ctl`)를 세운다. 0ms 연타는 취소와 같은 읽기 안에 떨어져 콜백의 `checkInterrupt()`가 함께 소비하고(실측 20라운드 잔류 0), 취소가 끝난 뒤 도착한 눌림은 돌고 있는 Python이 없어 슬롯에 남아 루프의 `discardPendingInterrupt`가 지운다(그 시험이 `SIGNAL === 2`를 단언한다). `except KeyboardInterrupt` 뒤 계산 중 눌림은 시간과 stderr 둘 다 본다(대조 215ms → 눌림 34ms).
@@ -253,3 +262,15 @@ RD-010의 `session-reset-check.mjs`(`_works/_completed/20260922-11-rd-010-sessio
 `reset`·`exit`·`crash` 3절을 재실행한다. 양성 대조는 소스를 변조(`git status --short`가 비어 있는 상태에서
 시작해 원복 뒤 다시 비어 있는지 확인)한 뒤 dev 서버가 HMR로 반영하길 기다렸다 재실행하는 방식으로
 했다(`verify/positive-controls.md`).
+
+RD-011의 `multiline-check.mjs`(`_works/_completed/20260923-12-rd-011-multiline-submit/verify/`)는 절 8개
+(`paste`·`tab`·`parse`·`stop`·`block`·`shift`·`recall`·`input`, dev 18개 확인)를 순서대로 돌리고,
+preview(4173)에 대해 `paste`·`tab`·`parse` 3절을 재실행한다. 이 RD가 `lib.mjs`에 더한 `paste(text)`는 먼저
+실제 클립보드 경로(`context().grantPermissions(["clipboard-read","clipboard-write"])` +
+`navigator.clipboard.writeText` + `Control+V`)를 시도한다 — headless Chromium에서는 `writeText`는 성공해도
+`Control+V`가 화면을 바꾸지 않고(실측), 대체로 시도한 `page.keyboard.insertText()`도 CDP가 삽입 이벤트에서
+`\n`을 지워 여러 줄이 한 줄로 뭉개진다. 그래서 `paste()`는 화면이 안 바뀌면 `textarea`에 합성
+`ClipboardEvent("paste")`를 직접 dispatch하는 경로로 대체한다 — xterm이 실제로 듣는 이벤트(`clipboardData.
+getData("text/plain")` → `coreService.triggerDataEvent`)라 `readPaste` 이후 코드 경로는 실제 붙여넣기와
+같다. 변이 4건은 `verify/positive-controls.md`에 기록(소스 변조 → dev HMR 반영 대기 → `ONLY=` 재실행 →
+`git checkout --` 원복, RD-010과 같은 방식).

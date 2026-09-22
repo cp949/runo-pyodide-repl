@@ -9,7 +9,7 @@
 - 벤더링 뒤 수정 방침: 아래 6.2 표의 우회 중 **TRP-006(`readPaste` 탭 보존)·TRP-016/TRP-004(재그리기 전제)·TRP-030(`moveCursorBack` 단위)은 소스에서 직접 고치고**, `read()`의 write 콜백 타이밍(TRP-008)은 공개 훅(`onInputReady` 콜백 또는 `read()`가 입력 상태 생성 뒤 resolve되는 `ready` Promise)으로 계약을 명시한다. `InputType`은 export해 상수 복제를 없앤다. `History`에 `replaceFrom(snapshot)`/`truncate(n)` 같은 삭제 API를 추가해 블록 히스토리의 "진행형 교체" 스냅샷 우회를 단순화할 수 있다(선택, RD 항목에서 결정).
 - `History`의 `localStorage` 자동 저장/복원은 옵션으로 끈다(벤더링했으므로 no-op 덮어쓰기 대신 생성자 옵션 `persist: false`).
 - `Readline.dispose()`는 리스너를 해제하고 `term`을 비우며 대기 중인 읽기(write 콜백 대기 중이라 `activeRead`가 없는 것 포함)를 `Error("readline disposed")`로 reject한다. 두 번째 호출은 무동작이다(RD-003). `term.dispose()`가 로드된 addon을 다시 dispose하므로 멱등이 필수다. dispose 뒤 `read()`는 reject하고 `println`·`print`는 터미널에 쓰지 않는다. 실제 xterm 6은 `term.dispose()` 뒤에도 write 콜백을 돌리고 그 안의 `term.buffer` 읽기는 `DisposableStore` 경고를 낸다.
-- `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다. 코어가 필요로 하는 진입점은 벤더에 **공개 훅**으로 추가한다: 입력 준비 알림(프리필, 6.3 — RD-013), 키 가로채기(Tab, `07-tab-completion.md` 7.1 — RD-015). 붙여넣기 탭 보존(TRP-006)은 훅이 아니라 `readPaste` 소스 수정이다(RD-011).
+- `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다. 코어가 필요로 하는 진입점은 벤더에 **공개 훅**으로 추가한다: 입력 준비 알림(프리필, 6.3 — RD-013), 키 가로채기(Tab, `07-tab-completion.md` 7.1 — RD-015). 붙여넣기 탭 보존(TRP-006)은 훅이 아니라 `readPaste` 소스 수정으로 했다(RD-011 완료: `readPaste`의 매핑 단계에서 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격, 직접 Tab 키 입력은 여전히 무시).
 - RD-008이 소스에 더한 공개 API: `read(prompt: string): Promise<string>` / `read(prompt: string, options: ReadOptions): Promise<string | null>` 오버로드와 `ReadOptions = { cancelable?: boolean }`(기본 `false` = 원본 `^C` + 같은 프롬프트 재그리기). `cancelable`이면 활성 읽기 중 Ctrl+C가 읽기를 `null`로 끝낸다(6.3). 오버로드라 기존 `read(prompt)` 호출부의 반환형은 `Promise<string>`으로 남는다. `ReadOptions`도 export한다.
 - RD-010이 더한 `cancelRead(): void`: 열린 읽기(활성 읽기 + `read()`의 write 콜백을 기다리는 읽기)를 `ReadCancelledError`(export)로 끝내는 **프로그램에 의한** 취소. `dispose()`와 달리 리스너·`term`·history·state는 건드리지 않고 화면에도 아무것도 쓰지 않는다(커서 이동·개행·재그리기 없음 — 개행 여부는 코어가 결정, `08-session.md`). 콜백이 아직 오지 않은 읽기는 `dispose()`처럼 콜백 안에서 취소 여부를 확인해 늦게 온 콜백이 `activeRead`를 되살리지 않는다. 열린 읽기가 없으면 무동작. 코어의 `reset()`이 옛 세션의 열린 읽기를 끝내는 데 쓴다(`08-session.md`).
 - 업스트림 추적: 원격을 연결하지 않는다(runo-coincident와 같은 방식). 업스트림 변경을 가져올 때는 `CHANGELOG.md`의 버전 기준으로 수동 diff한다.
@@ -22,7 +22,7 @@
 | TRP-016 | 여러 행으로 감기는 프롬프트의 첫 재그리기가 앞 행을 남김 | `read()` 앞에 `rewindTail`이 `\x1b[nA`로 첫 행까지 올린다(flush 후 `isWrapped` 카운트) |
 | TRP-017 | 뷰포트를 채운 레이아웃에서 행이 늘 때 스크롤백 맨 윗행이 사라짐 | **미해결**. 보이는 화면은 정상이라 관찰로만 남겼다(꼬리 상한을 두려던 계획은 근거가 없어 폐기) |
 | TRP-030 | `moveCursorBack(0)`은 줄 맨 앞으로 가고 `n`은 코드포인트 수 | 목록 재그리기 뒤 커서 복원에서 **0이면 호출을 생략**하고 개수는 `[...text]` 코드포인트로 센다 |
-| TRP-006 | `readPaste`가 붙여넣은 `\t`를 버림 | `preservePastedTabs(readline)`가 `readPaste`를 감싼다(붙여넣기 경로에서만) |
+| TRP-006 | `readPaste`가 붙여넣은 `\t`를 버림 | 새 구현: `readPaste`(벤더 소스)가 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격해 버퍼에 보존한다(RD-011). 이전 구현은 `preservePastedTabs(readline)`가 `readPaste`를 런타임 패치했다 |
 | TRP-001 | StrictMode 이중 마운트에서 dispose된 인스턴스의 지연 콜백 | 이전 구현: 상시 `while read()` 루프를 없애(필요할 때만 `read()` 호출) 재현이 사라졌다. 새 구현: `Readline.dispose()`가 `term`을 비워 소스에서 막는다(6.1). 마운트 직후 읽기를 시작해도 안전하다 |
 
 ## 6.3 자동 들여쓰기 규칙(`createAutoIndentReader(readline, term)`)
@@ -69,10 +69,17 @@
 - 재호출한 블록은 Enter 1회로 실행된다(여러 줄 제출 경로). history는 중복을 제거한다(3.14는 안 한다).
 
 ## 6.5 붙여넣기
-- 개행은 `\n`으로 편집 버퍼에 삽입되고 자동 제출하지 않는다. Enter 1회로 실행한다.
-- `\t`는 `preservePastedTabs`가 보존한다. 탭은 8칸 폭으로 표시된다.
+- 개행은 `\n`으로 편집 버퍼에 삽입되고 자동 제출하지 않는다. Enter 1회로 실행한다(러너의 여러 줄 분할 규칙은
+  `02-console-core.md` 5.2).
+- `\t`는 벤더 `readPaste`가 보존한다(6.1·6.2, RD-011). 직접 Tab 키 입력은 여전히 무시한다(RD-015 몫). 탭은
+  8칸 폭으로 표시된다.
 - 붙여넣은 블록의 둘째 줄부터 `... ` 접두사가 없다(`State`가 첫 줄에만 prompt를 렌더링한다 — 라이브러리 제약).
 - 프리필된 `... ` 줄에 들여쓴 여러 줄을 붙여넣으면 이중 들여쓰기가 된다(3.14도 같다).
+- 붙여넣은 탭 뒤 커서 위치(RD-011 DELTA-04 관찰): 붙여넣기 직후 커서는 붙여넣은 텍스트의 마지막 줄 끝에
+  있다(정상 — 붙여넣기는 삽입 지점에 커서를 남긴다). 화면 표시는 xterm 탭 스톱(8칸)으로 렌더링되지만 버퍼
+  원문은 `\t`를 그대로 유지한다. 커서를 탭이 있는 줄 중간으로 옮긴 뒤(예: 화살표 키) Backspace로 그 탭을
+  지울 때 벤더 레이아웃(`state.ts`)이 탭의 실제 폭(가변, 탭 스톱에 따라 달라짐)을 아는지는 확인하지 않았다
+  (관찰만, 고치지 않음 — 확정 10).
 
 ## 6.6 선택 복사
 - 단축키는 **Ctrl+Shift+C**. Ctrl+C는 취소/중단으로 이미 점유돼 있다(`@xterm/xterm` v6의
