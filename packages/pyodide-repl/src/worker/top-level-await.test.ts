@@ -6,7 +6,8 @@
  */
 import type { PyProxy } from "pyodide/ffi";
 import { loadPyodide, type PyodideInterface } from "pyodide";
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, onTestFinished, test } from "vitest";
+import { createConsole } from "./console";
 import {
   DEFAULT_CONSOLE_FLAGS,
   setTopLevelAwait,
@@ -82,4 +83,58 @@ describe("setTopLevelAwait", () => {
     setTopLevelAwait(pyconsole, true);
     expect(syntaxCheckOfAwait(pyconsole)).toBe("complete");
   });
+});
+
+/**
+ * 처리되지 않은 Promise 거부 수를 센다(RD-009 기준선, `09-testing.md` 9.5 5번, `webloop-reraise.test.ts` 사본).
+ */
+function trackRejections(): { count(): number } {
+  let count = 0;
+  const onRejection = () => {
+    count += 1;
+  };
+  process.on("unhandledRejection", onRejection);
+  onTestFinished(() => {
+    process.off("unhandledRejection", onRejection);
+  });
+  return { count: () => count };
+}
+
+/** 재보고는 실행이 끝난 뒤 이벤트 루프가 한 틱 돌 때 도착한다. */
+async function settle(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+}
+
+describe("asyncio.run(main())(RD-012)", () => {
+  test.each([
+    { topLevelAwait: false, bareAwait: "syntax-error" as const },
+    { topLevelAwait: true, bareAwait: "complete" as const },
+  ])(
+    "topLevelAwait=$topLevelAwait 에서도 asyncio.run(main())이 완료되고 값을 돌려준다",
+    async ({ topLevelAwait, bareAwait }) => {
+      const rejections = trackRejections();
+      // 정의는 console 층을 거치지 않는다(`sigint-handler-idle.test.ts`와 같은 방식). runLine이 보는 것은
+      // `asyncio.run(main())` 한 줄뿐이다.
+      pyodide.runPython(
+        "async def main():\n    await asyncio.sleep(0)\n    return 42\n",
+        { globals: pyodide.globals, filename: "<console>" },
+      );
+      const repl = createConsole(
+        pyodide,
+        { write: () => {}, writeErrorRaw: () => {} },
+        { topLevelAwait },
+      );
+
+      const call = await repl.runLine("asyncio.run(main())");
+      expect(call).toEqual({ kind: "complete", echo: "42", exited: false });
+
+      const bare = await repl.runLine("await asyncio.sleep(0)", {
+        echo: false,
+      });
+      expect(bare.kind).toBe(bareAwait);
+
+      await settle();
+      expect(rejections.count()).toBe(0);
+    },
+  );
 });
