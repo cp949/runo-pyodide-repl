@@ -688,7 +688,7 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 - worker init 수신은 모듈 본문 동기 등록 + `!Array.isArray(data) && data.kind === "init"`만 받고 제거(첫 메시지 무조건 소비 금지). 단위 시험: 배열 메시지가 먼저 와도 init을 받는다, 늦은 등록 변이는 실패한다.
 - 시험 제목 목록이 이동 전후 같다(diff 0). 모듈 시험은 모듈과 함께 이동.
 - coincident 비의존: core·repl 의존 트리에 `coincident`·`reflected-ffi` 없음(단위 시험), 두 패키지 `dist/`에 `coincident` 문자열 없음, tarball 스모크(xterm-readline·core·repl pack → 임시 폴더 `file:` + `pnpm.overrides` 설치 → import·타입 해석 → `node_modules`에 coincident 없음).
-- L1(마지막 DELTA 1회씩): `e2e:repl`(normal)·`e2e:ctrl-c`·`e2e:stdin-input`·`e2e:prompt-cancel`. L2 전체 `e2e:baseline` 병합 직전 1회(2026-09-24 사용자 사전 승인) — 결과가 RD-018·019 기준선과 같다. 시간 측정 관련 deferred 셀은 판정에서 제외한다.
+- L1(마지막 DELTA 1회씩): `e2e:repl-check`(normal)·`e2e:ctrl-c`·`e2e:stdin-input`·`e2e:prompt-cancel`. L2 전체 `e2e:baseline` 병합 직전 1회(2026-09-24 사용자 사전 승인) — 결과가 RD-018·019 기준선과 같다. 시간 측정 관련 deferred 셀은 판정에서 제외한다.
 - 문서: `00-architecture.md` 4절 재작성, `CONTEXT-MAP.md`에 core 컨텍스트, 02~08은 경로만 갱신.
 
 ### RD-021 — pyodide 버전 원천 통합과 호환 탐지
