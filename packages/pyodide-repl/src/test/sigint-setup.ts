@@ -134,6 +134,20 @@ function runInScratch(
   }
 }
 
+/** `installSigintHandler` 전에 부른다. 첫 설치 전의 `run_sync`를 한 번만 붙잡아 둔다(이미 있으면 유지). */
+export function saveRunSync(
+  pyodide: Pick<PyodideInterface, "runPython" | "toPy">,
+): void {
+  runInScratch(pyodide, SAVE_RUN_SYNC);
+}
+
+/** `afterEach`에서 부른다. `saveRunSync`가 붙잡은 값으로 래퍼 층을 걷어낸다. 저장한 적이 없으면 아무것도 하지 않는다. */
+export function restoreRunSync(
+  pyodide: Pick<PyodideInterface, "runPython" | "toPy">,
+): void {
+  runInScratch(pyodide, RESTORE_RUN_SYNC);
+}
+
 /**
  * 콘솔 + interrupt buffer + SIGINT 핸들러 + 제출 러너를 조립한다. Python 전역 `press`·`resend`·`started`를 심어
  * 시나리오가 같은 스레드에서 눌림을 만들거나 눌림 스레드에 시작을 알릴 수 있게 한다.
@@ -165,7 +179,7 @@ export function setupConsoleRunner(
   suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
   const buffer = createInterruptBuffer();
   prepare?.(buffer);
-  runInScratch(pyodide, SAVE_RUN_SYNC);
+  saveRunSync(pyodide);
   // 조각 래퍼의 코드 객체를 핸들러의 절단 목록에 넘겨야 하므로 조각 교체가 핸들러보다 먼저다(`connectInterrupts`와 같다).
   const codes = sleepSlice ? installSleepSlice(pyodide, { warn }) : undefined;
   const interruptIdle = installSigintHandler(
@@ -265,7 +279,7 @@ export function teardownConsoleRunner(
 ): void {
   for (const timer of pendingWakes.splice(0)) clearTimeout(timer);
   for (const idle of liveInterruptIdles.splice(0)) idle.destroy();
-  runInScratch(pyodide, RESTORE_RUN_SYNC);
+  restoreRunSync(pyodide);
   pyodide.setInterruptBuffer(
     undefined as unknown as Parameters<
       PyodideInterface["setInterruptBuffer"]

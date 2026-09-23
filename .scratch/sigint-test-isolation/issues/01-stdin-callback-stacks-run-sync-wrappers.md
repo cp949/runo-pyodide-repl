@@ -1,6 +1,6 @@
 # 01 `stdin-callback.test.ts`가 `run_sync` 래퍼를 원복 없이 겹쌓는다
 
-Status: open
+Status: done
 
 ## 현상
 
@@ -27,3 +27,17 @@ Status: open
 
 RD-009 범위 밖(시험 조립 정리)이라 ROADMAP 항목으로 등록하지 않았다. 다음에 이 시험 파일을 만질 때 1 또는 2를
 고른다.
+
+## 해결
+
+2026-09-23, 선택지 1. `sigint-setup.ts`의 SAVE/RESTORE를 `saveRunSync(pyodide)` / `restoreRunSync(pyodide)`로
+export하고(`setupConsoleRunner`·`teardownConsoleRunner`도 이것을 쓴다), `stdin-callback.test.ts`의
+`setupConsole()`이 `installSigintHandler` 앞에서 `saveRunSync`, 첫 `afterEach`가 `restoreRunSync`를 부른다.
+선택지 2는 시험마다 새 콘솔·버퍼·`screen`이 필요해 맞지 않고, 3은 `run_sync` 시나리오 추가 때 조용히 깨진다.
+
+- 검증: 임시 시험(삭제함)으로 원복 없이 3회 설치하면 `pyodide.ffi.run_sync`·`pyodide.webloop.run_sync`가 원본과 다르고
+  (대조), 설치·`restoreRunSync` 3회 반복은 매번 원본과 같음을 확인. `pnpm check-types`·`pnpm lint` 통과,
+  `pnpm test` 41 파일 939건 통과.
+- 관찰: `stdin-callback.test.ts`와 `sigint-handler.test.ts`를 병렬로 돌리면 변경 전에도 10회 중 1회
+  `sigint-handler.test.ts:368`(`"20\n"` 기대, `"19\n"` 수신)이 실패한다(변경 후 5회 중 1회). 이 변경과 무관한
+  기존 현상이며 이슈 02의 범위다.

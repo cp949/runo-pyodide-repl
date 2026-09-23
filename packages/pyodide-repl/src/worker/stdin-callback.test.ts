@@ -28,6 +28,7 @@ import type {
   PresserCommand,
   PresserEvent,
 } from "../test/roles/interrupt-presser";
+import { restoreRunSync, saveRunSync } from "../test/sigint-setup";
 import { spawnRole } from "../test/thread";
 import { createConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
@@ -47,6 +48,8 @@ beforeAll(async () => {
 let connected: Int32Array | undefined;
 
 afterEach(() => {
+  // 설치가 바꾼 `run_sync` 래퍼를 걷어내 시험마다 층이 쌓이지 않게 한다(저장한 적 없으면 무동작).
+  restoreRunSync(pyodide);
   // 남은 SIGINT가 다음 시험의 Python 실행을 끊지 않도록 버퍼를 먼저 떼고 비운 뒤 핸들러를 기본으로 되돌린다.
   pyodide.setInterruptBuffer(
     undefined as unknown as Parameters<
@@ -286,6 +289,7 @@ function setupConsole() {
   // 설치한다(03-ctrl-c.md 2.8).
   suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
   const buffer = createInterruptBuffer();
+  saveRunSync(pyodide);
   installSigintHandler(pyodide, repl.pyconsole, {
     ack: () => acknowledgeInterrupt(buffer),
     seq: () => readRequestSeq(buffer),
