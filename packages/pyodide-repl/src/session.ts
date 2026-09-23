@@ -22,6 +22,8 @@ import { createReplReader } from "./terminal/repl-reader";
 import type { RewindTerminal } from "./terminal/rewind-tail";
 import { createTerminalSinks } from "./terminal/sinks";
 import { createInputReader } from "./terminal/stdin-reader";
+import { createTabReader } from "./terminal/tab-reader";
+import type { SourceCompletion } from "./worker/complete-source";
 
 export interface StartSessionOptions {
   /** 핸들 소유. 세션을 넘어 산다(history 유지). */
@@ -105,10 +107,20 @@ export function startSession(options: StartSessionOptions): ReplSession {
   // 세션 소유: 기준점·pendingBlock은 세션과 함께 버려진다. 리셋 시 대기 중 블록은 `terminate()`가
   // 버린다(08-session.md 8.1).
   const blockHistory = createBlockHistory(readline);
+  // 세션 소유: 세대·큐·왕복 상태(`requesting`)는 이 세션 동안 유지된다(RD-015 DELTA-04). `complete`는
+  // `rpc.call`을 클로저로 참조한다 — `rpc`는 아래(초기화 프레임 핸들러들과 함께)에서 만들어지지만,
+  // 이 클로저는 실제 Tab을 누를 때(세션이 이미 시작된 뒤)만 실행되므로 선언 순서는 문제가 되지
+  // 않는다(TS는 중첩 함수 안의 참조에 TDZ를 적용하지 않는다, "## 결정" 참고).
+  const tabReader = createTabReader(readline, {
+    complete: (source, pending) =>
+      rpc.call<SourceCompletion>("complete", source, pending),
+    interruptCompletion: () => interruptSender.send(),
+  });
   const replReader = createReplReader(readline, liveTerminal, sinks, (pending) =>
     mergeReadOptions(
       blockHistory.readOptions(pending),
       autoIndent.readOptions(pending),
+      tabReader.readOptions(pending),
     ),
   );
   // stdin 리더도 같은 뷰를 받는다: `rewindTail`의 flush 콜백이 해제된 터미널의 buffer를 읽지 않게(TRP-004).
@@ -198,6 +210,8 @@ export function startSession(options: StartSessionOptions): ReplSession {
           reading = false;
           // 응답이 포트에 올라가기 전에 내린다: worker는 응답을 받는 대로 실행을 재개한다.
           readLinePending = false;
+          // 이번 세대의 읽기가 끝났다(Enter·취소 둘 다). 왕복 중 취소됐으면 여기서 인터럽트가 나간다.
+          tabReader.readEnded(line);
           // 취소 응답 뒤에는 다음 요청이 도착할 때까지 게이트를 닫는다(TRP-009).
           if (line === null) {
             cancelSettling = true;
@@ -288,6 +302,13 @@ export function startSession(options: StartSessionOptions): ReplSession {
       // REPL 읽기가 열려 있으면 입력을 기다리던 블록이다 — 버린다. 실행 중·`exit()`로 끝난 블록은
       // `reading`이 거짓이라 남는다(확정 5). `reading`은 REPL 읽기 전용(`readInput`은 별도).
       if (reading) blockHistory.discard();
+      // tabReader를 동기로 끝낸다(ended=true, queuedTabs=[]) — 뒤이은 rpc.dispose()가 대기 중인
+      // complete 요청을 reject하면 `.catch().finally(drainQueue)`가 마이크로태스크에서 큐를 다시
+      // 처리하려 든다. 여기서 먼저 끝내 두지 않으면 그 처리가 취소된 세션의 buffer/cursor를 읽어
+      // (cancelRead()는 state를 건드리지 않는다) 엉뚱한 삽입을 터미널에 쓴다(DELTA-04a
+      // Important-2). requesting이 참이면 interruptCompletion()(=interruptSender.send())도
+      // 함께 불리는데 뒤이어 worker.terminate()가 오므로 무해하다.
+      tabReader.readEnded(null);
       readline.cancelRead();
       endSession();
       worker.removeEventListener("error", onWorkerError);

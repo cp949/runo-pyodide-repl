@@ -279,48 +279,58 @@ export class Readline implements ITerminalAddon {
   /**
    * 활성 입력줄 위에 `text`를 출력하고 입력줄을 같은 읽기로 다시 그린다. 활성 읽기가 없으면
    * `println`과 같다. 출력이 끝나기 전에 들어온 입력은 큐에 두었다가 순서대로 재생한다(TRP-008).
+   * 돌려주는 프로미스는 재그리기(활성 읽기가 없으면 `println`)가 실제로 끝난 뒤 resolve한다 —
+   * 호출자(코어 `tab-reader.ts`)가 재그리기 도중에 큐의 다음 키를 벤더 큐를 우회해 처리하지
+   * 않도록 순서를 맞추는 용도다(DELTA-04a). 조기 반환 두 경로(`term`·`activeRead` 없음)도
+   * 매달리지 않게 각각 resolve한다.
    *
    * @param text - 입력줄 위에 찍을 텍스트. 여러 줄이면 `\n`으로 잇는다(`write`가 `\r\n`으로 정규화).
    */
-  public printAbove(text: string): void {
+  public printAbove(text: string): Promise<void> {
     if (this.activeRead === undefined || this.term === undefined) {
       this.println(text);
-      return;
+      return Promise.resolve();
     }
     // moveCursorToEnd()는 물리적 커서를 버퍼 끝(여러 줄로 감긴 경우 마지막 행)으로 옮겨야 그
     // 아래에 원시 텍스트를 안전하게 쓸 수 있지만, 논리 커서(line.pos)도 함께 옮긴다. 재그리기
     // 뒤에는 원래 위치로 돌려놓아야 하므로 먼저 저장해 둔다.
     const cursor = this.state.cursor();
+    const term = this.term;
     this.state.moveCursorToEnd();
     this.write("\r\n" + text + "\r\n");
     this.redrawing = true;
-    this.term.write("", () => {
-      // 콜백이 오기 전에 dispose됐으면 해제된 터미널의 buffer를 건드리지 않는다(TRP-004).
-      // dispose()가 이미 redrawing·queued를 비웠지만 명시적으로 한 번 더 맞춰 둔다.
-      if (this.term === undefined) {
+    return new Promise<void>((resolve) => {
+      term.write("", () => {
+        // 콜백이 오기 전에 dispose됐으면 해제된 터미널의 buffer를 건드리지 않는다(TRP-004).
+        // dispose()가 이미 redrawing·queued를 비웠지만 명시적으로 한 번 더 맞춰 둔다.
+        if (this.term === undefined) {
+          this.redrawing = false;
+          resolve();
+          return;
+        }
+        // 콜백이 오기 전에 cancelRead()로 읽기가 끝났으면 이미 취소된 입력줄을 다시 그리지
+        // 않는다. redrawing·queued도 비워야 다음 read()가 깨끗하게 시작한다.
+        if (this.activeRead === undefined) {
+          this.redrawing = false;
+          this.queued = [];
+          resolve();
+          return;
+        }
+        this.state.getTty().anchorRow = this.term.buffer.active.cursorY;
+        this.state.restoreCursor(cursor);
+        // moveCursorToEnd()가 남긴 옛 레이아웃(감긴 경우 마지막 행 기준)을 새 앵커 기준
+        // 레이아웃으로 되돌린다. 이게 없으면 refresh()가 옛 커서 행 기준으로 위로 올라가
+        // 방금 쓴 원시 텍스트나 입력줄 일부를 \x1b[J로 지운다(다중 행 블록 입력 회귀).
+        this.state.resetLayout();
+        this.state.refresh();
         this.redrawing = false;
-        return;
-      }
-      // 콜백이 오기 전에 cancelRead()로 읽기가 끝났으면 이미 취소된 입력줄을 다시 그리지
-      // 않는다. redrawing·queued도 비워야 다음 read()가 깨끗하게 시작한다.
-      if (this.activeRead === undefined) {
-        this.redrawing = false;
+        const queued = this.queued;
         this.queued = [];
-        return;
-      }
-      this.state.getTty().anchorRow = this.term.buffer.active.cursorY;
-      this.state.restoreCursor(cursor);
-      // moveCursorToEnd()가 남긴 옛 레이아웃(감긴 경우 마지막 행 기준)을 새 앵커 기준
-      // 레이아웃으로 되돌린다. 이게 없으면 refresh()가 옛 커서 행 기준으로 위로 올라가
-      // 방금 쓴 원시 텍스트나 입력줄 일부를 \x1b[J로 지운다(다중 행 블록 입력 회귀).
-      this.state.resetLayout();
-      this.state.refresh();
-      this.redrawing = false;
-      const queued = this.queued;
-      this.queued = [];
-      for (const data of queued) {
-        this.readData(data);
-      }
+        for (const data of queued) {
+          this.readData(data);
+        }
+        resolve();
+      });
     });
   }
 

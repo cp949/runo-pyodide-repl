@@ -225,6 +225,47 @@ describe("printAbove", () => {
     expect(term.vt.screen()).toBe("> abcdef\ngh\nLIST\n> abcdef\ngh");
   });
 
+  // DELTA-04a: 코어 `tab-reader.ts`가 재그리기 중 큐의 키를 벤더 큐를 우회해 처리하지 않도록,
+  // `printAbove`가 돌려주는 프로미스가 재그리기가 실제로 끝난 뒤에만 resolve해야 한다.
+  test("활성 읽기가 없으면 돌려준 프로미스가 즉시(println과 함께) resolve된다", async () => {
+    const { term, readline } = setup();
+    let resolved = false;
+
+    void readline.printAbove("x").then(() => {
+      resolved = true;
+    });
+
+    // println은 동기이므로 write 콜백을 기다릴 필요가 없다 — 마이크로태스크 한 번이면 충분하다.
+    await Promise.resolve();
+    expect(resolved).toBe(true);
+    expect(term.vt.screen()).toBe("x");
+  });
+
+  test("활성 읽기가 있으면 돌려준 프로미스가 재그리기 write 콜백이 끝난 뒤에 resolve된다", async () => {
+    const { term, readline } = setup();
+    void readline.read("> ");
+    term.type("abc");
+    term.asyncWrite = true;
+    let resolved = false;
+
+    void readline.printAbove("x").then(() => {
+      resolved = true;
+    });
+
+    // 콜백이 flush될 때까지는(재그리기가 끝나기 전) resolve되지 않는다.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    term.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(resolved).toBe(true);
+    // 재그리기도 정상적으로 끝나 있다(버퍼·커서 유지).
+    expect(readline.getLine()).toBe("abc");
+  });
+
   test("cancelRead()가 재그리기 콜백보다 먼저 오면 입력줄을 다시 그리지 않는다", () => {
     const { term, readline } = setup(40, 10);
     void readline.read(">>> ").catch(() => {});

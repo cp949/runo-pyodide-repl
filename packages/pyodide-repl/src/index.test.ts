@@ -27,12 +27,13 @@ import {
 } from "./index";
 import { parseInitFrame, type InitFrame } from "./protocol/init-frame";
 import { ACK, SEQ, SIGNAL } from "./protocol/interrupt-protocol";
-import { createRpc, type Rpc } from "./protocol/rpc";
+import { createRpc, type Rpc, type RpcHandlers } from "./protocol/rpc";
 import {
   createFakeTerminal,
   type FakeTerminal,
   type FakeTerminalOptions,
 } from "./test/fake-terminal";
+import type { SourceCompletion } from "./worker/complete-source";
 
 type Outcome =
   | { state: "pending" }
@@ -129,10 +130,14 @@ function createFakeWorker() {
 /** RD-003 시험이 쓰는 worker 팩토리. 세션이 시작되지만 아무 알림도 오지 않는다. */
 const createWorker = () => createFakeWorker().worker;
 
-/** 세션을 시작하고 worker 역할 rpc를 프레임의 포트에 만든다. */
+/**
+ * 세션을 시작하고 worker 역할 rpc를 프레임의 포트에 만든다. `workerHandlers`는 worker가 요청을
+ * 받는 쪽(`complete` 등)을 시험이 흉내 낼 때 쓴다(RD-015 DELTA-04, 기본은 핸들러 없음).
+ */
 function startSession(
   overrides: Partial<ReplOptions> = {},
   terminalOptions: FakeTerminalOptions = {},
+  workerHandlers: RpcHandlers = {},
 ) {
   const fake = createFakeTerminal(terminalOptions);
   const fakeWorker = createFakeWorker();
@@ -145,7 +150,7 @@ function startSession(
     ...overrides,
   });
   handles.push(handle);
-  const workerRpc = createRpc(fakeWorker.frame().rpcPort);
+  const workerRpc = createRpc(fakeWorker.frame().rpcPort, workerHandlers);
   workerRpcs.push(workerRpc);
   const bytes = () => fake.written.join("");
   return {
@@ -167,6 +172,7 @@ function startSession(
 function startResettableSession(
   overrides: Partial<ReplOptions> = {},
   terminalOptions: FakeTerminalOptions = {},
+  workerHandlers: RpcHandlers = {},
 ) {
   const fake = createFakeTerminal(terminalOptions);
   const workers: ReturnType<typeof createFakeWorker>[] = [];
@@ -188,7 +194,7 @@ function startResettableSession(
   const workerRpcAt = (index: number): Rpc => {
     const existing = rpcs[index];
     if (existing !== undefined) return existing;
-    const rpc = createRpc(must(workers[index]).frame().rpcPort);
+    const rpc = createRpc(must(workers[index]).frame().rpcPort, workerHandlers);
     workerRpcs.push(rpc);
     rpcs[index] = rpc;
     return rpc;
@@ -671,6 +677,97 @@ describe("블록 history(RD-014)", () => {
     session.fake.type("\x1b[A\r");
 
     await expect(l4).resolves.toBe("for i in range(2):\n    print(i)");
+  });
+});
+
+describe("Tab 완성 배선(RD-015 DELTA-04)", () => {
+  test("`input()` 읽기 중 Tab은 complete를 요청하지 않고 \\t도 넣지 않는다(그릴링 확정 6)", async () => {
+    const complete = vi.fn();
+    const session = startSession({}, {}, { complete });
+
+    await startInputRead(session);
+    session.fake.type("ab\tcd\r");
+    await waitDelivered(session);
+
+    expect(complete).not.toHaveBeenCalled();
+    expect(readMailbox(session).text).toBe("abcd");
+  });
+
+  test("프롬프트 취소(Ctrl+C) 중 완성 요청이 있으면 SIGINT를 1회 보낸다", async () => {
+    // 응답하지 않는 completion 요청(왕복 중 취소를 관찰하려면 requesting이 계속 참이어야 한다).
+    const complete = vi.fn(() => new Promise<SourceCompletion>(() => {}));
+    const session = startSession({}, {}, { complete });
+
+    const { line } = await startRead(session);
+    session.fake.type("os.pa");
+    session.fake.type("\t");
+    await waitFor(() => complete.mock.calls.length > 0);
+
+    const before = slots(session).seq;
+    session.fake.type("\x03");
+    await expect(line).resolves.toBeNull();
+
+    // cancelable Ctrl+C는 벤더가 직접 null로 끝낸다(setCtrlCHandler를 거치지 않는다) — 이 SIGINT는
+    // tabReader의 readEnded(null) → interruptCompletion() 경로에서만 나온다.
+    await waitFor(() => slots(session).seq === before + 1);
+    expect(slots(session).signal).toBe(2);
+    expect(echoes(session)).toBe(0);
+  });
+
+  test("세션 리셋 뒤 새 세션에서 Tab이 한 번만 적용된다(C11a 대응)", async () => {
+    const complete = vi.fn(
+      async (): Promise<SourceCompletion> => ({
+        completions: ["os.path"],
+        start: 0,
+      }),
+    );
+    const session = startResettableSession({}, {}, { complete });
+
+    const { line: l1 } = await startRead(session);
+    session.fake.type("y = 1\r");
+    await l1;
+
+    session.handle.reset();
+    await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "loading");
+
+    const { line: l2 } = await startRead(session);
+    session.fake.type("os.pa");
+    session.fake.type("\t");
+    await waitFor(() => complete.mock.calls.length > 0);
+    await tick();
+
+    expect(complete).toHaveBeenCalledTimes(1);
+    session.fake.type("\r");
+    await expect(l2).resolves.toBe("os.path");
+  });
+
+  test("리셋(terminate()) 중 큐에 남은 Tab이 터미널에 쓰지 않는다(DELTA-04a)", async () => {
+    // worker가 끝내 응답하지 않는 진행 중 요청을 흉내 낸다 — reset() 시점까지 requesting을 참으로 둔다.
+    const complete = vi.fn(() => new Promise<SourceCompletion>(() => {}));
+    const session = startResettableSession({}, {}, { complete });
+    // `Readline.prototype.editInsert`(공개 훅)만 잡는다 — 일반 타이핑은 내부 `state.editInsert`를
+    // 직접 부르므로(readline.ts:503·529 등) 여기 걸리지 않는다. tab-reader가 직접 부르는 경로만 본다.
+    const editInsertSpy = vi.spyOn(Readline.prototype, "editInsert");
+
+    await startRead(session);
+    session.fake.type("os.p");
+    session.fake.type("\t"); // 요청 #1 진행 중(응답 없음)
+    session.fake.type("\t"); // 큐(second=true)
+    await waitFor(() => complete.mock.calls.length > 0);
+    editInsertSpy.mockClear();
+    // 요청이 진행되는 동안 공백을 더 입력해 버퍼를 "os.p "로 만든다 — 리셋 뒤 큐가 처리될 때
+    // 스템이 비어 `indent` 분기(공백 삽입)로 가게 한다(리뷰 재현).
+    session.fake.type(" ");
+
+    session.handle.reset();
+    // rpc.dispose()의 reject → .catch().finally(drainQueue) → handleTab이 흐르는 마이크로태스크를
+    // 모두 지나가게 한다.
+    await tick();
+    await tick();
+
+    // 리셋된 옛 세션의 tabReader가 끝나지 않았다면(수정 전 버그) 여기서 공백을 삽입해
+    // RESET_NOTICE 뒤에 엉뚱한 내용이 쓰인다.
+    expect(editInsertSpy).not.toHaveBeenCalled();
   });
 });
 
