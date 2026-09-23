@@ -3,7 +3,10 @@ import type { Terminal } from "@xterm/xterm";
 import { createInterruptBuffer, SIGNAL } from "./protocol/interrupt-protocol";
 import { createInterruptSender } from "./protocol/interrupt-sender";
 import { startSession, type ReplSession } from "./session";
+import { createSelectionCopy, type CopyResult } from "./terminal/selection-copy";
 import { writeNotice } from "./terminal/notice";
+
+export type { CopyResult };
 
 /** 기본 pyodide CDN 위치. 끝 `/`를 포함한다(`00-architecture.md` 4.1). */
 export const DEFAULT_PYODIDE_INDEX_URL =
@@ -42,6 +45,10 @@ export interface ReplOptions {
   onCrash?: (message: string) => void;
   /** 기본 `false`. `=== true`일 때만 켠다. 바꾸려면 `reset({ topLevelAwait })`(RD-012, `02-console-core.md` 5.4). */
   topLevelAwait?: boolean;
+  /** 드래그 선택(`mouseup`) 시 자동 복사할지. 기본 `true`(`=== false`일 때만 끔). Ctrl+C 복사는 이 값과 무관하게 항상 동작한다(RD-017). */
+  copyOnSelect?: boolean;
+  /** 선택 복사(자동·Ctrl+C 모두) 결과를 알린다(RD-017). */
+  onCopy?: (result: CopyResult) => void;
 }
 
 export interface ReplHandle {
@@ -60,6 +67,8 @@ export interface ReplHandle {
   reset(options?: { topLevelAwait?: boolean }): void;
   /** `globalThis.crossOriginIsolated === true`. 거짓이면 worker가 없다. */
   readonly crossOriginIsolated: boolean;
+  /** 드래그 자동 복사 on/off를 바꾼다. 리셋 없음(`reset()`과 무관). `dispose()` 뒤 no-op(RD-017). */
+  setCopyOnSelect(on: boolean): void;
 }
 
 function normalizeIndexUrl(url: string): string {
@@ -67,8 +76,17 @@ function normalizeIndexUrl(url: string): string {
 }
 
 export function createRepl(options: ReplOptions): ReplHandle {
+  // 선택 복사 정책은 `Readline` 생성 앞에 만든다 — 훅이 vendor보다 먼저 걸려도 안전하게(`!isolated`와도 무관, 확정 8).
+  const selectionCopy = createSelectionCopy(options.terminal, {
+    copyOnSelect: options.copyOnSelect !== false,
+    onCopy: options.onCopy ?? (() => {}),
+  });
   // history는 세션(마운트) 동안 메모리에만 둔다. 새로고침 뒤에는 비어 있어야 한다. 세션을 넘어 산다(리셋은 RD-010).
-  const readline = new Readline({ persist: false, skipBlankHistory: true });
+  const readline = new Readline({
+    persist: false,
+    skipBlankHistory: true,
+    onKeyEvent: (event) => selectionCopy.onKeyEvent(event),
+  });
   options.terminal.loadAddon(readline);
   const onStatus = options.onStatus ?? (() => {});
   const isolated = globalThis.crossOriginIsolated === true;
@@ -143,6 +161,8 @@ export function createRepl(options: ReplOptions): ReplHandle {
       // 알림 핸들러가 dispose된 줄 편집기에 쓰지 않도록 RPC를 먼저 끊는다. `cancelRead()`가 추가로 앞서지만
       // 뒤이어 `readline.dispose()`가 돌아 관찰 가능한 차이는 없다.
       session?.terminate();
+      // mousedown/mouseup 리스너를 뗀다. readline보다 먼저 떼도 순서상 문제 없다(서로 독립).
+      selectionCopy.dispose();
       // 벤더 dispose가 멱등이라 term.dispose()가 addon을 다시 dispose해도 안전하다.
       readline.dispose();
     },
@@ -152,6 +172,10 @@ export function createRepl(options: ReplOptions): ReplHandle {
     },
     get crossOriginIsolated() {
       return isolated;
+    },
+    setCopyOnSelect(on) {
+      if (disposed) return;
+      selectionCopy.setCopyOnSelect(on);
     },
   };
 }
