@@ -1,6 +1,6 @@
 # cancelRead 뒤 printAbove 재그리기 콜백 전 창에서 친 키가 유실된다
 
-Status: open
+Status: done
 Origin: RD-019 벤더 `Readline` 버퍼 구현 중 코드 읽기로 발견(재현 시험 미작성, 브라우저 미관찰).
 
 ## 현상(코드 읽기 기준)
@@ -19,3 +19,9 @@ Origin: RD-019 벤더 `Readline` 버퍼 구현 중 코드 읽기로 발견(재�
 - 2026-09-24 등록 시점 분류: 재현 가능한 사용자 시나리오가 없어(시험 미작성) `deferred`.
 - 2026-09-24 `deferred` → `open` 재분류(사용자 결정, `docs/agents/issue-tracker.md` 재개 조건의 예외). 재개 조건 중 "재현 가능한 사용자 시나리오"는 **충족되지 않는다**: 유실은 Tab 후보 목록 재그리기 대기 중 리셋(마우스 클릭)이 일어나고 수 ms 안에 키가 도착해야 하는 경우뿐이다. 재개 사유는 불변식 정합이다 — `cancelRead()` 뒤에 친 키는 새 맥락의 키라 type-ahead가 보존해야 한다. 재현은 벤더 단위 시험(RED)으로만 확인한다. 시험이 RED가 아니면 구현을 멈추고 사용자가 재분류(`wontfix`·`deferred`)를 정한다.
 - 2026-09-24 그릴링 확정(Q1~Q5 전부 추천안). 처리 경로는 이 이슈 기준 rubber-workflow 소규모 실행(ROADMAP RD 없음). 수정은 `cancelRead()`가 `redrawing = false`, `queued = []`도 정리하는 방식이다(취소 이전 키는 폐기, 이후 키는 `typeAhead`). `printAbove` 콜백의 취소 분기·`dispose()`·코어는 바꾸지 않는다. 검증은 L0(벤더 단위 시험 4건, RED → GREEN)만이고 브라우저 L1은 하지 않는다(수 ms 창을 재현할 안정적 수단이 없음). 계획서는 `_works/20260924-24-cancelread-printabove-window/`(브랜치 `cancelread-printabove-window`), 구현은 다른 에이전트가 맡는다.
+- 2026-09-24 종결(done). `cancelRead()`가 `redrawing = false`, `queued = []`도 정리하도록 고쳤다(`packages/xterm-readline/src/readline.ts`). 재현 가능한 사용자 시나리오는 끝내 없었고, 불변식 정합(취소 뒤 친 키는 새 맥락의 키라 type-ahead가 보존)으로 재개해 처리했다. 근거는 벤더 시험 `print-above.test.ts` `describe("cancelRead() 뒤 재그리기 콜백 전 창")` 4건이다.
+  - (1) "취소 이전에 친 키는 폐기되어 다음 읽기에서 재생되지 않는다": 수정 전에도 통과한다(RED 없음). 취소 이전 키 폐기의 회귀 방지 시험이다.
+  - (2) "취소 뒤 콜백 전에 친 키는 type-ahead로 가서 다음 읽기에서 재생된다": 수정 전 RED. `AssertionError: expected '' to be 'y'`(새 `read()`의 `getLine()`). 수정 뒤 GREEN.
+  - (3) "취소 뒤 콜백 전에 친 키와 Shift+Enter는 순서대로 재생된다: y Shift+Enter z": 수정 전 RED. `AssertionError: expected '' to be 'y\nz'`. 수정 뒤 GREEN.
+  - (4) "콜백이 온 뒤 새 읽기에서는 키가 큐를 거치지 않고 바로 버퍼에 반영된다": 수정 전후 모두 통과한다(RED 없음). 새 읽기의 write 콜백이 `printAbove` 콜백 뒤에 FIFO로 오는 전제를 고정한다.
+  - `06-editing.md` 6.7 "알려진 경계"에서 이 항목을 지우고 "수명 주기"에 규칙을 옮겼다. L0만 실행했다(브라우저 L1 없음).
