@@ -6,13 +6,14 @@
 
 - 이전 구현은 npm `xterm-readline@1.2.2`를 그대로 설치하고 모든 수정을 **런타임 래핑**(타입상 private인 `readKey`/`state`/`activeRead`/`history`/`readPaste`를 감쌈)으로 넣었다. 우회 7건 중 4건(TRP-006·008·016·030)이 비공개 내부에 의존했다.
 - 새 구현은 소스를 **`packages/xterm-readline`(`@cp949/runo-xterm-readline`)으로 벤더링**한다([ADR-0003](../adr/0003-vendor-xterm-readline.md)). 원본은 `/work/thrd/xterm-readline`(strtok/xterm-readline 1.2.2, MIT, `src/*.ts` 2,832행 중 테스트 제외 약 1,470행). `LICENSE-MIT`와 저작권 고지를 패키지에 유지한다.
-- 벤더링 뒤 수정 방침: 아래 6.2 표의 우회 중 **TRP-006(`readPaste` 탭 보존)·TRP-016/TRP-004(재그리기 전제)·TRP-030(`moveCursorBack` 단위)은 소스에서 직접 고치고**, `read()`의 write 콜백 타이밍(TRP-008, 이전 구현 트랩 — 이 저장소 `docs/traps/TRP-008`과는 다른 문서)은 공개 옵션 `ReadOptions.prefill?: string`으로 계약을 명시한다(RD-013 완료: write 콜백 안, `new State` 직후 1회 채운다 — "onInputReady 콜백/ready Promise" 초안은 채택하지 않았다, 6.3). `InputType`은 export해 상수 복제를 없앤다. `History`에 `replaceFrom(snapshot)`/`truncate(n)` 같은 삭제 API를 추가해 블록 히스토리의 "진행형 교체" 스냅샷 우회를 단순화할 수 있다(선택, RD 항목에서 결정).
+- 벤더링 뒤 수정 방침: 아래 6.2 표의 우회 중 **TRP-006(`readPaste` 탭 보존)·TRP-016/TRP-004(재그리기 전제)·TRP-030(`moveCursorBack` 단위)은 소스에서 직접 고치고**, `read()`의 write 콜백 타이밍(TRP-008, 이전 구현 트랩 — 이 저장소 `docs/traps/TRP-008`과는 다른 문서)은 공개 옵션 `ReadOptions.prefill?: string`으로 계약을 명시한다(RD-013 완료: write 콜백 안, `new State` 직후 1회 채운다 — "onInputReady 콜백/ready Promise" 초안은 채택하지 않았다, 6.3). `InputType`은 export해 상수 복제를 없앤다. `History`에 삭제 API(`replaceFrom`/`truncate` 류)는 추가하지 않았다(RD-014 결정) — 블록 히스토리는 `restore(entries)`로 스냅샷을 되돌리는 것만으로 충분하고, 삭제 전용 API는 코어가 쓸 일이 없다.
 - `History`의 `localStorage` 자동 저장/복원은 옵션으로 끈다(벤더링했으므로 no-op 덮어쓰기 대신 생성자 옵션 `persist: false`).
 - `Readline.dispose()`는 리스너를 해제하고 `term`을 비우며 대기 중인 읽기(write 콜백 대기 중이라 `activeRead`가 없는 것 포함)를 `Error("readline disposed")`로 reject한다. 두 번째 호출은 무동작이다(RD-003). `term.dispose()`가 로드된 addon을 다시 dispose하므로 멱등이 필수다. dispose 뒤 `read()`는 reject하고 `println`·`print`는 터미널에 쓰지 않는다. 실제 xterm 6은 `term.dispose()` 뒤에도 write 콜백을 돌리고 그 안의 `term.buffer` 읽기는 `DisposableStore` 경고를 낸다.
 - `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다. 코어가 필요로 하는 진입점은 벤더에 **공개 훅**으로 추가한다: 입력 준비 알림(프리필, `ReadOptions.prefill` — RD-013 완료), 키 가로채기(`ReadOptions.onKey`, RD-013이 범용으로 추가했고 Tab은 RD-015가 그 훅을 그대로 쓴다, `07-tab-completion.md` 7.1). 붙여넣기 탭 보존(TRP-006)은 훅이 아니라 `readPaste` 소스 수정으로 했다(RD-011 완료: `readPaste`의 매핑 단계에서 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격, 직접 Tab 키 입력은 여전히 무시).
 - RD-008이 소스에 더한 공개 API: `read(prompt: string): Promise<string>` / `read(prompt: string, options: ReadOptions): Promise<string | null>` 오버로드와 `ReadOptions = { cancelable?: boolean }`(기본 `false` = 원본 `^C` + 같은 프롬프트 재그리기). `cancelable`이면 활성 읽기 중 Ctrl+C가 읽기를 `null`로 끝낸다(6.3). 오버로드라 기존 `read(prompt)` 호출부의 반환형은 `Promise<string>`으로 남는다. `ReadOptions`도 export한다.
 - RD-010이 더한 `cancelRead(): void`: 열린 읽기(활성 읽기 + `read()`의 write 콜백을 기다리는 읽기)를 `ReadCancelledError`(export)로 끝내는 **프로그램에 의한** 취소. `dispose()`와 달리 리스너·`term`·history·state는 건드리지 않고 화면에도 아무것도 쓰지 않는다(커서 이동·개행·재그리기 없음 — 개행 여부는 코어가 결정, `08-session.md`). 콜백이 아직 오지 않은 읽기는 `dispose()`처럼 콜백 안에서 취소 여부를 확인해 늦게 온 콜백이 `activeRead`를 되살리지 않는다. 열린 읽기가 없으면 무동작. 코어의 `reset()`이 옛 세션의 열린 읽기를 끝내는 데 쓴다(`08-session.md`).
 - RD-013이 소스에 더한 공개 API: `ReadOptions.prefill?: string`(`read()`의 write 콜백 안, `new State` 직후 1회 `state.update(prefill)`로 채운다 — 커서는 끝, 빈 문자열·미지정은 원본과 같이 `state.refresh()`만 부른다. `cancelable`이 아닌 읽기의 `^C` 재그리기는 다시 채우지 않는다). `ReadOptions.onKey?: (input: Input) => boolean`(활성 읽기의 키마다 벤더 처리 앞에서 부르고 `true`면 처리를 생략한다. `readPaste`가 `editInsert`로 바로 넣는 `Text` 토큰은 거치지 않는다. 활성 읽기가 없으면 부르지 않는다). `Readline.getCursor(): number`(UTF-16 커서 위치, `State.cursor()` 경유)·`editInsert(text)`·`editBackspace(n)`(`getLine`/`updateLine`과 같은 수준으로 활성 읽기가 없어도 현재 state에 작용한다). `ReadlineOptions.skipBlankHistory?: boolean`(기본 `false`, 켜면 Enter 분기에서 trim 결과가 빈 문자열인 제출을 `history.append` 대신 `history.resetCursor()`만 한다). `Input` 타입도 export한다(값 export 목록은 불변).
+- RD-014가 소스에 더한 공개 API: `Readline.getHistory(): History`(history 객체 그대로 돌려준다 — 코어의 블록 히스토리가 `entries` 스냅샷·`restore`에 쓴다). `History.restore(entries: string[]): void`(복사본 대입 → `resetCursor()` → `saveToLocalStorage()`, 넘긴 배열과 공유하지 않는다). `ReadOptions.historyEntry?: (line: string) => string`(Enter 분기에서 `skipBlankHistory`가 공백뿐인 제출을 거른 **뒤**, `history.append` 직전에 불려 돌려준 문자열이 기록된다. `resolve`는 원래 줄 그대로 돌려준다. 취소(`cancelable` Ctrl+C)에는 부르지 않는다).
 - 업스트림 추적: 원격을 연결하지 않는다(runo-coincident와 같은 방식). 업스트림 변경을 가져올 때는 `CHANGELOG.md`의 버전 기준으로 수동 diff한다.
 
 ## 6.2 이전 구현이 적용한 수정(무엇을 / 어떤 방법으로) — 새 구현은 6.1 방침대로 소스에서 처리
@@ -73,22 +74,50 @@
   (`read-guard.ts`)·`session.ts`의 RPC `readLine(prompt, pending, cancelable)` 핸들러는 `pending`을 그대로
   통과시킨다. stdin 리더(`stdin-reader.ts`)는 `autoIndent`를 받지 않는다.
 
-## 6.4 블록 히스토리 규칙(`groupBlockHistory(readline)`)
-- `history.append`를 감싼다. 기록 방식은 **"진행형 교체"**: 블록 첫 줄이 append되기 직전의 `entries`
-  스냅샷을 기준점으로 잡고, 이어지는 줄을 제출할 때마다 `entries`를 기준점으로 되돌린 뒤
-  `(pending + '\n' + 방금 줄).trimEnd()`를 원래 `append`로 넣는다(항상 최신 블록 항목 하나).
-  "블록이 끝난 뒤 1회 기록"은 `exit()`로 끝난 블록이 유실돼 채택하지 않았다.
-- 블록 텍스트는 worker가 준 `pending`에서 만든다(프로토콜 변경 없음). 종료용 공백 줄은 `trimEnd()`로
-  직전 항목과 같아져 따로 거르지 않는다. 블록 안 빈 줄은 보존한다. 문법 오류·예외로 끝난 블록도 전체가 남는다.
-- `beginRead(pending)`이 시작/이어짐/끝(`pending` 없음 = 기준점 해제)을 알리고, 취소와 `reset()`이
-  `discard()`로 기준점까지 되돌린다. 스냅샷 복원이므로 첫 줄 append가 밀어낸 항목도 복구된다.
-  `reset()`은 **입력을 기다리는 블록(`activeRead` 있음)만** 버린다.
-- `... ` 입력줄의 ↑는 `pendingBlock !== ''`이고 `state.editing === false`이면 삼킨다(진행형 항목이 작성 중인
-  블록 자신이라 자기 자신이 들어온다). ↓는 `history.cursor`가 -1이라 따로 막지 않는다.
+## 6.4 블록 히스토리 규칙(`createBlockHistory(readline)`, RD-014 완료)
+- 블록(`... `) 입력의 줄들을 history 항목 하나로 묶는 **세션 소유** 정책 객체(`terminal/block-history.ts`).
+  `startSession()`이 `createAutoIndent` 옆에서 만든다(`08-session.md` 8.1). 노출은
+  `readOptions(pending): Pick<ReplReadOptions, "historyEntry" | "onKey">`와 `discard(): void` 둘뿐이다 —
+  블록 시작을 알리는 별도 메서드는 없다. 매 REPL 읽기가 `readOptions(pending)` 호출 자체로 시작을 겸한다.
+- 기록 방식은 **"진행형 교체"**: 블록 첫 줄이 append되기 직전의 `entries` 스냅샷(`beforeFirstLine`)을
+  기준점(`blockBase`)으로 잡고, 이어지는 줄을 제출할 때마다 `history.restore(blockBase)`로 되돌린 뒤
+  `(pendingBlock + '\n' + 방금 줄).trimEnd()`를 `historyEntry` 훅이 돌려줘 기록한다(항상 최신 블록 항목
+  하나). "블록이 끝난 뒤 1회 기록"은 `exit()`로 끝난 블록이 유실돼 채택하지 않았다.
+  - `readOptions(pending)`: `pendingBlock = pending ?? ""`. `pending`이 없으면(새 `>>> ` 줄)
+    `blockBase = null`(기준점 해제) — 있으면(`... ` 줄) `blockBase ??= beforeFirstLine`(이미 있으면 유지).
+  - `historyEntry(line)`: `blockBase === null`이면 `beforeFirstLine = getHistory().entries.slice()`(다음
+    블록을 위한 스냅샷) 후 `line`을 그대로 반환. `blockBase`가 있으면 `getHistory().restore(blockBase)` 후
+    `(pendingBlock + '\n' + line).trimEnd()`를 반환.
+- 블록 텍스트는 worker가 준 `pending`에서 만든다(프로토콜 변경 없음). 종료용 공백 줄은 `skipBlankHistory`가
+  걸러 훅이 안 불린다(항목 불변). 블록 안 빈 줄은 보존한다. 문법 오류·예외로 끝난 블록도 전체가 남는다.
+- `discard()`: `blockBase !== null`이면 `getHistory().restore(blockBase)` 후 `blockBase = null`. 블록이
+  없으면 무동작. 스냅샷 복원이므로 첫 줄 append가 밀어낸 항목(50개 제한)·중복 제거로 옮겨진 옛 항목도 함께
+  복구된다. 호출 지점은 둘: **취소** = `session.ts`의 `readLine` continuation에서 `line === null`일 때.
+  **리셋** = `terminate()`가 `readline.cancelRead()` **앞**에서 `if (reading) blockHistory.discard()`
+  (`reading`은 REPL 읽기 전용 플래그라 `input()` 대기 중·실행 중·`exit()`로 끝난 블록은 자동 제외 —
+  `08-session.md` 8.1).
+- `... ` 입력줄의 ↑ 삼킴 판정은 **공개 API만으로** 한다: `onKey`가 `pending`이 있고(`pendingBlock !== ""`)
+  `getLine()`에 `"\n"`이 없으면 ArrowUp을 삼킨다(`true`). 벤더 내부 `state.editing`(private)과의 동치 근거:
+  `editing === true`인 한 줄 버퍼에서 벤더 ↑는 원래 무동작이라 삼켜도 화면이 같고, `... `의 여러 줄 버퍼는
+  Shift+Enter·붙여넣기(둘 다 `editInsert` → `editing = true`)로만 생긴다 — `getLine()`에 개행이 있으면(여러
+  줄 버퍼) 삼키지 않고 벤더 줄 이동에 맡긴다. ↓는 읽기 시작 시 `history.cursor === -1`이라 따로 막지 않는다.
 - `skipBlankHistory`(RD-013 완료)와 합성한다: `Readline` 생성자 옵션 `ReadlineOptions.skipBlankHistory`가
   벤더 안에서 처리한다(6.1) — 코어는 `new Readline({ persist: false, skipBlankHistory: true })`로 켠다.
-  블록 히스토리는 이 옵션이 이미 거른 뒤의 `history.append` 호출만 본다.
-- 재호출한 블록은 Enter 1회로 실행된다(여러 줄 제출 경로). history는 중복을 제거한다(3.14는 안 한다).
+  블록 히스토리는 이 옵션이 이미 거른 뒤의 Enter 제출(`historyEntry` 호출)만 본다.
+- `... `에서 Enter 1회로 제출된 여러 줄(붙여넣기·Shift+Enter)은 제출 텍스트 전체를 블록에 잇는다
+  (`(pendingBlock + '\n' + 제출텍스트).trimEnd()`). 붙여넣은 텍스트가 블록을 끝내고 top-level 문장까지
+  포함하면 그것도 같은 항목에 남는다(main은 블록 종료를 판정할 수 없다, `docs/traps/TRP-005`). 3.14도
+  붙여넣기는 한 항목이라 이 규칙은 편차가 아니다(`10-parity-deviations.md`).
+  - **`>>> `에서 붙여넣은 여러 줄이 블록을 "열어 둔 채" 끝나고 다음 `... ` 읽기가 그 `pending`을 이어받는
+    경로는 구조적으로 불가능하다.** `worker/submission-runner.ts`의 `runMultiline`/`runChunk`이 돌려주는
+    반환 경로 3곳 전부 `pending`을 절대 실어 보내지 않기 때문이다 — Python 버전과 무관한 코드 구조상의
+    제약이며 재현 실패가 아니다(`10-parity-deviations.md`, DELTA-04a). 붙여넣기가 즉시 완결되지 않고
+    `... `로 이어지는 유일한 경로는 애초에 `... ` 프롬프트에서 붙여넣는 경우뿐이다.
+- 재호출한 블록은 Enter 1회로 실행된다(여러 줄 제출 경로). history는 중복을 제거한다(3.14는 안 한다,
+  편차 9).
+- 리더 합성 순서: `session.ts`가 `mergeReadOptions(blockHistory.readOptions(pending),
+  autoIndent.readOptions(pending))`로 합성한다(blockHistory 먼저 — ↑ 삼킴은 blockHistory만 보고 겹치는
+  키가 없다). `mergeReadOptions`는 `terminal/read-options.ts`의 순수 함수다(6.3·`00-architecture.md` 4.2).
 
 ## 6.5 붙여넣기
 - 개행은 `\n`으로 편집 버퍼에 삽입되고 자동 제출하지 않는다. Enter 1회로 실행한다(러너의 여러 줄 분할 규칙은

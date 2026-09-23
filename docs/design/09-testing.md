@@ -99,7 +99,9 @@
 
 ## 9.2 jsdom(기본 환경) + 실제 `Readline` + 가짜 터미널 / 가짜 타이머
 `auto-indent.test.ts`(순수 함수 + `createAutoIndent` 정책 객체, RD-013 완료 — 별도 `-reader.ts` 파일 없이
-한 모듈에 둔다), `tab-reader.test.ts`, `stdin-reader.test.ts`,
+한 모듈에 둔다), `block-history.test.ts`(실제 `Readline` + 가짜 터미널, `createBlockHistory` 정책 객체,
+RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 완료 — 벤더 `packages/xterm-readline`의
+`history-entry.test.ts`도 같은 `StubTerminal` 패턴으로 `historyEntry` 훅을 본다), `tab-reader.test.ts`, `stdin-reader.test.ts`,
 `repl-reader.test.ts`, `rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
 `worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
 요청 거절 정책, **`setAtPrompt` 호출 순서**(`true` → `readLine` → `false` → `discardPendingInterrupt` → `run`, 취소
@@ -110,6 +112,7 @@
 - 가짜 터미널(`src/test/fake-terminal.ts`)은 `write` 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다
   (동기만 쓰면 TRP-008을 놓친다). history는 ↑ 재호출로만 관찰한다.
   `createFakeTerminal({ asyncWrite, cols, rows })`가 `{ term, screen, written, type, paste, keyDown, flush, disposedBufferReads }`를 돌려준다.
+  `entries` 직접 단언은 ↑ 재호출로 구분할 수 없는 복구 두 경우(50개 제한으로 밀린 항목 복구, 중복 제거로 옮겨진 옛 항목의 원래 자리 복구)에만 쓴다(`block-history.test.ts`, RD-014 확정 8).
   `Readline`이 읽는 xterm 멤버와 `loadAddon`·`dispose`만 구현하고 화면은 해석하지 않는다(원문 `written`). 화면 버퍼를 읽는
   코드(`rewindTail`)를 위해 `screen`에 시험이 값을 지정하는 최소 모델만 둔다: `buffer.active.{cursorY, baseY, getLine(row)?.isWrapped}`가
   읽는 `cursorY`·`baseY`·`wrappedRows`이고 VT는 해석하지 않는다. 기본값(커서 0행, 스크롤백 없음, 감긴 행 없음)은 값을 지정하지

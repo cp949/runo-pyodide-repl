@@ -336,9 +336,11 @@ RD-013 완료 반영: `shift` 절(Shift+Enter로 블록 진행)은 프리필이 
 직접 입력 제거, `print(i)`만 입력 → 프리필이 채운다). 완료된 `multiline-check.mjs` 원본 파일은 고치지 않았다
 (rubber-workflow: 완료 폴더는 읽기 전용 참고).
 
-인계(RD-014): 블록 입력 중(`... `) 붙여넣은 여러 줄은 `replayLines`가 한 줄씩 흘려 넣는다 — 각 줄이 벤더
-`history.append`를 그대로 타므로, 흘려 넣은 텍스트가 history에 (블록으로 묶이지 않은) 들여쓴 항목 여러 개로
-남는다. RD-014가 블록을 항목 하나로 묶을 때 이 경로도 함께 다뤄야 한다.
+인계(RD-014) 정정(2026-09-23, RD-014 그릴링에서 확인): 이 항목의 원래 전제("붙여넣은 여러 줄이 history에
+항목 여러 개로 남는다")는 틀렸다 — `... `에 붙여넣은 여러 줄은 항목 여러 개가 아니라 **한 항목**이다.
+`readPaste`가 Enter 토큰을 `"\n"` 텍스트로 바꿔 버퍼만 채우고(`readline.ts:413-414`) 사용자의 Enter 1회가
+`history.append`를 한 번만 부르기 때문이다(`:470`). `replayLines`는 worker에서 돌며 history를 건드리지
+않는다. RD-014가 `createBlockHistory`로 이 한 항목을 블록 전체에 이었다(`06-editing.md` 6.4).
 
 인계(RD-018): 확인 스크립트(`lib.mjs`의 `paste(text)` 포함)·변이 기록은
 `_works/_completed/20260923-12-rd-011-multiline-submit/verify/`(`multiline-check.mjs`·`mutate-safe.mjs`·
@@ -395,9 +397,9 @@ Tab은 RD-015가 그대로 쓴다), `ReadlineOptions.skipBlankHistory`, `Readlin
 `    print(3)`으로) 5건을 `auto-indent-check.mjs`의 `cancel` 절로 복원했다. `_works/_completed/…-rd-008-…/
 verify/skipped-ids.md`에 "RD-013 복원" 표기를 남겼다.
 
-인계(RD-014): `ReadlineOptions.skipBlankHistory`는 벤더 옵션(Enter 분기에서 처리)이라 블록 묶기
-(`groupBlockHistory`)는 이 옵션이 이미 거른 뒤의 `history.append` 호출 위에 겹쳐 쌓으면 된다. 프리필된
-`... ` 줄의 ↑는 이 RD가 손대지 않았다(벤더 history 탐색 그대로, RD-014가 결정할 몫).
+인계(RD-014): `ReadlineOptions.skipBlankHistory`는 벤더 옵션(Enter 분기에서 처리)이고 블록 묶기
+(`createBlockHistory`)는 이 옵션이 이미 거른 뒤의 `history.append` 호출 위에 겹쳐 쌓았다(계획대로).
+프리필된 `... ` 줄의 ↑는 RD-014가 삼킨다(RD-014 절의 "RD-013 체크리스트 정정" 참고).
 
 인계(RD-015): 키 훅(`ReadOptions.onKey`)은 이 RD가 범용으로 이미 벤더 소스에 추가했다 — RD-015는 새 훅을
 만들 필요 없이 `readOptions`에 Tab 처리 분기를 합쳐 쓰고 `getLine`·`getCursor`·`editInsert`로 버퍼·커서를
@@ -408,20 +410,63 @@ verify/skipped-ids.md`에 "RD-013 복원" 표기를 남겼다.
 
 ### RD-014 — 블록 입력을 history 항목 하나로
 
-상태: 대기 · 이전: RD-020 · 설계: `06-editing.md` 6.4
+상태: 완료 · 이전: RD-020 · 설계: `06-editing.md` 6.4
 
 시나리오: `for i in range(2):` / `    print(i)` / 빈 줄로 끝낸 뒤 ↑ → 블록 전체가 돌아오고 Enter 한 번으로 재실행. Ctrl+C로 취소한 블록은 history에 남지 않는다.
 
-완료 기준: 위 시나리오 + 괄호 안 빈 줄 보존, 문법 오류·예외·`exit()`로 끝난 블록도 전체가 남음, 공백만 있는 제출 제외, `... ` 입력줄의 ↑ 무동작. 벤더링 `History`에 삭제/복원 API를 추가할지 착수 시 결정하고 결정을 DELTA에 남긴다.
+완료 기준: 위 시나리오 + 괄호 안 빈 줄 보존, 문법 오류·예외·`exit()`로 끝난 블록도 전체가 남음, 공백만 있는 제출 제외, `... ` 입력줄의 ↑ 무동작.
 
-인계(RD-005): 건너뛴 이전 시나리오는 RD-006b의 X2·X3(블록 history 재호출 뒤 `012>>> ` 프롬프트 유지)다. worker는 `readLine`에 `pending`을 보내지만 main 핸들러가 아직 쓰지 않는다.
+결과: 그릴링 확정(2026-09-23) = 벤더 API는 범용 원시 연산 3종만 추가(`Readline.getHistory()`·
+`History.restore(entries)`·`ReadOptions.historyEntry`, 삭제 API는 추가하지 않음 — REPL 의미는 벤더에
+넣지 않는다). 코어는 **세션 소유** `createBlockHistory(readline)`(`terminal/block-history.ts`, 노출은
+`readOptions(pending)`·`discard()` 둘)와 순수 함수 `mergeReadOptions`(`terminal/read-options.ts`)로
+`createReplReader`가 모듈 종류를 모르게 했다. ↑ 삼킴은 공개 API만으로(`pending` 있고 `getLine()`에 `\n`
+없음) 판정하고 벤더 private `state.editing`과의 동치는 문서로만 근거를 남겼다. `discard()`는 취소
+(`readLine`의 `line === null`)와 리셋(`terminate()`의 `reading` 가드) 두 지점에서 부른다.
+
+검증(dev 29/29 · preview 11/11 · pageerror 0): 브라우저 `verify/block-history-check.mjs`(이전 RD-020
+A0~J1 25개 + RD-006b X2·X3 + 붙여넣기 2건) 전부 PASS. 단위 `block-history.test.ts` 18×2=36건(RED 3건
+확인 후 GREEN, `mutations-delta03.json` 8/8 killed), `session.ts` 배선 `index.test.ts` 4건
+(`mutations-delta04.json` 4/4 killed), 벤더 `history-entry.test.ts` 5건(`mutations-delta01.json` 4/4
+killed), `read-options.test.ts`(`mergeReadOptions`) 5건. 양성 대조 3종: 기준점 복원 제거 → A2 실패(B2는
+`discard()`의 독립 복원 때문에 계획과 달리 안 죽음), `trimEnd` 제거 → 브라우저 스크린 하니스가 trailing
+whitespace를 구조적으로 못 봐 A1·I1 모두 안 죽음(단위 시험 M2가 이미 커버), ↑ 삼킴 제거 → C1·C2 실패. 총
+`pageerror` 0. 루트 4종(`check-types`·`lint`·`test`·`build`) 통과.
+
+붙여넣기 2건 중 P1(`... `에서 붙여넣은 여러 줄이 블록 항목에 이어진다)은 실측 PASS. P2("`>>> `에서 블록을
+연 채 끝나는 붙여넣기 뒤 `... ` 줄이 같은 항목에 이어진다")는 **완료 조건에서 재현 실패가 아니라 구조적으로
+불가능함이 증명됐다**(DELTA-04a, 사용자 결정 2026-09-23: 원인 정정 문서화만) — `worker/submission-runner.ts`의
+`runMultiline`/`runChunk` 반환 경로 3곳 전부 `pending`을 절대 반환하지 않아, 개행이 포함된 단일 제출이
+`... `로 이어지는 경로 자체가 이 시스템에 없다(Python 버전과 무관). `block-history-check.mjs`의 `P P2`는
+실측(붙여넣기는 여전히 한 항목으로 기록되되 즉시 완결된다)을 확인하도록 고쳤다. `06-editing.md` 6.4·
+`10-parity-deviations.md`에 이 원인을 기록했다(DELTA-06).
+
+벤더링 `History` 삭제/복원 API 결정: `restore(entries)`만 추가했다(스냅샷 복원). 별도 삭제 API
+(`replaceFrom`/`truncate`)는 코어가 쓸 일이 없어 추가하지 않았다.
+
+인계(RD-005): 건너뛴 이전 시나리오는 RD-006b의 X2·X3(블록 history 재호출 뒤 `012>>> ` 프롬프트 유지)였다 — 이 RD가 브라우저로 복원했다(`skipped-ids.md:69` "RD-014 복원" 표기).
 
 RD-013 완료 반영: `createReadGuard`의 `readLine`은 이제 `(prompt, pending, cancelable)`을 받는다
 (`ReadGuardDeps.readLine`·`createRepl`의 `readLine` 핸들러·조립을 RD-013이 넓혔다, REPL 읽기는 가드가
 즉시 부르므로 시작 타이밍은 그대로다). 이 RD는 시그니처를 다시 바꾸지 않고 그 `pending`을 블록 묶기에
-쓰기만 하면 된다.
+썼다.
 
-인계(RD-008): 블록 history의 `discard()`를 걸 지점은 main `readLine` continuation의 `line === null`(취소)이다 — worker 쪽에서 `run(null)`이 `clearPending()`하는 것과 짝이다. "Ctrl+C로 취소한 블록은 history에 남지 않는다"는 완료 기준 중 **줄 단위 부분은 이미 성립한다**: RD-008이 RD-012c H2(취소 뒤에도 제출한 블록 줄이 ↑로 돌아온다)와 RD-012b H1(취소한 입력 줄은 ↑ 30회 동안 없다)을 브라우저로 통과시켰다. 이 RD가 볼 것은 블록을 항목 하나로 묶은 뒤의 동작이다(RD-006b X2·X3 포함).
+인계(RD-008): 블록 history의 `discard()`를 건 지점은 main `readLine` continuation의 `line === null`(취소)이다 — worker 쪽에서 `run(null)`이 `clearPending()`하는 것과 짝이다. RD-008이 RD-012c H2(취소 뒤에도 제출한 블록 줄이 ↑로 돌아온다)와 RD-012b H1(취소한 입력 줄은 ↑ 30회 동안 없다)을 이미 브라우저로 통과시켰고, 이 RD는 블록을 항목 하나로 묶은 뒤의 동작(RD-006b X2·X3 포함)을 확인했다.
+
+인계(RD-015): `mergeReadOptions(blockHistory.readOptions(pending), autoIndent.readOptions(pending))`
+합성 자리에 Tab 리더 분기를 그대로 끼운다 — `mergeReadOptions(blockHistory, autoIndent, tab)`. 새 훅을
+만들 필요 없음(`onKey` 규칙은 앞에서부터 먼저 소비한 쪽이 이긴다).
+
+인계(RD-018): 확인 스크립트·결과는 `_works/_completed/20260923-15-rd-014-block-history/verify/`의
+`block-history-check.mjs`(29개)·`positive-controls.md`(3건)·`results/dev.json`·`results/preview.json`에
+있다.
+
+RD-013 체크리스트 정정: RD-013 완료 폴더(`_works/_completed/20260923-14-rd-013-auto-indent/checklist.md`
+21·55행)의 "프리필 뒤 ↑는 history 항목으로 교체"는 **실측과 다르다**(무동작이다, 편차 14와 같음) —
+`previousHistory`는 `cursor === -1 && line.length() > 0`이면 즉시 반환해(`state.ts:254`) 프리필이 있는
+줄의 ↑는 애초에 무동작이다. ↑ 탐색이 열리는 것은 프리필이 **없는** `... ` 줄(들여쓰기 0으로 돌아온 줄,
+Ctrl+U로 지운 줄)뿐이고, RD-014의 ↑ 삼킴은 이 경로만 다룬다. 완료된 RD-013 폴더의 체크리스트 문구
+자체는 읽기 전용이라 고치지 않는다.
 
 ### RD-015 — Tab 완성(이름·속성), 완성 중 Ctrl+C, Tab 큐
 

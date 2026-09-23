@@ -54,6 +54,21 @@ _Avoid_: 잔여 출력, 부분 줄
 블록 입력 중 이미 제출된 `... ` 줄들을 개행으로 이은 텍스트. 자동 들여쓰기·Tab 완성·블록 히스토리가 쓴다.
 _Avoid_: 버퍼(콘솔 내부 `buffer`와 혼동)
 
+**블록 history 기준점**:
+`createBlockHistory`가 소유하는 세션 상태(`blockBase`·`pendingBlock`). 블록 첫 줄이 append되기 직전의
+`entries` 스냅샷이고, 이어지는 제출마다 이 기준점으로 되돌린 뒤 다시 기록한다("진행형 교체"). 취소·리셋의
+`discard()`가 이 기준점으로 복원한다. 세션이 바뀌면(리셋) 새 `createBlockHistory` 객체가 되어 사라진다.
+_Avoid_: 스냅샷(코드 안에서는 이 이름을 쓰지만 용어로는 "기준점"을 쓴다)
+
+**`historyEntry`**:
+벤더 `ReadOptions.historyEntry`. Enter 분기에서 `skipBlankHistory`가 거른 뒤·`history.append` 직전에 불려
+돌려준 문자열이 기록된다(`resolve`는 원래 줄 그대로). 블록 히스토리가 이 훅으로 진행형 교체를 구현한다.
+
+**`mergeReadOptions`**:
+`terminal/read-options.ts`의 순수 함수. 세션이 `blockHistory.readOptions(pending)`·
+`autoIndent.readOptions(pending)` 등 여러 정책 객체의 `ReadOptions` 조각을 하나로 합성해 `createReplReader`에
+넘긴다. `onKey`는 앞에서부터 먼저 소비한 쪽이 이기고, `prefill`·`historyEntry`는 뒤가 이긴다.
+
 ### 실행
 
 **제출**:
