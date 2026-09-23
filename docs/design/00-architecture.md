@@ -65,7 +65,7 @@ loop:
 
 프롬프트 대기 중 main→worker `complete` 요청에 답한다(RD-015). 실행 중 도착한 요청은 빈 후보로 답한다.
 
-루프(`worker/repl-loop.ts`의 `runReplLoop(deps)`)는 `complete` 응답(RD-015)을 빼면 위 그대로다. `protocol/`을 import하지 않고 `readLine`·`setAtPrompt`(RD-009)·`discardPendingInterrupt`(RD-007)·`run`·`onTerminated`·`onError`를 주입받으며 `boot.ts`가 RPC 래퍼와 `atPrompt` 변수를 만든다. 호출 순서는 시험이 고정한다: `setAtPrompt(true)` → `readLine` → `setAtPrompt(false)` → `discardPendingInterrupt` → `run`. 오류 정책: `run`이 `KeyboardInterrupt`가 아닌 오류를 던지면 `onError`(`console.error` + 빨간 `repl 내부 오류: …` + `clearPending()`) 뒤 `>>> `로 계속한다. `readLine` 요청이 reject되면 `rpc disposed`(main의 `dispose()`)일 때는 조용히, 그 밖의 이유면 `console.error`만 남기고 루프를 끝낸다.
+루프(`worker/repl-loop.ts`의 `runReplLoop(deps)`)는 `complete` 응답(RD-015)을 빼면 위 그대로다. `protocol/`을 import하지 않고 `readLine`·`setAtPrompt`(RD-009)·`discardPendingInterrupt`(RD-007)·`run`·`onTerminated`·`onError`를 주입받으며 `boot.ts`가 RPC 래퍼와 `atPrompt` 변수를 만든다. `complete` 핸들러는 `createRpc` 생성 시에만 등록할 수 있어(`protocol/rpc.ts`, 나중 등록 API 없음) `boot.ts`가 `atPrompt`·`completer`(콘솔 생성 뒤 `loadCompleteSource`가 채운다) 두 클로저 변수를 `createRpc` 앞에서 선언해 `atPrompt && completer ? completer(source, pending) : emptyCompletion()`으로 답한다(RD-015, `07-tab-completion.md` 7.1). 호출 순서는 시험이 고정한다: `setAtPrompt(true)` → `readLine` → `setAtPrompt(false)` → `discardPendingInterrupt` → `run`. 오류 정책: `run`이 `KeyboardInterrupt`가 아닌 오류를 던지면 `onError`(`console.error` + 빨간 `repl 내부 오류: …` + `clearPending()`) 뒤 `>>> `로 계속한다. `readLine` 요청이 reject되면 `rpc disposed`(main의 `dispose()`)일 때는 조용히, 그 밖의 이유면 `console.error`만 남기고 루프를 끝낸다.
 
 ### 3.3 `input()`(worker, 동기)
 
@@ -166,7 +166,7 @@ packages/pyodide-repl/src/
     block-history.ts       블록 → history 항목 하나(createBlockHistory, 세션 소유)  ← 06 6.4(RD-014 완료)
     history-filter.ts
     tab-completion.ts      순수 로직                                  ← 07
-    tab-reader.ts          Tab 가로채기·큐·목록 재그리기
+    tab-reader.ts          Tab 가로채기·큐·complete RPC 왕복(목록 재그리기는 벤더 printAbove)
     selection-copy.ts      Ctrl+Shift+C                              ← 06 6.6
   worker/                  worker 쪽. pyodide 프록시에만 의존(boot.ts는 조립 모듈이라 예외, 아래)
     boot.ts                부팅 시퀀스(로드 → 콘솔 → ready → 배너 → 루프)  ← 01 5절 S1
@@ -187,7 +187,7 @@ packages/pyodide-repl/src/
     webloop-reraise.ts                                                 ← 03 2.8
 ```
 
-Python 소스는 `.py?raw`로 임포트한다(vite는 내장 지원, tsdown/rolldown은 `tsdown.config.ts`의 `raw-text` 플러그인 + `src/py-modules.d.ts` 타입 선언). 적용 파일: `console-helpers.py`·`sleep-slice.py`·`sigint-handler.py`·`webloop-reraise.py`·`multiline.py`(RD-011). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 `<…>` 꺾쇠 이름을 쓴다(트레이스백에 새면 알아보기 위한 것, 절단은 코드 객체로 한다).
+Python 소스는 `.py?raw`로 임포트한다(vite는 내장 지원, tsdown/rolldown은 `tsdown.config.ts`의 `raw-text` 플러그인 + `src/py-modules.d.ts` 타입 선언). 적용 파일: `console-helpers.py`·`sleep-slice.py`·`sigint-handler.py`·`webloop-reraise.py`·`multiline.py`(RD-011)·`complete-source.py`(RD-015, `07-tab-completion.md` 7.1). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 `<…>` 꺾쇠 이름을 쓴다(트레이스백에 새면 알아보기 위한 것, 절단은 코드 객체로 한다).
 
 `terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 예외는 `worker/boot.ts`다. 부팅 시퀀스를 조립하는 모듈이라 `createRpc`·`createMailboxReader`·`InitFrame`과 `acknowledgeInterrupt`·`readRequestSeq`·`discardPendingInterrupt`를 import해 `connectInterrupts`의 `{ ack, seq, discard }`와 루프의 `discardPendingInterrupt`를 클로저로 넣고, pyodide 로더는 `worker.ts`가 주입한다(브라우저는 CDN 로더, node 시험은 npm `loadPyodide`). `console.ts`·`sink-writer.ts`·`top-level-await.ts`는 `protocol/`을 import하지 않고 sink 함수를 받는다. `repl-loop.ts`와 `submission-runner.ts`도 `readLine`·`run`·출력 함수를 주입받고, `stdin-callback.ts`도 `requestInput`·`wait`·`signalInterrupt`·`checkInterrupt`를 주입받으며(뒤 둘은 `boot.ts`가 `() => signalInterrupt(interruptBuffer)`·`() => pyodide.checkInterrupt()`로 넣는다), RPC 래퍼는 `boot.ts`가 만든다. 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
 

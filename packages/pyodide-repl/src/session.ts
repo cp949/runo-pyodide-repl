@@ -58,7 +58,8 @@ export interface ReplSession {
   endSession(): void;
   /**
    * 옛 읽기를 끝내고(`readline.cancelRead()`) 세션 자원을 정리한다: `ended=true` → (REPL 읽기 열림이면
-   * 블록 history 폐기) → `cancelRead()` → `endSession()` → `rpc.dispose()` → `worker.terminate()`.
+   * 블록 history 폐기) → `tabReader.readEnded(null)` → `cancelRead()` → `endSession()` →
+   * `rpc.dispose()` → `worker.terminate()`.
    */
   terminate(): void;
   /** `terminate()` 뒤 참. */

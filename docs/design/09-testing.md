@@ -101,7 +101,10 @@
 `auto-indent.test.ts`(순수 함수 + `createAutoIndent` 정책 객체, RD-013 완료 — 별도 `-reader.ts` 파일 없이
 한 모듈에 둔다), `block-history.test.ts`(실제 `Readline` + 가짜 터미널, `createBlockHistory` 정책 객체,
 RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 완료 — 벤더 `packages/xterm-readline`의
-`history-entry.test.ts`도 같은 `StubTerminal` 패턴으로 `historyEntry` 훅을 본다), `tab-reader.test.ts`, `stdin-reader.test.ts`,
+`history-entry.test.ts`도 같은 `StubTerminal` 패턴으로 `historyEntry` 훅을 본다 — 벤더 `packages/xterm-readline`의
+`print-above.test.ts`도 같은 패턴으로 `printAbove`(버퍼·커서 유지, 재그리기 중 키 큐 순서 보존, 커서 끝·이모지
+버퍼, 활성 읽기 없을 때 `println` 동등, dispose 뒤 콜백 무해, 다중 행 블록·감긴 단일 행에서 소실 없음,
+`cancelRead()` 경합 무해, RD-015 DELTA-01·01a·04a 11건)를 본다), `tab-reader.test.ts`, `stdin-reader.test.ts`,
 `repl-reader.test.ts`, `rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
 `worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
 요청 거절 정책, **`setAtPrompt` 호출 순서**(`true` → `readLine` → `false` → `discardPendingInterrupt` → `run`, 취소
@@ -289,3 +292,19 @@ RD-013의 `auto-indent-check.mjs`(`_works/_completed/20260923-14-rd-013-auto-ind
 곧바로 읽으면 낡은 값을 보므로 250~300ms 유예를 넣는다. 양성 대조 2건은 `verify/positive-controls.md`에
 기록 — ① `readOptions`의 `prefill` 제거(`prefill`·`unit` 절 실패, `shift`는 `onKey`만으로 계산돼 죽지
 않는다), ② `onKey` 제거(`backspace`·`shift`·`alt`·`cancel` 대부분 실패). 둘을 합치면 배선 전체가 커버된다.
+
+RD-015의 `tab-check.mjs`(`_works/_completed/20260923-16-rd-015-tab-completion/verify/`)는 이전 RD-016
+브라우저 58개(C1~C12)를 절 단위로 이식하고 C13(큐)·C14(완성 중 Ctrl+C)를 더해 총 68개 확인을 순서대로
+돌리고, preview(4173)에 대해 C1·C3·C8·C11 4절(30개)을 재실행한다. C12(지연 측정)는 페이지 내부
+keydown 리스너 + `MutationObserver`(같은 `performance.now()` 시계, TRP-022)로 `a.` 속성 후보(두 번째 Tab이
+목록을 화면에 반영한 시각, N=20)와 빈 스템 공백 삽입(첫 Tab이 동기 삽입한 시각, N=20)을 웜(세션 첫 Tab
+제외)으로 잰다 — 필수 판정은 정지 0 + 최대 200ms 이내(RD-009 시나리오와 같은 판정선), 30ms는 참고치로만
+기록한다(실측: `a.` 중앙값 25.8ms·최대 33.5ms, 빈 스템 중앙값 10.9ms·최대 17.0ms). `import os.pa`(지연
+측정 3종째)는 RD-016 뒤로 미룬다(미실행). 양성 대조 3건은 `verify/positive-controls.md`에 RD-010과 같은
+방식으로 기록한다 — 큐(`queuedTabs.push`) 제거는 브라우저 C13 실패로 확인했지만, `readEnded` 배선 제거·
+`interruptCompletion` 무력화는 계획한 브라우저 시나리오(C8·C14) 대신 `index.test.ts`의 세션 조립 수준
+단위 시험("프롬프트 취소 중 완성 요청이 있으면 SIGINT를 1회 보낸다")으로 확인했다 — C8은 Playwright의
+연속 `press`가 항상 완성 왕복(~25ms)보다 빨라 "완성이 다음 줄에 끼어드는" 경합이 재현되지 않고, C14는
+`exec()`/`eval()` 아티팩트(아래)로 정상 코드에서도 한때 실패해 변이 구분력이 없었기 때문이다(`DELTA-05.md`
+"## 결정"). C14는 재현 클래스를 `exec()`가 아니라 REPL 프롬프트에 직접 멀티라인으로 타이핑해 정의해야
+`co_filename == "<console>"` 규칙이 매치돼 정상 복귀한다(`10-parity-deviations.md`에 좁은 경계 사례로 등록).

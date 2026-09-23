@@ -266,7 +266,7 @@ describe("printAbove", () => {
     expect(readline.getLine()).toBe("abc");
   });
 
-  test("cancelRead()가 재그리기 콜백보다 먼저 오면 입력줄을 다시 그리지 않는다", () => {
+  test("cancelRead()가 재그리기 콜백보다 먼저 오면 입력줄을 다시 그리지 않는다", async () => {
     const { term, readline } = setup(40, 10);
     void readline.read(">>> ").catch(() => {});
     term.type("abc");
@@ -274,11 +274,23 @@ describe("printAbove", () => {
     // write 콜백을 flush()까지 미뤄, printAbove의 재그리기 콜백이 도착하기 전에
     // cancelRead()가 먼저 끝나는 경합을 흉내낸다.
     term.asyncWrite = true;
-    readline.printAbove("L");
+    let resolved = false;
+    const printed = readline.printAbove("L").then(() => {
+      resolved = true;
+    });
     readline.cancelRead();
     readline.println("[reset]");
-    term.flush();
 
+    // flush() 전에는(재그리기 콜백이 아직 안 왔으므로) resolve되지 않는다(pending-issue 02-1).
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    term.flush();
+    await printed;
+
+    // cancelRead() 뒤라 재그리기를 건너뛰지만, printAbove가 돌려준 프로미스는 여전히
+    // resolve된다 — 호출자(`tab-reader.ts`)의 `.finally(drainQueue)`가 매달리지 않는다.
+    expect(resolved).toBe(true);
     // 죽은 입력줄("abc")이 [reset] 아래에 다시 그려지지 않는다.
     const screen = term.vt.screen();
     const resetIndex = screen.indexOf("[reset]");

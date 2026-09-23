@@ -470,21 +470,71 @@ Ctrl+U로 지운 줄)뿐이고, RD-014의 ↑ 삼킴은 이 경로만 다룬다.
 
 ### RD-015 — Tab 완성(이름·속성), 완성 중 Ctrl+C, Tab 큐
 
-상태: 대기 · 이전: RD-016, RD-016c, RD-016f · 설계: `07-tab-completion.md` 7.1~7.4
+상태: 완료 · 이전: RD-016, RD-016c, RD-016f · 설계: `07-tab-completion.md` 7.1~7.4
 
 시나리오: `a.` 뒤 Tab → 후보 하나면 삽입, 여럿이면 공통 접두사. 같은 자리 두 번째 Tab → 열 우선 목록(셀 폭 = 최장 + 2, 200개 상한). 빈 스템은 `4 - (열 % 4)`칸 공백을 왕복 없이. `important = ` 뒤 Tab 8연타(0ms) → 32칸. `__getattr__`가 무한 루프인 객체에서 `a.x` Tab 뒤 Ctrl+C → 세션 리셋 없이 `>>> `.
 
-완료 기준: 이전 RD-016 브라우저 58개 시나리오와 같은 결과(3.14 pty 목록 화면 행 일치 포함), 경합 Tab→Enter·Tab→Ctrl+C 각 20회 정지 0, `input()` 중 Tab 무동작, 세션 리셋·`exit()` 뒤 동작. 코드포인트↔UTF-16 변환 시험(서로게이트 쌍). 완성 중 취소 단위 시험(RED + 변이 검사).
-
-왕복 지연 측정 계약: keydown(Tab) → 후보 삽입 또는 목록이 화면에 반영된 시각. 페이지 내부 시계(TRP-022), dev Chromium headless, 웜(세션 첫 Tab 제외), 대표 입력 3종(`a.` 속성 후보 다수, 빈 스템 공백 삽입, `import os.pa`는 RD-016 뒤) × N=20. **필수**는 정지 0과 200ms 이내(RD-009 시나리오와 같은 판정선)이고, 30ms는 참고치로 기록한다(출처 없는 수치라 필수에서 뺐다. RD-009 Ctrl+C 복귀 중앙값 22~30ms와 같은 자릿수인지 본다). 결과를 본 뒤 기준을 재해석하지 않는다.
+완료 기준(전부 충족, 실측 — `_works/_completed/20260923-16-rd-015-tab-completion/`의 DELTA-01~05):
+- 이전 RD-016 브라우저 58개(C1~C12)가 3.14 pty 목록 화면 행과 일치(`res_s10_0.json` `screen2`와 `a.`·
+  `A.`·`x.__cl`·`print` 전부 행 단위 정확 일치, 열 폭 계산 버그·후보 집합 차이 관찰 안 됨) + **C13**(큐:
+  `a.` Tab 2연타 0ms → 왕복 1회 뒤 목록 1번) + **C14**(완성 중 Ctrl+C, 아래) 전부 PASS —
+  `verify/results/dev.json` **68/68, 실패 0**, `pageErrors` 0. preview(빌드 산출물) C1·C3·C8·C11 재실행
+  30/30 PASS.
+- 경합: Tab→Enter·Tab→Ctrl+C 각 20회 정지 0(C8), 왕복 중 입력이 바뀌면 완성 폐기(`tab-reader.ts`
+  `applyResume`의 세대·`ended`·버퍼·커서 4중 검사).
+- 큐: `important = ` Tab 8연타 0ms → 32칸(왕복 없음, C5e), `a.` Tab 2연타 0ms → 왕복 1회 뒤 목록(C13).
+- **C14 완성 중 Ctrl+C**: `__getattr__` 무한 루프 객체에 `a.x.` Tab 뒤 Ctrl+C → 세션 리셋 없이
+  `KeyboardInterrupt` + `>>> `. **사용자 코드가 REPL 프롬프트에 직접 입력된 경로(컴파일 파일명이
+  `<console>`)에서만** 즉시 복귀한다(실측 25.4ms) — `exec()`/`eval()`로 정의된 코드(파일명이 `<console>`이
+  아님)는 worker `sigint-handler.py`가 완성 평가 프레임을 사용자 코드로 인식하지 못해 복귀하지 않는 좁은
+  경계 사례가 남는다(`10-parity-deviations.md`에 등록, 코드는 고치지 않았다 — RD-012 계열 기존 인프라
+  영역). 단위: 취소 시 `interruptCompletion` 정확히 1회, Enter 종료·요청 없음·이미 끝남은 0회
+  (`tab-reader.test.ts`).
+- `input()` 중 Tab 무동작·`\t` 없음(C9a·C9b, `stdin-reader.ts`에 `readOptions`가 없어 벤더가 무시) + 단위
+  (`index.test.ts`: 가짜 `complete` 0회). `from os import pa` 무동작(C9c).
+- 세션 리셋 뒤 Tab 동작·삽입 1회(C11a), `exit()` 뒤 무동작(C11b), `exit()` 뒤 리셋 세션에서 동작(C11c).
+- 지연(C12, 페이지 내부 시계 TRP-022, dev Chromium headless, 웜(세션 첫 Tab 제외) N=20): `a.` 속성 후보
+  중앙값 **25.8ms**·최대 **33.5ms**, 빈 스템 공백 중앙값 **10.9ms**·최대 **17.0ms**. 정지 0, 둘 다 필수
+  기준(200ms) 이내(참고 30ms 안쪽). `import os.pa`(지연 측정 3종째)는 RD-016 뒤로 미룸(미실행).
+- 코드포인트↔UTF-16: `x = "😀" ; a.at` Tab에서 Python `start`(코드포인트)와 JS `pos`(UTF-16) 변환이 맞아
+  서로게이트 쌍이 잘리지 않는다(`tab-completion.test.ts` 61건 + `complete-source.test.ts`의 `start === 10`
+  실측).
+- 변이 검사: 벤더 훅(DELTA-01·01a) 큐 제거·`resetLayout()` 제거·`activeRead` 가드 제거 killed(단일 행
+  버퍼 한정이던 "앵커 갱신 제거" 변이는 DELTA-01a가 다중 행 재그리기 버그를 근본 해소해 더 이상 관찰 대상이
+  아니다), worker(DELTA-03) `except BaseException`·`atPrompt` 가드 제거·`warnings.simplefilter` 제거·
+  `sorted()` 제거 4/4 killed, 코어(DELTA-04) 큐·세대·버퍼·커서·`ended`·취소 시 `send`·`lastKeyWasTab` 리셋·
+  `tabReader` 합성 제거 7/7 killed, DELTA-04a `printAbove` 즉시 resolve·`terminate()`의 `readEnded(null)`
+  제거 2/2 killed.
+- 양성 대조 3건(서버 재시작 필수, `verify/positive-controls.md`): 큐(`queuedTabs.push`) 제거 → 브라우저
+  C13 실패(계획과 일치). `readEnded` 배선 제거·`interruptCompletion` 무력화는 계획한 브라우저 시나리오
+  (C8·C14) 대신 단위(`index.test.ts` "프롬프트 취소 중 완성 요청이 있으면 SIGINT를 1회 보낸다")로 확인
+  (C8은 Playwright 타이밍상 재현 불가, C14는 사전 결함으로 변이 구분력 없음).
+- 루트 4종(`pnpm check-types`·`pnpm lint`·`pnpm test`·`pnpm build`) 통과(시험: `xterm-readline` 16파일
+  126개, `pyodide-repl` 40파일 909개, `demo` 1파일 3개 — 전부 통과, 회귀 0).
 
 Tab 가로채기는 벤더 `readKey`(private)를 감싸지 않는다. **키 가로채기 공개 훅은 RD-013이 이미 벤더 소스에
 추가했다**(`ReadOptions.onKey?: (input: Input) => boolean`, `Input`을 받아 소비했으면 `true`를 돌려준다,
-`06-editing.md` 6.1·6.3) — `createTabReader`는 REPL 읽기의 `readOptions`에 Tab 처리 분기를 합쳐 쓰고
-그 훅과 `getLine`·`getCursor`·`editInsert`·`updateLine`·`tty()` 같은 공개 API만 쓴다(새 훅을 만들 필요
-없음). `07-tab-completion.md` 7.1은 이에 맞게 고쳤다.
+`06-editing.md` 6.1·6.3) — `terminal/tab-reader.ts`의 `createTabReader(readline, { complete,
+interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHistory`·`autoIndent` 옆에서 만든다)가
+그 훅과 `getLine`·`getCursor`·`editInsert`·`tty`·`printAbove`(벤더 공개 API, RD-013·RD-015)만 쓴다(새 훅을
+만들 필요 없음). `07-tab-completion.md` 7.1은 이에 맞게 고쳤다.
 
-인계(RD-006): "main이 `input()` 읽기 중 Tab을 요청하지 않는다"는 성질(메일박스 대기 중 worker는 `complete`에 답하지 못한다)은 Tab 리더가 들어올 때 시험으로 고정한다. 프로토콜 쪽(메일박스 대기 중 보낸 `complete`는 `deliver` 전 응답 없음, 뒤 응답, 유실 없음)은 RD-006이 `protocol/thread-scenario.test.ts`에 넣었다. `input()` 안 Tab 무동작은 편차 17이다.
+인계(RD-006): "main이 `input()` 읽기 중 Tab을 요청하지 않는다"는 성질(메일박스 대기 중 worker는 `complete`에 답하지 못한다)은 `index.test.ts`의 "input() 읽기 중 Tab은 complete를 요청하지 않고 `\t`도 넣지 않는다" 시험이 고정한다. 프로토콜 쪽(메일박스 대기 중 보낸 `complete`는 `deliver` 전 응답 없음, 뒤 응답, 유실 없음)은 RD-006이 `protocol/thread-scenario.test.ts`에 넣었다. `input()` 안 Tab 무동작은 편차 17이다.
+
+인계(RD-014): 실제 배선은 `mergeReadOptions(blockHistory.readOptions(pending), autoIndent.readOptions(pending), tabReader.readOptions(pending))` 3항 합성이다 — 새 훅 없이 `onKey`가 앞에서부터 먼저 소비한 쪽이 이기는 규칙 그대로 끼웠다.
+
+인계(RD-016 — `import`/`from` 줄의 모듈 완성): `.py` 확장 지점은 `worker/complete-source.py`의
+`complete_source(console, source, pending=None)` — `pending` 매개변수는 이미 받고 있으나 이 RD는 쓰지
+않는다(RD-016이 `ZipStdlibModuleCompleter` 분기를 그 인자로 넣는다). `.ts` 확장 지점은
+`worker/complete-source.ts`의 `loadCompleteSource`(시그니처 변경 없이 내부 분기만 넓히면 된다). main
+게이트(`mentionsImportKeyword`) 삽입 자리는 `terminal/tab-completion.ts`의 `planTab` 앞(현재는 게이트
+없이 스템 유무만 본다, `07-tab-completion.md` 7.5). `terminal/tab-reader.ts`의 `handleTab`이 이미
+`deps.complete(plan.source, pendingBlock || undefined)`로 `pending`을 넘기고 있어 프로토콜 변경이 필요
+없다. 지연 측정 3종째(`import os.pa`)는 이 RD가 미실행으로 남겼다.
+
+인계(RD-018): 확인 스크립트·pty 기준 데이터는 `_works/_completed/20260923-16-rd-015-tab-completion/verify/`의
+`tab-check.mjs`(68개 절)·`pty/`(`res_s*.json` 복사, 3.14.4 기준)·`positive-controls.md`(3건)·
+`results/dev.json`·`results/preview.json`에 있다.
 
 ### RD-016 — `import`/`from` 줄의 모듈 완성
 

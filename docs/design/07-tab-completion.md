@@ -2,28 +2,40 @@
 
 > 이 문서의 규칙·상수는 이전 구현(`/work/cp949/pyodide-samples/apps/repl`, 읽기 전용 참고)이 CPython 3.14.4 pty 실측과 브라우저 회귀로 확정한 것이다. 새 구현은 통신 계층만 바꾸고(`docs/design/00-architecture.md`, `01-protocols.md`) 이 규칙은 그대로 지킨다. 절 끝의 "참고:" 경로는 이전 구현의 근거 위치다.
 
-`complete(source, pending)` 요청은 main→worker RPC 요청이다(`01-protocols.md` 1절). worker가 프롬프트 대기 중(`readLine` 요청을 보내고 응답을 기다리는 동안)에만 답하고, `input()` 메일박스 대기 중에는 worker가 멈춰 있어 답하지 못한다(그 구간의 Tab은 main이 무동작 처리).
+`complete(source, pending)` 요청은 main→worker RPC 요청이다(`01-protocols.md` 1절). worker가 프롬프트 대기 중(`readLine` 요청을 보내고 응답을 기다리는 동안)에만 답하고, `input()` 메일박스 대기 중에는 worker가 멈춰 있어 답하지 못한다(그 구간의 Tab은 main이 무동작 처리). `pending`은 main이 넘기고 worker는 RD-016 전까지 무시한다.
 
 ## 7.1 요청 프로토콜
-- 요청: `complete(source, pending)` → 응답 `{ completions: string[], start: number }`.
-  `source`는 커서 앞 텍스트(`buf.slice(0, pos)`), `pending`은 `... ` 블록의 이전 줄들(`\n`으로 이음).
-- worker 핸들러는 **프롬프트를 기다리는 동안(`atPrompt`)에만** 실제로 계산하고, 실행 중에 늦게 도착한
-  요청은 `{ completions: [], start: 0 }`로 돌려 사용자 코드와 겹쳐 돌지 않게 한다.
-- main(`createTabReader`)이 벤더 readline의 **키 가로채기 공개 훅**으로 Tab(`UNSUPPORTED_CONTROL_CHAR = 21`,
-  `data: ['\t']`)을 가로챈다(이전 구현은 private `readKey`를 런타임 래핑했다. 벤더링 뒤에는 `06-editing.md` 6.1
-  규칙대로 private 멤버를 쓰지 않는다. 훅(`ReadOptions.onKey`)은 RD-013이 범용으로 이미 추가했다 —
-  이 RD는 REPL 읽기 옵션에서 자동 들여쓰기의 `onKey`와 합쳐 쓰고, `getLine`·`getCursor`·`editInsert`(RD-013이
-  더한 접근자)로 버퍼·커서를 읽고 고친다). 응답은 **읽기가 살아 있고 버퍼·커서가
-  요청 때와 같을 때만** 적용한다. 읽기가 그 사이 끝났으면
-  (Enter, Ctrl+C) 완성을 버린다. 요청이 reject되면 무동작이고 입력은 그대로다.
-- 왕복 중 들어온 Tab은 **버리지 않고 큐에 두었다가** 끝난 뒤 그 읽기에 이어 처리한다(`requesting`,
-  `queuedTabs`). 목록 재그리기 중 들어온 키도 큐에 두고 순서대로 처리한다(`redrawing`, `queuedKeys`,
-  TRP-008).
-- `input()` 읽기, 실행 중, 읽기 시작 전의 Tab은 무동작이고 `\t`도 넣지 않는다.
-- 완성 요청 중 읽기가 Ctrl+C로 취소되면 `interruptCompletion`(= `interruptSender.send()`)이 worker의 후보
-  계산(무한 루프인 `__getattr__` 등)을 끊는다. 사용자 프레임이 `<console>`이라 핸들러가 `KeyboardInterrupt`를
-  올리고, `complete_source`의 `except Exception`은 `BaseException`을 잡지 않아 요청이 reject된다.
-  요청이 없을 때·이미 끝난 뒤·Enter로 끝난 읽기에는 보내지 않는다.
+- 요청: `complete(source, pending)` → 응답 `{ completions: string[], start: number }`(`worker/complete-source.ts`
+  의 `SourceCompletion`). `source`는 커서 앞 텍스트(`buf.slice(0, pos)`), `pending`은 `... ` 블록의 이전 줄들
+  (`\n`으로 이음).
+- worker 핸들러(`boot.ts`가 `createRpc(frame.rpcPort, { complete })`로 등록)는 **프롬프트를 기다리는
+  동안(`atPrompt`)에만** 실제로 계산하고, `completer`가 아직 없거나(로드 중) 실행 중에 늦게 도착한 요청은
+  `{ completions: [], start: 0 }`로 돌려 사용자 코드와 겹쳐 돌지 않게 한다.
+- main은 `terminal/tab-reader.ts`의 `createTabReader(readline, { complete, interruptCompletion })`(세션
+  소유 정책 객체, `session.ts`가 `blockHistory`·`autoIndent` 옆에서 만든다)가 벤더 readline의 **키 가로채기
+  공개 훅**(`ReadOptions.onKey`, RD-013이 범용으로 이미 추가)으로 Tab(`UnsupportedControlChar`, `data:
+  ['\t']`)을 가로챈다(이전 구현은 private `readKey`를 런타임 래핑했다. 벤더링 뒤에는 `06-editing.md` 6.1
+  규칙대로 private 멤버를 쓰지 않는다). 노출은 둘뿐이다: `readOptions(pending)`(세대 `generation` +1,
+  `ended=false`, `pendingBlock` 저장, `lastKeyWasTab=false`, `queuedTabs=[]` — `session.ts`가
+  `mergeReadOptions(blockHistory.readOptions(pending), autoIndent.readOptions(pending),
+  tabReader.readOptions(pending))`로 3항 합성해 `createReplReader`에 넘긴다)와 `readEnded(line)`(세션이
+  `readLine` continuation에서 `null`·문자열 둘 다에 호출, `blockHistory.discard()`와 같은 자리 — 순서는
+  `readEnded` 먼저). `getLine`·`getCursor`·`editInsert`·`tty`·`printAbove`(RD-013·RD-015가 더한 접근자)로
+  버퍼·커서를 읽고 고친다. 응답(`applyResume`)은 **세대가 같고, 읽기가 끝나지 않았고(`!ended`), 버퍼·커서가
+  요청 때와 같을 때만** 적용한다. 하나라도 어긋나면(Enter·Ctrl+C로 읽기가 그 사이 끝났거나 다른 입력이
+  버퍼를 바꿨으면) 완성을 버린다. 요청이 reject되면 무동작이고 입력은 그대로다.
+- 왕복 중 들어온 Tab은 **버리지 않고 큐에 두었다가**(`requesting`, `queuedTabs`) 끝난 뒤(`drainQueue`, 성공·
+  실패 모두) 그 읽기에 이어 처리한다 — 다른 세대의 큐 항목은 버린다. 목록 재그리기 중 들어온 키는 코어가
+  아니라 **벤더 `printAbove`**가 큐에 두고 순서대로 재생한다(6.1·7.3). 이전 구현의 `redrawing`/`queuedKeys`에
+  해당하는 상태는 벤더 쪽 `redrawing`/`queued`로 옮겨졌다 — 코어 `tab-reader.ts`에는 이 상태가 없다.
+- `input()` 읽기(`stdin-reader.ts`는 `readOptions`가 없다 → Tab이 `onKey`에 닿지 않아 벤더가 무시), 실행 중,
+  읽기 시작 전(활성 읽기가 없어 벤더가 `onKey` 자체를 부르지 않음)의 Tab은 무동작이고 `\t`도 넣지 않는다.
+- 완성 요청 중 읽기가 Ctrl+C로 취소되면(`readEnded(null)`이 `requesting === true`일 때) `interruptCompletion`
+  (= `interruptSender.send()`)이 1회 worker의 후보 계산(무한 루프인 `__getattr__` 등)을 끊는다. 사용자
+  프레임이 `<console>`이라 핸들러가 `KeyboardInterrupt`를 올리고, `complete_source`의 `except Exception`은
+  `BaseException`을 잡지 않아 요청이 reject된다. 요청이 없을 때·이미 끝난 뒤·Enter로 끝난 읽기에는 보내지
+  않는다. `exec()`/`eval()`로 정의된 코드(파일명이 `<console>`이 아님)는 이 인식이 걸리지 않는 좁은 경계
+  사례가 남는다(`10-parity-deviations.md`).
 
 ## 7.2 스템과 공백(32칸 규칙)
 - `STEM_DELIMITERS`는 pyodide `Console.completer_word_break_characters`와 같은 **33자**
@@ -40,10 +52,18 @@
 - 목록은 열 우선이다: `CELL_GAP = 2`, 셀 폭 = 최장 후보 길이 + 2, 열 수 = `floor(터미널 열 / 셀 폭)`
   (최소 1), 행 수 = `ceil(n / 열 수)`. 후보는 스템을 포함한 전체 문자열. `LIST_CAP = 200`을 넘으면
   `...N개 더` 한 행. 열 폭은 문자열 길이 근사(전각 미반영).
-- 그리는 순서: `moveCursorToEnd` → `\r\n` + 행들 + `\r\n` → 입력줄 재그리기. 재그리기는 `autoIndent.read`가
-  아니라 `readline.read`를 직접 쓰고 프롬프트는 브리지가 합성한 것(꼬리 포함)을 그대로 쓴다(TRP-004).
-  새 읽기의 입력 상태는 write 콜백에서 만들어지므로 그 콜백 안에서 `updateLine(buf)` → 커서 복원
-  (코드포인트 수, **0이면 생략**, TRP-030) → `editing` 복원을 한다. 사이에 다른 키가 끼면 첫 Tab 규칙으로 돌아간다.
+- 그리는 순서: 벤더 `printAbove(text)`(`06-editing.md` 6.1)가 **같은 읽기로 앵커만 갱신해 다시 그린다**
+  (State 재생성 없음, TRP-030 해당 없음) — `text`는 `formatCompletionList`가 만든 행을 `\n`으로 이은
+  문자열이고, `printAbove`가 `state.moveCursorToEnd()`(원래 논리 커서를 먼저 저장) → `\r\n` + `text` +
+  `\r\n` 원시 쓰기 → `term.write("", cb)` 콜백에서 `Tty.anchorRow`를 실제 물리 커서(`term.buffer.active.
+  cursorY`)로 갱신 → `State.restoreCursor(cursor)`(저장해 둔 논리 커서 위치로 되돌림) → `State.resetLayout()`
+  (`moveCursorToEnd()`가 남긴 옛 레이아웃을 0으로 되돌려, 다중 행 블록 입력에서 재그리기가 옛 줄을 지우지
+  않게 함, DELTA-01a) → `state.refresh()` 순서로 처리한다. `printAbove`가 돌려주는 `Promise<void>`는 이
+  전체가 끝난 뒤에만 resolve하고, `tab-reader.ts`의 `applyResume`이 `list` 분기에서 이 프로미스를 그대로
+  반환해 `.finally(drainQueue)`가 재그리기가 실제로 끝난 뒤에야 큐의 다음 Tab을 처리한다(재그리기 중
+  벤더 큐를 우회해 옮겨진 커서로 계산하는 것을 막는다, DELTA-04a). 콜백을 기다리는 동안 도착한 키는 벤더
+  `queued`에 원본 문자열째 쌓였다가 콜백에서 순서대로 재생된다(붙여넣기 덩어리도 하나로, `readPaste`
+  경로를 그대로 탐). 사이에 다른 키가 끼면(재그리기가 끝난 뒤 도착한 키) 첫 Tab 규칙으로 돌아간다.
 
 ## 7.4 인덱스 변환
 - Python `start`는 **코드포인트 인덱스**, `xterm-readline`의 `pos`는 **UTF-16**이다.

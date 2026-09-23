@@ -46,6 +46,17 @@ Tab 완성:
 22. **새 세션에서 `sys`가 REPL 전역에 있어 `s` 후보에 섞인다.**
 23. (동등) 3.14의 삽입 quirk는 그대로 따른다: `import os.pa  # c` Tab → `import os.pa  # cs.path`.
 
+Tab 완성 배선(RD-015 완료, `07-tab-completion.md` 7.1·`06-editing.md` 6.5): **붙여넣기 토큰이 Tab 판정을
+건너뛴다** — 벤더 `readPaste`는 `onKey`를 거치지 않으므로 Tab, 붙여넣기, Tab 순서로 치면 `lastKeyWasTab`이
+붙여넣기에 반응하지 않고 유지된다. 두 번째 Tab도 "연속 두 번째"로 판정돼(첫 Tab처럼 삽입/공백이 아니라)
+목록이 열린다(이전 구현과 같은 동작, 이 RD가 등록). **Tab 완성 중 Ctrl+C는 `exec()`/`eval()` 경계에서
+한계가 있다** — 사용자 코드가 REPL 프롬프트에 직접 입력된 경로(컴파일 파일명이 `<console>`)에서는 완성
+계산(`console.complete`) 중 Ctrl+C가 즉시 `KeyboardInterrupt`로 복귀한다(실측 25.4ms). `exec()`/`eval()`
+등으로 정의된 코드(파일명이 `<console>`이 아님)의 `__getattr__`/`__repr__`이 블로킹이면 완성 평가가 멎을
+수 있다 — worker `sigint-handler.py`가 `co_filename == "<console>"` 규칙으로만 사용자 코드 실행 중을
+인식해 그런 프레임을 못 알아본다(RD-012 계열 기존 설계, 이 RD가 등록. 근거:
+`_works/_completed/20260923-16-rd-015-tab-completion/DELTA-05.md` "### 정정(2026-09-23, 재검증 뒤)").
+
 Ctrl+C·sleep:
 
 24. **사용자 코드가 스스로 일으킨 SIGINT 무시**: `signal.raise_signal(SIGINT)`·`_thread.interrupt_main()`. 사용자가 자기 SIGINT 핸들러를 걸면 연타 보호가 사라진다.

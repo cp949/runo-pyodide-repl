@@ -14,7 +14,9 @@ sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들�
 (readline)`을 다시 불러 새 객체(4칸)가 되기 때문이다:
 
 1. `session.terminate()` — 옛 세션을 끝낸다: (REPL 읽기가 열려 있으면 `blockHistory.discard()`로 대기 중
-   블록 history를 첫 줄까지 버린다 →, RD-014 완료·`06-editing.md` 6.4) `readline.cancelRead()`(열린 읽기를
+   블록 history를 첫 줄까지 버린다 →, RD-014 완료·`06-editing.md` 6.4) `tabReader.readEnded(null)`(`ended
+   =true`·큐 비움을 동기로 확정 — 뒤이은 `rpc.dispose()`의 `complete` 요청 reject가 취소된 세션의 버퍼·
+   커서로 큐를 다시 처리하는 것을 막는다, RD-015 DELTA-04a) → `readline.cancelRead()`(열린 읽기를
    `ReadCancelledError`로 끝낸다. 화면·history·리스너·`term`은 건드리지 않는다, `06-editing.md` 6.1) →
    `endSession()`(`alive=false`, `interruptSender.cancel()`) → `rpc.dispose()` → `worker.terminate()`.
 2. `Atomics.store(interruptBuffer, SIGNAL, 0)` — interrupt buffer는 세션 사이에 재사용하므로(같은
@@ -37,7 +39,8 @@ sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들�
 
 세션 소유 vs 핸들 소유(`session.ts`): 세션은 게이트 4종(`alive`·`readLinePending`·`inputReadsPending`·
 `cancelSettling`)·`reading`·`ended`·sink·리더·가드·`autoIndent`(`lastUsedIndentation`, RD-013)·
-`blockHistory`(기준점 `blockBase`·`pendingBlock`, RD-014)·메일박스·RPC·worker를 소유한다. 리셋마다 전부
+`blockHistory`(기준점 `blockBase`·`pendingBlock`, RD-014)·`tabReader`(`createTabReader`, 세대·큐·왕복 상태
+`requesting`, RD-015)·메일박스·RPC·worker를 소유한다. 리셋마다 전부
 초기값으로 새로 만들어져, 옛 세션의 상태(예: 취소 응답 직후의 `cancelSettling=true`)가 새 세션으로 새지
 않는다. 핸들은 `readline`·`interruptBuffer`·`interruptSender`·Ctrl+C 핸들러(`session?.pythonRunning()`을
 현재 세션 변수로 늦게 읽어, 리셋으로 세션이 바뀌어도 다시 등록할 필요가 없다)·`dispose()`·`reset()`을

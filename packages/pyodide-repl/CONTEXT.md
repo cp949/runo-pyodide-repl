@@ -116,6 +116,30 @@ top-level await 대기를 깨울 때 콘솔 task를 끝내는 표지 예외(`Exc
 **프롬프트 유휴**:
 REPL 읽기를 기다리며 사용자 코드가 없는 상태(`ReplLoopDeps.setAtPrompt(true)` 구간). 여기서 남은 SIGINT는 폐기한다.
 
+### Tab 완성
+
+**Tab 리더**:
+`createTabReader`(`terminal/tab-reader.ts`)가 만드는 세션 소유 정책 객체. Tab 키를 `onKey`로 가로채
+삽입·목록 표시·큐잉·취소 인터럽트를 담당한다. `createAutoIndent`·`createBlockHistory`와 같은 패턴이다.
+_Avoid_: 완성기(worker `complete_source`를 가리킬 때만 이 말을 쓴다)
+
+**세대**(`generation`):
+Tab 리더가 `readOptions(pending)`마다 1 증가시키는 카운터. `complete` 응답이 요청 때와 다른 세대면 버린다.
+
+**큐 Tab**(`queuedTabs`):
+`complete` 왕복(`requesting`)이나 벤더 `printAbove` 재그리기 중 눌린 Tab. 왕복·재그리기가 끝난 뒤(성공·
+실패 모두) 순서대로 이어 처리한다. 다른 세대의 큐 항목은 버린다.
+
+**`printAbove`**:
+벤더 `Readline.printAbove(text: string): Promise<void>`. 활성 입력줄 위에 `text`를 찍고 같은 읽기로
+다시 그린다(State 재생성 없음). 활성 읽기가 없으면 `println`과 같다. 재그리기가 끝난 뒤에만 resolve한다.
+_Avoid_: `println`(세션 밖 출력, 재그리기 없음)
+
+**`complete_source`**:
+worker `worker/complete-source.py`의 진입 함수. `console.complete(source)`를 후처리(정렬·내부 이름
+(`INTERNAL_PREFIXES`) 제외·예외 삼킴·경고 억제)해 `(completions, start)`를 돌려준다. `KeyboardInterrupt`는
+`except Exception`을 지나 그대로 전파된다.
+
 **Python 소스**:
 worker가 pyodide에 넣는 Python 코드. TS 문자열이 아니라 `src/worker/*.py` 파일이고 `import SOURCE from "./x.py?raw"`로 가져온다(tsdown `load` 훅 + `src/py-modules.d.ts`). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 **`<…>` 꺾쇠 이름**을 쓴다 — 트레이스백에 새면 알아보기 위한 것이고, 절단은 문자열이 아니라 코드 객체로 한다.
 _Avoid_: 인라인 스크립트, 템플릿 문자열
