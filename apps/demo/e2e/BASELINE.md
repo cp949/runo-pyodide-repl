@@ -17,8 +17,9 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
   아직 없어 그 확인 코드 자체가 스크립트에 없다는 뜻이다.
 - `pnpm --filter demo e2e:<이름>` 단독 실행은 서버(주로 5173)가 이미 떠 있어야 한다
   (`e2e/README.md` "실행 전제", 25항목 목록은 같은 문서).
-- `pnpm --filter demo e2e:measure` — dev만 기동, 측정 5종(`boot-press` 제외, 판정선은 4절 참고,
+- `pnpm --filter demo e2e:measure` — dev만 기동, 측정 5종(`boot-press` 제외, 참고값은 4절,
   이 실행기는 exit code만 본다).
+- `e2e:baseline`·`e2e:measure`는 사용자가 지시할 때만 돌린다(`docs/agents/rubber-workflow.md` "검증 실행 예산").
 - `pnpm --filter demo e2e:check` — `checks/`·`measure/`·`node/`의 `.mjs`를 `node --check`로 정적
   구문 검사만 한다(eslint·tsc는 계속 `e2e/**`를 무시한다, `apps/demo/eslint.config.js`·
   `tsconfig.json`).
@@ -111,19 +112,22 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 
 ## 4. `measure` 세트 표
 
-판정선은 각 RD 완료 시점(기본 N)의 실측 기록이다 — DELTA-04·05는 재측정하지 않았다(배선·축소 N
-확인만, `checklist.md` "허용 편차" 절).
+이 표의 값은 **참고값**이다(2026-09-24 사용자 확정, `docs/design/09-testing.md` 9.7). 각 RD 완료 시점(기본 N)의
+실측 기록이고 DELTA-04·05는 재측정하지 않았다(배선·축소 N 확인만, `checklist.md` "허용 편차" 절). 결과가 참고값을
+벗어나도 회귀 판정이 아니며 `deferred` 이슈 대상이다(`docs/agents/issue-tracker.md` "등록·분류 기준"). 스크립트
+exit code(형식 판정·`pageerror`)는 그대로 보고되지만 `measure` 세트는 L3이라 사용자 지시 때만 돌린다. 예외:
+`boot-press.mjs`는 `baseline` 세트 소속이고 판정(30/30 OK)은 시간이 아니라 결과 분류다.
 
-| 스크립트 | 셀 | 판정선(중앙값·최대·N) | 근거 |
+| 스크립트 | 셀 | 참고값(실측 당시, 중앙값·최대·N) | 근거 |
 | --- | --- | --- | --- |
 | `measure/press-loss.mjs` | 눌림 소실(브라우저) | HANG 0(기본 N=200). node 쪽 별도 통계(`node/rd-007/press-loss.mjs`)는 N=3000 소실 0, 재전송 복구 지연 p50 5.2ms·max 10.3ms(기준 20ms 안팎) | ROADMAP.md RD-007 135행 |
 | `measure/burst-matrix.mjs` | 9콤보(`a`·`b1`·`b5`·`b20`·`b50`·`c`·`d2`·`d5`·`warm-a`) | 각 N=20, 180시행 전부 프롬프트 복귀(OK), 대상 `pageerror` 0(판정 CRASH>HANG>DIRTY>OK) | ROADMAP.md RD-007 136행 |
 | `measure/boot-press.mjs`(**baseline 세트 소속**, N=30 판정) | 부팅 중 Ctrl+C | dev N=30·preview N=10 전부 정상(시행당 60~64회가 부팅 중 진입) | ROADMAP.md RD-007 137행. DELTA-05 재실행: dev N=30 **30/30 OK** |
 | `measure/input-burst-matrix.mjs` | 8콤보(`a`·`b`·`c`·`lp5`·`sp5`·`pa`·`pb`·`pc`) | 각 N=20, 160시행 전부 OK, 대상 `pageerror` 0 | ROADMAP.md RD-008 163행 |
-| `measure/sleep-await-check.mjs` | 12셀(RD-009/009a) + TLA 4셀(RD-012) = 16셀 | 각 N=20, 320시행. 12셀 전부 복귀·중앙값 30ms 이내(아래 표), 형식 판정 12/12. TLA 4셀도 전부 통과(`tla-burst` 중앙값 57.88ms는 30회 연타라 허용 편차). 총 `pageerror` 0 | ROADMAP.md RD-009 178~197행, RD-012 360~369행 |
+| `measure/sleep-await-check.mjs` | 12셀(RD-009/009a) + TLA 4셀(RD-012) = 16셀 | 각 N=20, 320시행. 12셀 전부 복귀·중앙값 30ms 안팎(아래 표, 참고값), 형식 판정 12/12. TLA 4셀도 전부 통과(`tla-burst` 중앙값 57.88ms는 30회 연타라 허용 편차). 총 `pageerror` 0 | ROADMAP.md RD-009 178~197행, RD-012 360~369행 |
 | `measure/keys-after-enter-probe.mjs` | Enter 직후 지연 0/5/10/20/50/100/200ms | 판정선 없음(측정 전용, 편차 32 키 소실 창 기록) | `keys-after-enter-probe.mjs` 머리 주석 |
 
-### `sleep-await-check.mjs` 12셀 중앙값·최대(ms) — RD-009/009a 실측(참고, 판정은 형식 판정 + 30ms 이내)
+### `sleep-await-check.mjs` 12셀 중앙값·최대(ms) — RD-009/009a 실측(참고값, 스크립트 판정은 형식 판정만)
 
 | 셀 | 중앙값 | 최대 |
 | --- | --- | --- |

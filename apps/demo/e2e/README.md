@@ -8,9 +8,12 @@
 기준선(시나리오 ID별 현재 기대 결과)은 `apps/demo/e2e/BASELINE.md`에 있다. 이 문서는 실행법·폴더
 규칙·버전 차이·함정만 다룬다.
 
-**실행 횟수 제한**: 전체 `e2e:baseline`은 1회 약 8분 이상 걸린다. 작업 폴더 하나에서 1회 이하로
-잡고, RED·수정 후 재확인은 기존 로그·브라우저 없는 하니스·개별 스크립트(`N=` 축소)로 한다
-(`docs/agents/rubber-workflow.md` "검증 실행 예산").
+**실행 규칙**: 전체 `e2e:baseline`(1회 약 8분 이상)과 `e2e:measure`·`node/` 통계는 **사용자가 지시할 때만**
+돌린다. 에이전트가 스스로 돌리는 것은 변경 영역 개별 스크립트(`ONLY=`·`N=` 축소)까지다
+(`docs/agents/rubber-workflow.md` "검증 실행 예산" L0~L3).
+
+**스크립트 작성 규칙**: 고정 대기 뒤 부재·존재 확인과 절대 ms 상한 판정을 새로 쓰지 않는다. 마커 배리어·
+`waitFor`·페이지 안 시계를 쓴다(`docs/design/09-testing.md` 9.7).
 
 ## 실행 전제
 
@@ -182,6 +185,7 @@ eslint·tsc는 계속 `e2e/**`를 무시한다(`apps/demo/eslint.config.js`의 `
 
 - 새 브라우저 확인 스크립트는 처음부터 `apps/demo/e2e/checks/`(또는 `measure/`)에 쓰고 작업 브랜치에
   커밋한다 — 더 이상 `_works/<작업>/verify/`에 두지 않는다.
-- 완료 조건 "기준선과 같다"는 `BASELINE.md`·`baseline.json` 갱신을 포함한다.
+- 완료 조건 "기준선과 같다"는 변경 영역 개별 스크립트 통과 + 기대값이 바뀐 행의 `BASELINE.md`·`baseline.json`
+  갱신이다. 전체 `e2e:baseline` 대조는 사용자가 지시할 때 한다.
 - 변이 검사 기록(`mutate-safe.mjs` 류)·`positive-controls.md`(수행 기록)·`results/`(실행 로그)는 여전히
   `_works/<작업>/`에 둔다(일회성 근거 기록, 저장소 코드가 아니다).

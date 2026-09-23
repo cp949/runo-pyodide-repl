@@ -16,10 +16,13 @@ rubber-workflow(DELTA 단위, 탄력적 추가, `dev` 브랜치 + 재그룹화 �
 
 ### e2e·반복 측정 최소화
 
-브라우저 e2e(전체 `e2e:baseline` 약 8분 이상)와 반복 측정은 필요한 만큼 돌릴 수 없다. 계획 단계에서
-검증 실행 예산을 적는다: 전체 baseline은 작업 폴더 전체에서 1회 이하, RED는 기존 로그·브라우저 없는
-하니스·개별 스크립트 순으로 가장 싼 수단, 수정 후엔 실패한 스크립트 하나만 재실행. 예산 초과는 실행 전
-사용자 확인. See `docs/agents/rubber-workflow.md` "검증 실행 예산".
+검증은 L0(`pnpm test` 등 브라우저 없음)·L1(변경 영역 개별 e2e 스크립트, `ONLY=`·`N=` 축소)·L2(전체
+`e2e:baseline`, 약 8분 이상)·L3(`e2e:measure`·node 통계·반복 측정)로 나눈다. **L2·L3은 사용자가 지시할 때만
+돌린다** — 자동으로 진행하지 않는다. RD·이슈 완료는 L0 + L1로 판정한다. 계획 단계에서 L1 스크립트·횟수를 적고,
+넘으면 실행 전 사용자 확인. See `docs/agents/rubber-workflow.md` "검증 실행 예산".
+
+e2e 스크립트의 시간 판정(고정 대기·ms 상한)은 `docs/design/09-testing.md` 9.7, 이슈 등록·`Status`
+분류는 `docs/agents/issue-tracker.md` "등록·분류 기준"을 따른다.
 
 ### 설계 문서
 

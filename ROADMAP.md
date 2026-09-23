@@ -17,7 +17,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - RD로 등록하려면 **재현 가능한 사용자 시나리오**와 **관찰 가능한 완료 기준**이 둘 다 있어야 한다. 하나라도 없으면 해당 설계 문서의 "알려진 한계·편차"(`docs/design/10-parity-deviations.md`)에 한 줄로 남긴다.
 - 완료 기준이 "착수 시 정한다"인 채로 등록하지 않는다.
 - `docs/design/10-parity-deviations.md` 2절 "범위 밖"의 차이는 등록하지 않는다.
-- 브라우저 회귀 기준선(아래 RD-018)은 모든 후속 항목의 완료 기준에 "기준선과 같다"로 포함한다(`pnpm --filter demo e2e:baseline` 통과 + `apps/demo/e2e/BASELINE.md` 갱신).
+- 브라우저 회귀 기준선(아래 RD-018)과의 대조는 L0 + L1로 한다: 변경 영역 개별 스크립트 통과 + 기대값이 바뀐 행만 `apps/demo/e2e/BASELINE.md` 갱신. 전체 `pnpm --filter demo e2e:baseline`(L2)은 사용자가 지시할 때만 돌린다(2026-09-24 사용자 확정, `docs/agents/rubber-workflow.md` "검증 실행 예산").
 - RD-018 확정 11: 새 RD의 브라우저 확인 스크립트는 처음부터 `apps/demo/e2e/checks/`(또는 `measure/`)에 쓰고 작업 브랜치에 커밋한다. 변이 검사 기록·`positive-controls.md`(수행 기록)·`results/`는 `_works/<작업>/`에 둔다.
 
 ## 공통 완료 조건
