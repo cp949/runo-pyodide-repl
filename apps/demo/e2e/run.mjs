@@ -31,12 +31,38 @@ const PREVIEW_URL = "http://localhost:4173";
 const STATIC_URL = "http://localhost:4174";
 
 /**
- * `baseline`이 순차로 돌릴 스크립트 목록(DELTA-02부터 채움: `checks/` 16종 dev 전부 → preview 부분 →
- * `repl-check cdn-blocked`·`not-isolated` → `measure/boot-press.mjs` N=30). 이 DELTA에서는 빈 배열로
- * 시작해 실행기 자체(서버 기동/종료·`check`·결과 대조)만 검증한다 — 항목 모양(스크립트 경로·인자·
- * dev/preview 여부)은 채우는 DELTA가 정한다.
+ * `baseline`이 순차로 돌릴 스크립트 목록. 항목 하나 = `{ file, args?, server, only? }`.
+ * `file`은 `e2eDir` 기준 경로, `args`는 url 앞에 붙는 위치 인자(`repl-check`의 모드 등, 기본 빈 배열),
+ * `server`는 `SERVER_URLS`의 키(dev|preview|static, url을 결정한다), `only`가 있으면 `ONLY=` 환경변수로
+ * 넘겨 그 접두어의 확인만 돌린다(부분 preview 재실행용).
+ *
+ * RD-018 DELTA-02: RD-005~008 판정 스크립트 9종. dev는 전부, preview는 각 RD 인계 기록이 남긴 부분
+ * 집합만(`carryover`·`prompt-join`·`trailing-newline`은 preview 실행 없음 — RD-005 인계 기록 근거).
+ * `not-isolated`는 4174(static, 헤더 없는 정적 서버)에 대해 돌지만 label은 dev로 잡힌다(4173이 아닌
+ * 모든 URL은 dev, DELTA-02 "## 결정" 참고) — 이 SETS의 `server: "static"`과는 별개로, 결과 파일
+ * label은 각 스크립트가 자기 url을 보고 스스로 정한다.
  */
-const SETS = [];
+const SETS = [
+  // dev 전부
+  { file: "checks/repl-check.mjs", args: ["normal"], server: "dev" },
+  { file: "checks/repl-check.mjs", args: ["cdn-blocked"], server: "dev" },
+  { file: "checks/repl-check.mjs", args: ["not-isolated"], server: "static" },
+  { file: "checks/prompt-join-check.mjs", server: "dev" },
+  { file: "checks/trailing-newline-check.mjs", server: "dev" },
+  { file: "checks/carryover-check.mjs", server: "dev" },
+  { file: "checks/stdin-input-check.mjs", server: "dev" },
+  { file: "checks/bg-input-guard-probe.mjs", server: "dev" },
+  { file: "checks/ctrl-c-check.mjs", server: "dev" },
+  { file: "checks/prompt-cancel-check.mjs", server: "dev" },
+  { file: "checks/input-cancel-check.mjs", server: "dev" },
+  // preview 부분 집합(각 RD 인계 기록)
+  { file: "checks/repl-check.mjs", args: ["normal"], server: "preview" },
+  { file: "checks/stdin-input-check.mjs", server: "preview", only: "RM1,L1,O1,M1,M2,O2,TICK" },
+  { file: "checks/bg-input-guard-probe.mjs", server: "preview" },
+  { file: "checks/ctrl-c-check.mjs", server: "preview" },
+  { file: "checks/prompt-cancel-check.mjs", server: "preview", only: "RM1,B0" },
+  { file: "checks/input-cancel-check.mjs", server: "preview", only: "RM2,EC" },
+];
 
 /** `measure`가 순차로 돌릴 스크립트 목록(DELTA-04부터 채움). SETS와 같은 이유로 이 DELTA는 빈 배열이다. */
 const MEASURE_SET = [];
@@ -278,15 +304,37 @@ async function writeSummary() {
   return summary;
 }
 
+/**
+ * `SETS` 항목 하나를 node 자식 프로세스로 돌린다(브라우저 자체는 각 스크립트가 playwright로 연다).
+ * exit code로 흐름을 끊지 않는다 — FAIL이 있어도 스크립트는 정상적으로 exit 1을 돌려주는 게 정상이고,
+ * 판정은 `finish()`가 쓴 `results/*.json`을 `writeSummary`가 나중에 모아서 한다. `spawn` 자체가 실패하면
+ * (파일 없음 등) 그건 던진다.
+ */
+function runOneScript({ file, args = [], server, only }) {
+  return new Promise((resolve, reject) => {
+    const url = SERVER_URLS[server];
+    const scriptPath = path.join(e2eDir, file);
+    const env = { ...process.env };
+    if (only) env.ONLY = only;
+    else delete env.ONLY;
+    const label = only ? ` (ONLY=${only})` : "";
+    console.log(`[run.mjs] ▶ ${file} ${[...args, url].join(" ")}${label}`);
+    const child = spawn(process.execPath, [scriptPath, ...args, url], { cwd: e2eDir, stdio: "inherit", env });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      console.log(`[run.mjs] ◀ ${file}(${server}) exit ${code}${signal ? ` signal ${signal}` : ""}`);
+      resolve(code);
+    });
+  });
+}
+
 async function cmdBaseline() {
   await rm(resultsDir, { recursive: true, force: true });
   await mkdir(resultsDir, { recursive: true });
   const servers = await ensureServers(["dev", "preview", "static"]);
   try {
-    // DELTA-02부터: SETS를 순서대로 실행(dev → preview 부분 → repl-check 특수 모드 → boot-press N=30).
-    // 이 DELTA는 SETS가 비어 있어 아무 것도 실행하지 않는다.
-    for (const _entry of SETS) {
-      throw new Error("SETS 실행은 DELTA-02부터 구현된다");
+    for (const entry of SETS) {
+      await runOneScript(entry);
     }
   } finally {
     await teardown(servers);
