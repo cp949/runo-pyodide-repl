@@ -115,10 +115,13 @@ interface ReplOptions {
   topLevelAwait?: boolean                  // 기본 false. 바꾸려면 reset()
   onStatus?: (s: ReplStatus) => void       // 'loading' | 'ready' | 'load-failed' | 'not-isolated' | 'terminated' | 'crashed'
   onCrash?: (message: string) => void
+  copyOnSelect?: boolean                   // 기본 true. 선택 시 자동 복사(RD-017 예정). 바꾸려면 setCopyOnSelect()
+  onCopy?: (result: CopyResult) => void    // 복사 시도마다. { ok: true; chars } | { ok: false; error } (RD-017 예정)
 }
 
 interface ReplHandle {
   reset(options?: { topLevelAwait?: boolean }): void   // worker 교체. 화면 유지
+  setCopyOnSelect(on: boolean): void                    // 선택 시 자동 복사 on/off. 리셋 없음(RD-017 예정)
   dispose(): void                                       // worker 종료·리스너 해제. Terminal은 호출자가 소유
   readonly crossOriginIsolated: boolean                 // 거짓이면 worker가 없다(경고만 낸 상태)
 }
@@ -127,7 +130,7 @@ interface ReplHandle {
 export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
 ```
 
-`ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`·`onCrash?`(RD-010)·`topLevelAwait?`(RD-012, 기본 `false`, `=== true`만 켠다)이고 `ReplHandle`은 `dispose()`·`reset(options?)`·`crossOriginIsolated`다. RD-003·004의 임시 `readLine(prompt)` 핸들 API는 RD-005에서 빠졌다. 줄 읽기는 worker가 보내는 `readLine` 요청이 유일한 경로다. `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`·`terminated`(`sessionTerminated` 알림)를 발행하고 `crashed`는 RD-010이 발행한다. `sessionTerminated`는 터미널에 쓰지 않고 worker도 종료하지 않는다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다.
+`ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`·`onCrash?`(RD-010)·`topLevelAwait?`(RD-012, 기본 `false`, `=== true`만 켠다)·`copyOnSelect?`·`onCopy?`(RD-017 예정, 기본 `true`·`=== false`일 때만 끈다, `06-editing.md` 6.6)이고 `ReplHandle`은 `dispose()`·`reset(options?)`·`setCopyOnSelect(on)`(RD-017 예정, 세션·화면에 영향 없음, `disposed` 뒤 no-op)·`crossOriginIsolated`다. 선택 복사 리스너는 핸들 수명이라 `reset()`이 건드리지 않고 `dispose()`가 뗀다(`selectionCopy.dispose()`는 `session.terminate()` 뒤, `readline.dispose()` 앞). RD-003·004의 임시 `readLine(prompt)` 핸들 API는 RD-005에서 빠졌다. 줄 읽기는 worker가 보내는 `readLine` 요청이 유일한 경로다. `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`·`terminated`(`sessionTerminated` 알림)를 발행하고 `crashed`는 RD-010이 발행한다. `sessionTerminated`는 터미널에 쓰지 않고 worker도 종료하지 않는다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다.
 
 `reset(options?: { topLevelAwait?: boolean }): void`(RD-010이 무인자로 추가, RD-012가 옵션을 더했다). `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면 마지막으로 적용한 값을 유지한다(sticky, 핸들이 보관, getter는 없다). `disposed`·`!isolated`면 no-op, 그 외 상태는 전부 허용한다. 순서·게이트는 3.4·`08-session.md` 8.1.
 
@@ -203,6 +206,8 @@ RD-010 시점의 데모(`ReplView.tsx`)는 `createRepl({ terminal, createWorker,
 - `status === "terminated"` → `<div role="alert" data-testid="terminated">Python session terminated. "세션 리셋" 버튼으로 새 세션을 시작하세요.</div>`.
 - `status === "crashed"` → `<div role="alert" data-testid="crashed">worker가 예기치 않게 종료됐습니다: {crashMessage} <button data-testid="restart">재시작</button></div>`. `restart`는 `reset()`을 부르고 `crashMessage` state를 비운다 — 리셋이 `loading`을 동기 발행하므로 Alert는 상태 전이로 자연히 사라진다.
 - 터미널(`<div data-testid="terminal">`)은 `crashed` 중에도 계속 렌더한다(이전 구현과 다른 선택: 화면에 남은 출력이 단서가 된다).
+- `<label><input type="checkbox" data-testid="copy-on-select" /> 선택 시 자동 복사</label>`(RD-017 예정): 기본 켜짐. `localStorage`(`runo-repl.copyOnSelect`, `"0"`이면 꺼짐)에서 초기값을 읽고 바뀔 때마다 저장하며 `handle.setCopyOnSelect(checked)`를 부른다(리셋 없음). `createRepl`에도 같은 초기값을 `copyOnSelect`로 넘긴다. `isolated`와 무관하게 활성이다(worker 없이도 선택·복사는 된다).
+- `<div role="status" data-testid="copy-toast">`(RD-017 예정): `onCopy` 결과를 우측 하단 고정(`position: fixed; right: 16px; bottom: 16px`, 작은 글씨)으로 1초 보인다 — `ok`면 `copied {chars} chars to clipboard`, 아니면 `copy failed`. 연속 복사는 타이머를 새로 건다. 표시 중이 아니면 렌더하지 않는다.
 
 RD-005 시점에는 `onStatus`만 있었고 `terminated`도 `<p data-testid="terminated">Python session terminated.</p>`(버튼 없음)였다 — 위가 RD-010이 대체한 최종 형태다.
 

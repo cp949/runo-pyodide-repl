@@ -544,13 +544,13 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 
 완료 기준: 이전 RD-016a 브라우저 129개 시나리오와 같은 결과, 3.14 pty 케이스 A01~A36 중 32개 + X01 대조, 게이트 코퍼스 53줄 일치, 호출마다 `ZipStdlibModuleCompleter` 새 인스턴스(`loadPackage` 뒤 후보 반영 시험), zip stdlib 보정으로 `collections.abc` 등 복원.
 
-### RD-017 — 선택 영역 복사(Ctrl+Shift+C)
+### RD-017 — 선택 영역 복사(선택 시 자동 복사, 선택 중 Ctrl+C는 복사)
 
 상태: 대기 · 이전: RD-013 · 설계: `06-editing.md` 6.6
 
-시나리오: 출력 텍스트를 마우스로 선택하고 Ctrl+Shift+C → 클립보드에 그대로. 기존 Ctrl+C(중단·취소)는 그대로.
+시나리오: 출력 텍스트를 마우스로 드래그해 놓으면(버튼을 뗀 순간) 클립보드에 그대로 들어가고 화면 우측 하단에 작은 글씨로 `copied 20 chars to clipboard`가 1초 표시된다. 선택이 있는 채 Ctrl+C → 복사만 하고 선택을 지운다 — 실행 중(`while True: pass`)이면 인터럽트하지 않고, `>>> `·`... `·`input()` 읽기 중이면 취소하지 않으며 `^C`도 찍지 않는다. 같은 자리 두 번째 Ctrl+C(선택 없음)는 기존 동작(RD-007 인터럽트·RD-008 취소) 그대로다. Ctrl+Shift+C도 선택이 있으면 같은 복사다. 데모의 "선택 시 자동 복사" 체크박스(기본 켜짐, localStorage 저장)를 끄면 드래그해도 복사되지 않고 Ctrl+C 복사만 남는다. 더블클릭(단어)·트리플클릭(줄) 선택도 드래그와 같다. 복사가 실패하면(`navigator.clipboard.writeText` reject) `copy failed`가 같은 자리에 1초 표시된다.
 
-완료 기준: 위 시나리오(브라우저). 캡처 단계 `keydown` 리스너가 readline보다 먼저 받고 cleanup에서 해제된다(단위 시험).
+완료 기준: 위 시나리오 전부(브라우저, `verify/selection-copy-check.mjs`) + preview 재실행. 규칙·API는 `06-editing.md` 6.6과 `00-architecture.md` 4.1(`ReplOptions.copyOnSelect`·`onCopy`, `ReplHandle.setCopyOnSelect`)에 적힌 대로다. 벤더 `packages/xterm-readline`에 키 이벤트 훅 `ReadlineOptions.onKeyEvent?: (event: KeyboardEvent) => boolean` 하나만 추가한다(`true`면 xterm 기본 처리 생략 — 코어가 `attachCustomKeyEventHandler`를 덮어쓰지 않는다). 단위: 판정 순수 함수(`ctrlKey`·`shiftKey`·`altKey`·`metaKey`·`key`·선택 유무 → `copy`/`pass`)·정책 객체(가짜 터미널: 선택 있으면 Ctrl+C가 벤더에 닿지 않고 `clearSelection` 1회, 선택 없으면 원래 경로, `mouseup`(`button === 0`, 터미널 안에서 시작한 드래그만) 자동 복사, `copyOnSelect` 끄면 `mouseup` 무동작이되 Ctrl+C 복사는 유지, `writeText` reject → `onCopy({ ok: false })`, `dispose()` 뒤 리스너 0 + 벤더 훅에서 `false`)·`chars`는 코드포인트 수(`"😀"` 1) 전부 RED 확인 + 변이 검사(`hasSelection` 가드 제거·`clearSelection` 제거·`copyOnSelect` 게이트 제거·`dispose` 해제 제거·`preventDefault` 제거 killed). 양성 대조 2건(서버 재시작 필수): `hasSelection` 가드 제거 → 선택 없는 Ctrl+C 인터럽트 셀 실패, `clearSelection` 제거 → 두 번째 Ctrl+C 인터럽트 셀 실패. 편차 등록: `10-parity-deviations.md`에 "선택이 있으면 Ctrl+C가 SIGINT·취소 대신 복사(3.14 pty는 선택 개념이 없어 항상 SIGINT)" + "선택 시 자동 복사(tty에 없음)" 1건. 총 `pageerror` 0, 루트 4종 통과. 브라우저 기준선(RD-018)에 이식 세트로 인계한다.
 
 ## Phase 3 — 검증 자산
 

@@ -9,7 +9,7 @@
 - 벤더링 뒤 수정 방침: 아래 6.2 표의 우회 중 **TRP-006(`readPaste` 탭 보존)·TRP-016/TRP-004(재그리기 전제)·TRP-030(`moveCursorBack` 단위)은 소스에서 직접 고치고**, `read()`의 write 콜백 타이밍(TRP-008, 이전 구현 트랩 — 이 저장소 `docs/traps/TRP-008`과는 다른 문서)은 공개 옵션 `ReadOptions.prefill?: string`으로 계약을 명시한다(RD-013 완료: write 콜백 안, `new State` 직후 1회 채운다 — "onInputReady 콜백/ready Promise" 초안은 채택하지 않았다, 6.3). `InputType`은 export해 상수 복제를 없앤다. `History`에 삭제 API(`replaceFrom`/`truncate` 류)는 추가하지 않았다(RD-014 결정) — 블록 히스토리는 `restore(entries)`로 스냅샷을 되돌리는 것만으로 충분하고, 삭제 전용 API는 코어가 쓸 일이 없다.
 - `History`의 `localStorage` 자동 저장/복원은 옵션으로 끈다(벤더링했으므로 no-op 덮어쓰기 대신 생성자 옵션 `persist: false`).
 - `Readline.dispose()`는 리스너를 해제하고 `term`을 비우며 대기 중인 읽기(write 콜백 대기 중이라 `activeRead`가 없는 것 포함)를 `Error("readline disposed")`로 reject한다. 두 번째 호출은 무동작이다(RD-003). `term.dispose()`가 로드된 addon을 다시 dispose하므로 멱등이 필수다. dispose 뒤 `read()`는 reject하고 `println`·`print`는 터미널에 쓰지 않는다. 실제 xterm 6은 `term.dispose()` 뒤에도 write 콜백을 돌리고 그 안의 `term.buffer` 읽기는 `DisposableStore` 경고를 낸다.
-- `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다. 코어가 필요로 하는 진입점은 벤더에 **공개 훅**으로 추가한다: 입력 준비 알림(프리필, `ReadOptions.prefill` — RD-013 완료), 키 가로채기(`ReadOptions.onKey`, RD-013이 범용으로 추가했고 Tab은 RD-015가 그 훅을 그대로 쓴다, `07-tab-completion.md` 7.1), 입력줄 위 출력(`Readline.printAbove(text: string): Promise<void>`, RD-015 완료 — 활성 읽기를 그대로 둔 채 입력줄 위에 텍스트를 찍고 같은 읽기로 다시 그린다. 재그리기 중 들어온 키는 큐에 쌓았다가 순서대로 재생한다. 활성 읽기가 없으면 `println`과 같다. `07-tab-completion.md` 7.3). 붙여넣기 탭 보존(TRP-006)은 훅이 아니라 `readPaste` 소스 수정으로 했다(RD-011 완료: `readPaste`의 매핑 단계에서 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격. Tab은 REPL 읽기의 `onKey`(Tab 리더, `createTabReader`)가 소비하고, `input()` 읽기는 `readOptions`가 없어 벤더가 그대로 무시한다, RD-015 완료).
+- `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다. 코어가 필요로 하는 진입점은 벤더에 **공개 훅**으로 추가한다: 입력 준비 알림(프리필, `ReadOptions.prefill` — RD-013 완료), 키 가로채기(`ReadOptions.onKey`, RD-013이 범용으로 추가했고 Tab은 RD-015가 그 훅을 그대로 쓴다, `07-tab-completion.md` 7.1), 입력줄 위 출력(`Readline.printAbove(text: string): Promise<void>`, RD-015 완료 — 활성 읽기를 그대로 둔 채 입력줄 위에 텍스트를 찍고 같은 읽기로 다시 그린다. 재그리기 중 들어온 키는 큐에 쌓았다가 순서대로 재생한다. 활성 읽기가 없으면 `println`과 같다. `07-tab-completion.md` 7.3). 키 이벤트 가로채기(`ReadlineOptions.onKeyEvent?: (event: KeyboardEvent) => boolean`, RD-017 예정 — xterm `attachCustomKeyEventHandler` 수준에서 벤더 처리 앞에 불리고 `true`면 xterm 기본 처리를 생략한다. 선택 중 Ctrl+C 복사가 쓴다, 6.6). 붙여넣기 탭 보존(TRP-006)은 훅이 아니라 `readPaste` 소스 수정으로 했다(RD-011 완료: `readPaste`의 매핑 단계에서 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격. Tab은 REPL 읽기의 `onKey`(Tab 리더, `createTabReader`)가 소비하고, `input()` 읽기는 `readOptions`가 없어 벤더가 그대로 무시한다, RD-015 완료).
 - RD-008이 소스에 더한 공개 API: `read(prompt: string): Promise<string>` / `read(prompt: string, options: ReadOptions): Promise<string | null>` 오버로드와 `ReadOptions = { cancelable?: boolean }`(기본 `false` = 원본 `^C` + 같은 프롬프트 재그리기). `cancelable`이면 활성 읽기 중 Ctrl+C가 읽기를 `null`로 끝낸다(6.3). 오버로드라 기존 `read(prompt)` 호출부의 반환형은 `Promise<string>`으로 남는다. `ReadOptions`도 export한다.
 - RD-010이 더한 `cancelRead(): void`: 열린 읽기(활성 읽기 + `read()`의 write 콜백을 기다리는 읽기)를 `ReadCancelledError`(export)로 끝내는 **프로그램에 의한** 취소. `dispose()`와 달리 리스너·`term`·history·state는 건드리지 않고 화면에도 아무것도 쓰지 않는다(커서 이동·개행·재그리기 없음 — 개행 여부는 코어가 결정, `08-session.md`). 콜백이 아직 오지 않은 읽기는 `dispose()`처럼 콜백 안에서 취소 여부를 확인해 늦게 온 콜백이 `activeRead`를 되살리지 않는다. 열린 읽기가 없으면 무동작. 코어의 `reset()`이 옛 세션의 열린 읽기를 끝내는 데 쓴다(`08-session.md`).
 - RD-013이 소스에 더한 공개 API: `ReadOptions.prefill?: string`(`read()`의 write 콜백 안, `new State` 직후 1회 `state.update(prefill)`로 채운다 — 커서는 끝, 빈 문자열·미지정은 원본과 같이 `state.refresh()`만 부른다. `cancelable`이 아닌 읽기의 `^C` 재그리기는 다시 채우지 않는다). `ReadOptions.onKey?: (input: Input) => boolean`(활성 읽기의 키마다 벤더 처리 앞에서 부르고 `true`면 처리를 생략한다. `readPaste`가 `editInsert`로 바로 넣는 `Text` 토큰은 거치지 않는다. 활성 읽기가 없으면 부르지 않는다). `Readline.getCursor(): number`(UTF-16 커서 위치, `State.cursor()` 경유)·`editInsert(text)`·`editBackspace(n)`(`getLine`/`updateLine`과 같은 수준으로 활성 읽기가 없어도 현재 state에 작용한다). `ReadlineOptions.skipBlankHistory?: boolean`(기본 `false`, 켜면 Enter 분기에서 trim 결과가 빈 문자열인 제출을 `history.append` 대신 `history.resetCursor()`만 한다). `Input` 타입도 export한다(값 export 목록은 불변).
@@ -135,15 +135,60 @@
   지울 때 벤더 레이아웃(`state.ts`)이 탭의 실제 폭(가변, 탭 스톱에 따라 달라짐)을 아는지는 확인하지 않았다
   (관찰만, 고치지 않음 — 확정 10).
 
-## 6.6 선택 복사
-- 단축키는 **Ctrl+Shift+C**. Ctrl+C는 취소/중단으로 이미 점유돼 있다(`@xterm/xterm` v6의
-  `evaluateKeyboardEvent`는 선택 여부와 무관하게 ETX(0x03)로 바꿔 흘린다).
-- `xterm-readline`이 `term.attachCustomKeyEventHandler`를 이미 점유하므로 앱이 또 걸면 덮어쓴다. 대신
-  **터미널 컨테이너에 캡처 단계 `keydown` 리스너**를 달아 readline에 도달하기 전에 가로챈다.
-- 조건: `ctrlKey && shiftKey && key.toLowerCase() === 'c' && term.hasSelection()`.
-  `preventDefault()` + `stopPropagation()` 뒤 `navigator.clipboard.writeText(term.getSelection())`.
-  실패(권한 거부 등)는 조용히 무시. cleanup에서 리스너를 뗀다.
+## 6.6 선택 복사(RD-017 예정 — 선택 시 자동 복사, 선택 중 Ctrl+C는 복사)
+
+규칙(사용자 결정 2026-09-23. Windows Terminal·VS Code 터미널의 "선택 있으면 Ctrl+C=복사, 없으면 SIGINT"
+관례를 따른다):
+
+- **선택 시 자동 복사**: 마우스 드래그·더블클릭(단어)·트리플클릭(줄)으로 선택을 만들고 버튼을 뗀 순간
+  `term.getSelection()`을 `navigator.clipboard.writeText`로 복사한다. 기본 켜짐. 앱이 끌 수 있다
+  (`ReplOptions.copyOnSelect`, `ReplHandle.setCopyOnSelect(on)`, `00-architecture.md` 4.1). 선택은 지우지
+  않는다(강조가 남아 있어야 사용자가 무엇을 복사했는지 안다).
+- **선택 중 Ctrl+C = 복사**: `ctrlKey && !altKey && !metaKey && key.toLowerCase() === "c" && term.hasSelection()`
+  (Shift 유무 무관 — Ctrl+Shift+C도 같다)이면 복사하고 **`term.clearSelection()`**으로 선택을 지운 뒤 이벤트를
+  끝낸다(`preventDefault`, xterm 기본 처리 생략). 실행 중이면 SIGINT를 보내지 않고 `^C`도 찍지 않으며,
+  `>>> `·`... `·`input()` 읽기 중이면 취소하지 않는다. 자동 복사가 켜져 있으면 이 경로는 "재복사 + 선택 해제"
+  다. 선택을 지우는 이유: 지우지 않으면 선택이 남아 있는 동안 Ctrl+C가 계속 복사만 해 무한 루프 실행을 끊을
+  수 없다. `copyOnSelect`와 무관하게 항상 켜져 있다.
+- **선택 없는 Ctrl+C**: 기존 그대로(RD-007 인터럽트, RD-008 취소, `03-ctrl-c.md`·6.3). Mac의 Cmd+C는 xterm이
+  ETX로 바꾸지 않고 브라우저 네이티브 복사가 이미 되므로 `metaKey`는 조건에서 제외한다.
+- **알림**: 복사 결과를 `ReplOptions.onCopy?: (result: CopyResult) => void`로 앱에 알린다.
+  `CopyResult = { ok: true; chars: number } | { ok: false; error: unknown }`. `chars`는 **코드포인트 수**
+  (`[...text].length`, `"😀"`은 1)이고 여러 줄 선택의 개행이 포함된다(`getSelection()`은 행을 `\n`으로 잇고
+  행 끝 공백을 지운다). 코어는 DOM 오버레이를 그리지 않는다 — Terminal과 컨테이너는 앱 소유다. 데모는
+  우측 하단 고정 `<div role="status" data-testid="copy-toast">`에 `copied N chars to clipboard` 또는
+  `copy failed`를 1초 표시한다(`00-architecture.md` 4.1). 실패는 조용히 무시하지 않는다 — 사용자가 복사됐다고
+  오해하는 것을 막는다.
+
+기전(코어 `terminal/selection-copy.ts`, `createRepl`이 핸들 수명으로 만든다 — 세션이 아니다):
+
+- 키 가로채기는 **벤더 공개 훅** `ReadlineOptions.onKeyEvent?: (event: KeyboardEvent) => boolean`이다.
+  `Readline.handleKeyEvent`(xterm `attachCustomKeyEventHandler`에 등록된 벤더 핸들러)가 자기 처리(Shift+Enter)
+  **앞에서** 부르고 `true`(소비)면 xterm에 `false`를 돌려준다. xterm 6은 커스텀 핸들러가 `false`를 주면
+  `evaluateKeyboardEvent`(ETX 변환)·`onData`·`preventDefault` 전부를 건너뛰므로 벤더 `readKey`에 `CtrlC`가
+  도달하지 않는다. `keydown`·`keypress`·`keyup` 모두 이 훅을 거치므로 훅은 `event.type === "keydown"`만
+  본다. 코어가 `attachCustomKeyEventHandler`를 직접 걸면 벤더 것을 덮어쓰므로 쓰지 않는다. 6.1의
+  "공개 훅" 목록에 이 훅을 더한다. 이전 설계(캡처 단계 `keydown` 리스너)는 `terminal.element` 존재와 DOM
+  순서에 의존해 기각했다.
+- 네이티브 `copy` 경로(xterm이 `element`의 `copy` 이벤트에서 `hasSelection()`이면 선택 텍스트를
+  `clipboardData`에 넣는다)는 쓰지 않는다 — 성공·실패를 알 수 없어 `onCopy`를 채울 수 없고, 자동 복사 경로와
+  기전이 둘로 갈린다. 훅이 `preventDefault()`를 불러 네이티브 복사가 중복으로 일어나지 않게 한다.
+- 자동 복사는 `terminal.element`에 `mousedown`(`button === 0`이면 `dragging = true`)을, **`element.ownerDocument`
+  에 `mouseup`**을 건다 — xterm 자신도 드래그 중 `mouseup`을 `document`에서 듣고, 터미널 밖에서 버튼을 떼는
+  드래그가 흔하다. `mouseup`에서 `dragging`이었고 `hasSelection()`이면 복사한다(단순 클릭은 xterm이 `mousedown`
+  에서 선택을 지우므로 복사하지 않는다). `onSelectionChange`는 드래그 중 이동마다 발화해 복사 트리거로 쓰지
+  않는다. `createRepl` 시점에 `terminal.element`가 없으면(`open()` 전) 자동 복사를 걸지 않는다 — 데모는
+  `open()` 뒤에 부른다(`ReplView.tsx`). 터치·키보드 선택(`selectAll` API)은 범위 밖.
+- 정책 객체 `createSelectionCopy(terminal, { copyOnSelect, onCopy, writeText })`는 `onKeyEvent(event)`·
+  `setCopyOnSelect(on)`·`dispose()`를 노출한다. `writeText`는 시험용 주입(기본 `navigator.clipboard.writeText`).
+  판정은 순수 함수(`decideKey({ ctrlKey, altKey, metaKey, key, type }, hasSelection) → "copy" | "pass"`)로 분리해
+  node 시험한다. `dispose()`가 리스너 둘을 떼고 이후 `onKeyEvent`는 항상 `false`다. `createRepl.dispose()`
+  순서: `session.endSession()` → `session.terminate()` → **`selectionCopy.dispose()`** → `readline.dispose()`.
+  `reset()`은 건드리지 않는다(핸들 수명).
 - Ctrl+L(화면 지우기)과 세션 리셋은 별개 기능으로 유지한다. Ctrl+D(빈 줄 EOF)는 구현하지 않았다.
+
+편차: 3.14 pty에는 선택 개념이 없어 Ctrl+C는 항상 SIGINT이고 자동 복사도 없다 → `10-parity-deviations.md`에
+1건으로 등록한다(RD-017 완료 시).
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/03-selection-copy.md`,
 이전 구현 설계 문서 `09-auto-indent.md`, `10-block-history.md`,
