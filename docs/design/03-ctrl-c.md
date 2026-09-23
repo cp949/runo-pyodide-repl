@@ -87,7 +87,11 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   예외로 끝나면 pyodide가 Promise 변환에서 `PyErr_Print()`로 `sys.excepthook`을 부르고 콘솔 실행 중에는
   그것이 화면에 새기 때문이다(편차 28 해소, TRP-021). `GeneratorExit`만 재raise한다(코루틴 `close()` 신호를
   값으로 바꾸면 `RuntimeError`가 된다). 나르기 전 `trim(exc)`으로 트레이스백 머리의 우리 프레임(`guard`)을
-  떼고 첫 우리 프레임(조각·핸들러)부터 안쪽 전부를 잘라 사용자·라이브러리 프레임만 남긴다.
+  떼고 첫 우리 프레임(조각·핸들러)부터 안쪽 전부를 잘라 사용자·라이브러리 프레임만 남긴다. 래퍼의
+  `ensure_future` 안에서 눌림이 처리돼 규칙 ①의 `KeyboardInterrupt`가 나면, 그 `guard` 코루틴을 소유한 Task가
+  없을 때(Task 생성 전)만 `guard`와 시작 전(`CORO_CREATED`) awaitable 코루틴을 `close()`하고 다시 올린다 —
+  버려진 코루틴의 `RuntimeWarning: coroutine ... was never awaited`가 트레이스백 앞에 찍히는 것을 막는다. Task를
+  만든 뒤면 그 Task가 `guard`를 돌리므로 닫지 않는다.
 - `runcode` 래퍼(인스턴스 속성 교체): 실행 중인 콘솔 task를 `active`로 기록. top-level await 대기 중에는
   그 task를 취소하고 표지 예외 `IdleInterrupt`(`Exception` 계열 — webloop 재던짐 경로를 피함)로 끝낸다.
 - 취소는 `CORO_SUSPENDED` Task에만. 깨울 수 없는 순간(대기 코루틴 실행 중, 재개 직전)에는 `pending`

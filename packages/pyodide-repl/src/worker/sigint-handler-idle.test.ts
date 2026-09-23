@@ -554,6 +554,43 @@ async def woken_waiter():
     expect(pyodide.globals.get("n")).toBe(1);
     expect(runner.screen.stderr).toBe("");
   }, 20_000);
+
+  // run_sync 래퍼가 `guard(awaitable)` 코루틴을 만든 뒤 Task를 만들기 전에 SIGINT가 처리되면 사슬에 `<console>` 프레임이
+  // 있어 핸들러 규칙 ①이 그 자리에서 KeyboardInterrupt를 올린다. 그때 guard·awaitable 코루틴이 await되지 않은 채
+  // 버려지면 `RuntimeWarning: coroutine ... was never awaited`가 트레이스백 앞에 찍힌다.
+  it("run_sync 래퍼가 Task를 만들기 전에 처리된 SIGINT도 never awaited 경고 없이 표준 트레이스백만 남긴다", async () => {
+    const runner = await setup();
+    pyodide.runPython(
+      `import asyncio, signal
+_ef_original = asyncio.ensure_future
+_ef_hits = []
+
+def _ef_pressing(*args, **kwargs):
+    # run_sync 래퍼가 guard 코루틴을 넘긴 호출에서만, 진입 직후(Task 생성 전) 한 번 눌림을 처리한다. 콘솔도 제출마다
+    # ensure_future로 실행 task를 만들므로 첫 호출만 고르면 그쪽에 걸린다.
+    if not _ef_hits and getattr(args[0] if args else None, '__name__', '') == 'guard':
+        _ef_hits.append(1)
+        press()
+        signal.raise_signal(signal.SIGINT)
+    return _ef_original(*args, **kwargs)
+
+asyncio.ensure_future = _ef_pressing
+`,
+      { globals: pyodide.globals, filename: "<test>" },
+    );
+
+    try {
+      expect(await runner.run("run_sync(asyncio.sleep(0.01))")).toEqual(READY);
+    } finally {
+      pyodide.runPython("import asyncio\nasyncio.ensure_future = _ef_original", {
+        globals: pyodide.globals,
+        filename: "<test>",
+      });
+    }
+
+    expect(pyodide.runPython("len(_ef_hits)", { globals: pyodide.globals })).toBe(1);
+    expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
+  }, 20_000);
 });
 
 describe("깨울 수 없는 순간에 소비된 SIGINT", () => {

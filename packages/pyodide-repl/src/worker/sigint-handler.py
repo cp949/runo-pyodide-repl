@@ -206,7 +206,19 @@ def install(console, ack, seq, warn, extra_own_codes=()):
 
         def run_sync(awaitable):
             nonlocal pending
-            fut = asyncio.ensure_future(guard(awaitable))
+            coro = guard(awaitable)
+            try:
+                fut = asyncio.ensure_future(coro)
+            except BaseException:
+                # ensure_future 안에서 눌림이 처리돼 규칙 ①의 KeyboardInterrupt가 났다. Task를 만들기 전이면 guard와 시작 전
+                # awaitable 코루틴을 닫아 둔다: 버려지면 GC가 `coroutine ... was never awaited` 경고를 트레이스백 앞에
+                # 찍는다. Task를 만든 뒤면 그 Task가 guard를 돌리므로 닫지 않는다(닫으면 Task가 닫힌 코루틴을 재개하다
+                # `RuntimeError: cannot reuse already awaited coroutine`을 낸다).
+                if not any(task.get_coro() is coro for task in asyncio.all_tasks(asyncio.get_event_loop())):
+                    coro.close()
+                    if inspect.iscoroutine(awaitable) and inspect.getcoroutinestate(awaitable) == inspect.CORO_CREATED:
+                        awaitable.close()
+                raise
             waiters.add(fut)
             try:
                 result = original_run_sync(fut)
