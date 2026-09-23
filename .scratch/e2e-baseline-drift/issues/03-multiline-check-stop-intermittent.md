@@ -1,6 +1,6 @@
 # 03 `multiline-check.mjs` dev `stop:` 확인이 간헐적으로 실패한다(4회 중 1회)
 
-Status: open
+Status: done
 
 ## 현상
 
@@ -34,3 +34,7 @@ stop: exit() 뒤 나머지 문장은 실행하지 않고 terminated Alert가 뜬
   읽은 시점에 `1` 출력 행이 화면에 없었다. 가설(미검증): (A) 판정 대기 부족 — 상태 DOM 갱신이 xterm의 `1` 쓰기 렌더보다 먼저 보인다(9.7 "존재 확인은
   조건 대기" 위반 셀). (B) 제품 결함 — 세션 종료 처리 중 직전 stdout이 버려진다. 구분 방법: `1` 행을 `waitFor`로 기다리게 고친다 — (A)면 통과, (B)면
   시간 초과로 여전히 실패한다.
+- 2026-09-24 종료: `checks/multiline-check.mjs` `stop: exit() …` 셀이 `terminated` 뒤 `tail(6)`을 한 번 읽던 것을 `1` 행 `waitFor`(5초)로 바꿨다
+  (`09-testing.md` 9.7 "존재 확인은 조건 대기"). L1: dev `ONLY=stop` 1회 4/4 통과(초기 + stop 3셀), `pnpm --filter demo e2e:check` 27/27.
+  한계: 기존 실패율(전체 실행 6회 중 2회)에서 1회 통과는 해소 증명이 아니다. 가설 (B)(종료 중 출력 버림)였다면 이 셀은 이제 `"1" 출력 행(terminated 뒤)`
+  시간 초과로 실패한다 — 그 메시지로 재발하면 제품 결함으로 새 이슈를 `open`으로 등록한다.

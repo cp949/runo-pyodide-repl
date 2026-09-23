@@ -149,8 +149,11 @@ async function runDev(url) {
     await paste("print(1)\nexit()\nprint(2)");
     await enter();
     await waitFor(async () => (await statusText()) === "terminated", "status = terminated", 10000);
+    // 상태 DOM 갱신이 xterm의 `1` 행 렌더보다 먼저 보일 수 있어 `1` 행도 조건 대기한다(09-testing.md 9.7,
+    // .scratch/e2e-baseline-drift/issues/03). 종료 처리 중 출력이 버려지는 결함이면 여기서 시간 초과로 실패한다.
+    await waitFor(async () => (await tail(6)).some((r) => r === "1"), '"1" 출력 행(terminated 뒤)', 5000);
+    // terminated 뒤에는 더 실행되지 않으므로 "2" 부재는 이 시점에 판정해도 된다.
     const t = await tail(6);
-    if (!t.some((r) => r === "1")) throw new Error(`"1"이 안 보인다 — ${show(t)}`);
     if (t.some((r) => r === "2")) throw new Error(`"2"가 보인다(실행되면 안 된다) — ${show(t)}`);
     const terminatedCount = await page.locator('[data-testid="terminated"]').count();
     if (terminatedCount !== 1) throw new Error(`terminated Alert 개수 = ${terminatedCount}`);
