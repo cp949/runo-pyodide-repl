@@ -6,7 +6,7 @@
 // 기대 행·입력 문장은 이전 스크립트의 것을 그대로 쓴다. 건너뛴 ID는 skipped-ids.md.
 // 이전과 달라진 점:
 //   - 입력은 읽기가 시작된 뒤에 보낸다(TRP-005). stdin 프롬프트 글자는 읽기 시작보다 먼저(`write` 알림) 화면에 나오고 프롬프트 없는
-//     `input()`은 화면 신호가 없어, 첫 글자가 에코될 때까지 재시도한다(`typeWhenReading`). 버려진 키는 화면에 흔적이 없다.
+//     `input()`은 화면 신호가 없어, 첫 글자를 한 번 치고 에코될 때까지 기다린다(`typeWhenReading`, 재시도 없음 — RD-019 이후 읽기 전 키는 버려지지 않고 쌓였다가 읽기 시작에서 재생된다).
 //   - 고정 sleep 대신 화면이 안정될 때까지(`settled`) 기다린다.
 //   - 각 확인은 Ctrl+L(`clear`)로 시작해 정확한 행 목록으로 단언한다(TRP-008). 개행 수는 커서 행으로 본다(TRP-006).
 // 사용: node stdin-input-check.mjs <url>(생략 시 http://localhost:5173)     ONLY=RM1,TICK node stdin-input-check.mjs <url>

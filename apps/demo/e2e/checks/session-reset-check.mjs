@@ -223,8 +223,8 @@ async function runDev(url) {
       async () => (await rows()).some((r) => r.includes("KeyboardInterrupt")),
       "input() 취소 트레이스백",
     );
-    // 취소 트레이스백 렌더링과 겹치면 곧바로 타이핑한 첫 글자가 드롭될 수 있다(TRP-005류) — 화면이
-    // 안정된 뒤에 타이핑한다.
+    // 취소 트레이스백 렌더링과 겹치는 창에 친 첫 글자는 RD-019 이전에는 드롭될 수 있었다(TRP-005류). 지금은 읽기 없는
+    // 구간의 키를 벤더가 쌓아 재생하므로 유실되지 않지만, 화면이 안정된 뒤에 타이핑하는 순서는 유지한다.
     await h.settled();
     await submit("print(1)");
     const t = await tail(3);
@@ -276,7 +276,8 @@ async function runDev(url) {
     if (text !== TERMINATED_TEXT) throw new Error(`terminated 문구 = ${show(text)}`);
   });
   await step("exit: terminated에서 입력은 완전 무응답(에코도 없음)", async () => {
-    // terminated 뒤에는 활성 읽기가 없어(8.3, TRP-005류) 키가 화면에 아무 흔적도 안 남긴다 — echo도 없다.
+    // terminated 뒤에는 활성 읽기가 없어(8.3) 키가 화면에 아무 흔적도 안 남긴다 — echo도 없다. RD-019 뒤에는 이 키를 버리지
+    // 않고 벤더 Readline이 쌓아 두지만(그리지 않는다) 리셋(`cancelRead`)이 폐기한다.
     // type()은 에코를 기다리므로 여기서는 쓰지 않는다(에코가 없는 게 기대 동작이라 항상 타임아웃한다).
     const before = await rows();
     await page.keyboard.type("1+1");

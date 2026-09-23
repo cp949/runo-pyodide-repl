@@ -9,14 +9,14 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 
 - `pnpm --filter demo e2e:baseline` — 서버 3개(5173 dev · 4173 preview · 4174 비격리 정적)를
   이 실행기가 비어 있으면 스스로 기동하고(이미 떠 있으면 "기존 사용"으로 표기하고 그대로 쓰며 종료
-  시에도 내리지 않는다) 판정 16종의 dev 전부 + preview 부분 + `boot-press` N=30을 순서대로 돌린 뒤
+  시에도 내리지 않는다) 판정 17종의 dev 전부 + preview 부분 + `boot-press` N=30을 순서대로 돌린 뒤
   `apps/demo/e2e/results/summary.json`을 쓰고 이 실행기가 띄운 서버만 정리한다.
 - 판정 규칙: `summary.json`의 `failed`(`baseline.json`의 `deviations`·`unrun` 접두어에 해당하는
   이름은 제외) **0건** + 총 `pageerror`(`pageErrors` 필드, `expectedPageErrors`에 등록된 의도적
   forced 오류는 뺀 값) **0** + `ok: true`. "미실행"(`unrun`)은 실패가 아니다 — 담당 RD가
   아직 없어 그 확인 코드 자체가 스크립트에 없다는 뜻이다(2026-09-24 RD-016 완료로 현재 목록은 비어 있다).
 - `pnpm --filter demo e2e:<이름>` 단독 실행은 서버(주로 5173)가 이미 떠 있어야 한다
-  (`e2e/README.md` "실행 전제", 25항목 목록은 같은 문서).
+  (`e2e/README.md` "실행 전제", 26항목 목록은 같은 문서).
 - `pnpm --filter demo e2e:measure` — dev만 기동, 측정 5종(`boot-press` 제외, 참고값은 4절,
   이 실행기는 exit code만 본다).
 - `e2e:baseline`·`e2e:measure`는 사용자가 지시할 때만 돌린다(`docs/agents/rubber-workflow.md` "검증 실행 예산").
@@ -52,6 +52,7 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 | `block-history-check.mjs` | A·B·C·X 절 29개 | `초기,A,B,C` 11/11 | 통과 |
 | `tab-check.mjs` | C1~C15(C12 왕복 지연 포함) 76개 = 기존 C1~C14 68개 + RD-016 C15 8개(a·b·c·d×2·e×2·f) | `C1·C3·C8·C11` 30/30 | 통과. RD-016(2026-09-24): C15 절 8개 추가, C9c를 `from os import pa` → `path` 채움으로 재정의, C5e 제목 정정(왕복 + 큐), C12에 `import os.pa` 지연 기록 추가(판정 없음, 웜 N=20 중앙값·최대는 결과 JSON `notes`). dev `ONLY=C5,C9,C12,C15` 20/20(C15 8개 포함, `pageErrors` 0)만 실측했고 76개 전체 재실행은 하지 않았다(L2). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2) |
 | `selection-copy-check.mjs` | S01~S12 등 14개 | `S01,S02,S05,S07` 4/4 | 통과 |
+| `type-ahead-check.mjs` | 초기·T01~T09(T08·T09a·T09b 포함, T10 제외)·T11·콘솔/`pageerror` 확인 13개(T10 상한 4096은 벤더 단위 시험이 고정해 브라우저 셀 없음) | 미실행(dev 전용) | 통과 13/13(2026-09-24 RD-019 dev L1 1회, `pageErrors` 0. T11은 Tab이 마지막 키인 입력만 판정 — Tab 뒤 이어진 키는 응답 적용 조건으로 완성이 버려진다) |
 | `measure/boot-press.mjs`(baseline 세트 소속, DELTA-05가 배선) | 부팅 중 Ctrl+C N=30 | 미실행(baseline dev 전용) | 통과 30/30 |
 
 [^repl-log]: `repl-check.mjs`는 dev에서 `normal`·`cdn-blocked`·`not-isolated`(4174) 세 모드를 각각
@@ -125,7 +126,7 @@ exit code(형식 판정·`pageerror`)는 그대로 보고되지만 `measure` 세
 | `measure/boot-press.mjs`(**baseline 세트 소속**, N=30 판정) | 부팅 중 Ctrl+C | dev N=30·preview N=10 전부 정상(시행당 60~64회가 부팅 중 진입) | ROADMAP.md RD-007 137행. DELTA-05 재실행: dev N=30 **30/30 OK** |
 | `measure/input-burst-matrix.mjs` | 8콤보(`a`·`b`·`c`·`lp5`·`sp5`·`pa`·`pb`·`pc`) | 각 N=20, 160시행 전부 OK, 대상 `pageerror` 0 | ROADMAP.md RD-008 163행 |
 | `measure/sleep-await-check.mjs` | 12셀(RD-009/009a) + TLA 4셀(RD-012) = 16셀 | 각 N=20, 320시행. 12셀 전부 복귀·중앙값 30ms 안팎(아래 표, 참고값), 형식 판정 12/12. TLA 4셀도 전부 통과(`tla-burst` 중앙값 57.88ms는 30회 연타라 허용 편차). 총 `pageerror` 0 | ROADMAP.md RD-009 178~197행, RD-012 360~369행 |
-| `measure/keys-after-enter-probe.mjs` | Enter 직후 지연 0/5/10/20/50/100/200ms | 판정선 없음(측정 전용, 편차 32 키 소실 창 기록) | `keys-after-enter-probe.mjs` 머리 주석 |
+| `measure/keys-after-enter-probe.mjs` | Enter 직후 지연 0/5/10/20/50/100/200ms | 판정선 없음(측정 전용). RD-019 이전에는 편차 32(읽기 없는 구간의 키 소실)를 기록했고, RD-019 뒤에는 키가 쌓여 재생되므로 전 지연에서 N/N 유입이 기대값이다(재측정은 L3, 실행하지 않음) | `keys-after-enter-probe.mjs` 머리 주석 |
 
 ### `sleep-await-check.mjs` 12셀 중앙값·최대(ms) — RD-009/009a 실측(참고값, 스크립트 판정은 형식 판정만)
 

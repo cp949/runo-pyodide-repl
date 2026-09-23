@@ -81,6 +81,8 @@ const SETS = [
   { file: "checks/block-history-check.mjs", args: [DEV_URL], server: "preview" },
   { file: "checks/tab-check.mjs", server: "dev", trailingArgs: ["preview"] },
   { file: "checks/selection-copy-check.mjs", server: "dev", trailingArgs: ["preview"] },
+  // RD-019: 읽기가 없는 구간 키 버퍼링(type-ahead). dev 전용(preview 재실행 없음).
+  { file: "checks/type-ahead-check.mjs", server: "dev" },
   // RD-018 DELTA-05: 부팅 중 Ctrl+C 판정(N=30 기본값, boot-press.mjs는 measure/ 소속 파일이지만 baseline 세트다)
   { file: "measure/boot-press.mjs", server: "dev" },
 ];

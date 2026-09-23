@@ -28,11 +28,11 @@
   환경에서는 `e2e/run.mjs`가 "이미 죽었다"로 조용히 오판할 수 있다(`pending-traps/01.md` 계열,
   아래 함정 절 참고).
 
-## 명령 표(25항목, `apps/demo/package.json`)
+## 명령 표(26항목, `apps/demo/package.json`)
 
 | 이름 | 실행 |
 | --- | --- |
-| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 16종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
+| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 17종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
 | `e2e:measure` | `node e2e/run.mjs measure` — dev만 기동, 측정 5종(`boot-press` 제외) 순차 실행 |
 | `e2e:check` | `node e2e/run.mjs check` — `checks/`·`measure/`·`node/`의 `.mjs`를 `node --check`로 정적 구문 검사만(eslint·tsc는 `e2e/**` 계속 무시, 아래 "정적 검사" 참고) |
 | `e2e:repl-check` | `node e2e/checks/repl-check.mjs normal`(`cdn-blocked`·`not-isolated`는 인자로 직접 지정) |
@@ -51,6 +51,7 @@
 | `e2e:block-history` | `node e2e/checks/block-history-check.mjs` |
 | `e2e:tab` | `node e2e/checks/tab-check.mjs` |
 | `e2e:selection-copy` | `node e2e/checks/selection-copy-check.mjs` |
+| `e2e:type-ahead` | `node e2e/checks/type-ahead-check.mjs` |
 | `e2e:boot-press` | `node e2e/measure/boot-press.mjs` |
 | `e2e:press-loss` | `node e2e/measure/press-loss.mjs` |
 | `e2e:burst-matrix` | `node e2e/measure/burst-matrix.mjs` |
@@ -90,7 +91,7 @@
   피하려고). 실행: `python3 apps/demo/e2e/positive-controls/rd-0NN.py <번호>`(번호는 파일 머리
   주석·`rd-0NN.py` 안 `CONTROLS` 딕셔너리 참고). 끝나면 드라이버가 띄운 dev 서버가 하나 남는다 —
   직접 정리한다.
-- `rd-010.md`~`rd-017.md`(7개, RD-010~017 중 RD-016 제외): 자동 드라이버가 아니라 수행한 변조·명령·
+- `rd-010.md`~`rd-017.md`(7개, RD-010~017 중 RD-016 제외)·`rd-019.md`(RD-019): 자동 드라이버가 아니라 수행한 변조·명령·
   결과를 손으로 기록한 절차 문서다. 재현하려면 문서에 적힌 순서(소스 변조 → `pnpm --filter demo dev`
   **재시작** → `ONLY=`로 대상 셀 실행 → 원복 → 재시작 → 전체 재통과)를 직접 따른다 — dev 재시작은
   이 경우 실행자의 몫이다(`.py` 5개와 다르다).
@@ -141,7 +142,7 @@ DELTA-02 "## 결정")·`"preview"`(4173)다. 같은 프로세스에서 같은 �
 
 이 폴더의 하니스·확인 스크립트를 고치거나 새로 만들 때 부딪히기 쉬운 함정(`docs/traps/`):
 
-- `docs/traps/TRP-005` 자동화 입력은 새 프롬프트가 보인 뒤에 보내야 한다
+- `docs/traps/TRP-005` Ctrl+C는 새 프롬프트가 보인 뒤에 보내야 한다(글자는 RD-019 이후 버퍼링, 재시도하면 중복)
 - `docs/traps/TRP-006` 화면 행 텍스트만 비교하면 출력 끝의 여분 빈 줄을 놓친다
 - `docs/traps/TRP-007` 파일을 `git checkout`으로 되돌린 뒤 다시 변조하면 vite dev가 낡은 모듈을 계속 준다
 - `docs/traps/TRP-008` "로그가 없다" 확인을 뷰포트만 훑어 하면 화면 밖으로 밀려난 로그를 놓친다
@@ -180,6 +181,16 @@ eslint·tsc는 계속 `e2e/**`를 무시한다(`apps/demo/eslint.config.js`의 `
 - `seedClipboard(page, text)`: 시험 전 클립보드에 사전 값을 넣는다.
 - `setCopyOnSelect(page, on)`: "선택 시 자동 복사" 체크박스를 `on`에 맞춘다(리셋이 없어 대기 없이 클릭만 한다).
 - `toastText(page)`: 복사 토스트(`data-testid=copy-toast`) 텍스트, 없으면 `null`.
+
+## 도우미(RD-019, 읽기가 없는 구간의 키)
+
+- `typeWhenReading(text)`·`cancelWhenReading(text)`는 **재시도하지 않는다**. 활성 읽기가 없는 구간의 키는 벤더
+  `Readline`이 버리지 않고 쌓았다가 다음 읽기가 시작될 때 재생하므로(RD-019 type-ahead), 에코가 없다고 첫 글자를 다시
+  치면 글자가 중복된다(`x: `에 `abc` → `aabc`). 첫 글자를 한 번 치고 그 에코(재생 = 읽기 시작)를 `waitFor`한 뒤 나머지를
+  친다. 취소 helper는 에코 뒤에 Ctrl+C를 누른다 — 읽기 전 Ctrl+C는 쌓이지 않고 쌓인 키를 비운 채 게이트에 막힌다.
+- 실행 중·부팅 중에 친 키가 "다음 프롬프트에 그대로 들어온다"는 판정은 `checks/type-ahead-check.mjs`(T01~T11)가 한다.
+- 실행 중(읽기 없음)에는 `paste()`를 쓸 수 없다: 붙여넣기 뒤 화면이 바뀔 때까지(1.5초 두 번) 기다리다 시간 초과로 던진다. `type-ahead-check.mjs`의 `pasteSilently`처럼 `.xterm-helper-textarea`에 `ClipboardEvent("paste")`를 직접 dispatch한다. 여러 줄 붙여넣기는 첫 줄이 `>>> …`, 둘째 줄은 `... ` 접두 없이 그려지고 커서가 마지막 줄 끝에 있다.
+- 결과 JSON 이름은 `<스크립트>-<label>.json`이고 `-2` 접미 카운터는 프로세스 안에서만 센다. 같은 `E2E_RESULTS_DIR`로 전 셀을 돌린 뒤 `ONLY=`로 다시 돌리면 전 셀 결과가 덮어써진다. 근거 JSON을 남길 때는 실행마다 `E2E_RESULTS_DIR`을 다르게 준다.
 
 ## 앞으로 새 RD를 추가할 때(RD-018부터)
 

@@ -19,7 +19,8 @@
 //
 // 규칙(RD-004 DELTA-08 계승): 고정 sleep 대신 조건이 참이 될 때까지 폴링한다. 행 텍스트는 `.xterm-rows > div`(NBSP → 공백,
 // 행 끝 공백 제거), 색은 span 클래스(`xterm-fg-1` 빨강, `xterm-fg-2` 초록). 개행 수는 커서 행 번호로 단언한다(TRP-006).
-// 입력은 새 프롬프트 행(`>>> ` 또는 꼬리+`>>> `)이 보인 뒤에 보낸다(TRP-005).
+// 입력은 새 프롬프트 행(`>>> ` 또는 꼬리+`>>> `)이 보인 뒤에 보낸다(TRP-005). 읽기가 없는 구간의 키는 벤더 Readline이
+// 쌓았다가 다음 읽기에서 재생하므로(RD-019) 재시도로 키를 다시 치면 글자가 중복된다.
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -307,24 +308,17 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     await press("Control+u");
   }
   /**
-   * stdin 읽기가 시작되기 전에 친 키는 벤더 readline이 버린다(활성 읽기가 없다, TRP-005). 프롬프트 글자(`x: `)는 `write` 알림으로
-   * 읽기 시작보다 먼저 화면에 나오고 프롬프트 없는 `input()`은 화면 신호가 없어, 화면만으로는 읽기가 시작됐는지 알 수 없다.
-   * 첫 글자를 쳐서 화면이 바뀔 때까지(에코) 재시도한다. 버려진 키는 화면에 흔적이 없어 재시도가 안전하다. 나머지 글자는 그 뒤에 친다.
+   * stdin 읽기가 시작되기 전에 친 키는 벤더 readline이 버리지 않고 쌓았다가 읽기가 시작될 때 재생한다(RD-019 type-ahead,
+   * TRP-005). 프롬프트 글자(`x: `)는 `write` 알림으로 읽기 시작보다 먼저 화면에 나오고 프롬프트 없는 `input()`은 화면
+   * 신호가 없어, 화면만으로는 읽기가 시작됐는지 알 수 없다. 그래서 첫 글자를 **한 번만** 치고 그 에코(재생 시점 = 읽기 시작)가
+   * 화면에 나타날 때까지 기다린다. 재시도하지 않는다: 첫 글자가 버려지지 않고 쌓이므로 다시 치면 글자가 중복된다(`x: `에
+   * `abc` → `aabc`). 나머지 글자는 에코 뒤에 친다.
    */
-  async function typeWhenReading(text, { attempts = 40, echoMs = 400 } = {}) {
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const before = await snapshot();
-      await page.keyboard.type(text[0]);
-      const echoed = await waitFor(async () => (await snapshot()) !== before, "첫 글자 에코", echoMs).then(
-        () => true,
-        () => false,
-      );
-      if (echoed) {
-        if (text.length > 1) await type(text.slice(1));
-        return;
-      }
-    }
-    throw new Error(`stdin 읽기가 시작되지 않았다(첫 글자 ${JSON.stringify(text[0])}가 ${attempts}번 버려짐)`);
+  async function typeWhenReading(text, { timeoutMs = 15000 } = {}) {
+    const before = await snapshot();
+    await page.keyboard.type(text[0]);
+    await waitFor(async () => (await snapshot()) !== before, "첫 글자 에코(쌓인 키가 읽기 시작에서 재생됨)", timeoutMs);
+    if (text.length > 1) await type(text.slice(1));
   }
   /** 화면(행 + 커서 행)이 `quietMs` 동안 바뀌지 않을 때까지 기다린다. 긴 프롬프트의 재그리기가 끝난 뒤 행을 읽을 때 쓴다. */
   async function settled(quietMs = 200, timeoutMs = 5000) {
@@ -391,9 +385,11 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     );
   }
   /**
-   * stdin 읽기가 열린 것을 첫 글자 에코로 확인한 뒤 Ctrl+C를 누른다. 읽기가 열리기 전의 Ctrl+C는
-   * 활성 읽기가 없어 `ctrlCHandler`로 가 버려지고(TRP-005), 인자 없는 `input()`은 프롬프트 글자가 없어
-   * 화면만으로는 읽기 시작을 알 수 없다. `text`는 최소 한 글자이어야 한다(그 글자가 읽기 확인용이다).
+   * stdin 읽기가 열린 것을 첫 글자 에코로 확인한 뒤 Ctrl+C를 누른다. 읽기가 열리기 전의 Ctrl+C는 쌓이지 않고
+   * 쌓인 키를 비운 채 `ctrlCHandler`로 가 게이트에 막혀 버려진다(TRP-005, RD-019). 그러면 다음에 열리는 읽기가
+   * 취소되지 않고, 글자를 쳐 둔 경우 그 글자도 함께 사라진다. 인자 없는 `input()`은 프롬프트 글자가 없어 화면만으로는 읽기
+   * 시작을 알 수 없으므로, 글자 하나를 **한 번** 쳐서 에코를 확인한 뒤(`typeWhenReading`, 재시도 없음) Ctrl+C를 누른다.
+   * `text`는 최소 한 글자이어야 한다(그 글자가 읽기 확인용이다).
    */
   async function cancelWhenReading(text) {
     if (!text) throw new Error("cancelWhenReading에는 읽기를 확인할 글자가 최소 하나 필요하다");

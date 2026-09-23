@@ -337,7 +337,8 @@ async function run(url) {
     await press("Control+c");
     await waitPrompt(">>>");
     // 취소 직후 재그리기는 두 단계(즉시 프롬프트 → KeyboardInterrupt 삽입 뒤 프롬프트 재출력)라 그
-    // 사이의 짧은 창에 보낸 키가 새 읽기로 교체되며 버려질 수 있다(RD-014 reset()과 같은 이유, 실측).
+    // 사이의 짧은 창에 보낸 키가 새 읽기로 교체되며 버려질 수 있다(RD-014 reset()과 같은 이유, 실측). RD-019 뒤에는 읽기 없는
+    // 구간의 키를 벤더가 쌓아 재생하지만 이 재그리기 창(`redrawing`)의 키 처리는 바뀌지 않아 이 대기는 그대로 둔다.
     await sleep(250);
     await step("C7b `... ` 줄 접두사 완성", async () => {
       await type("for i in range(2):");
@@ -862,7 +863,7 @@ async function run(url) {
       await type("exit()");
       await press("Enter");
       await sleep(1500);
-      // 세션 종료 뒤에는 활성 읽기가 없어 키가 아예 에코되지 않는다(TRP-005) — h.type()은 에코를
+      // 세션 종료 뒤에는 활성 읽기가 없어 키가 에코되지 않는다(쌓아 두었다가 리셋이 폐기, RD-019) — h.type()은 에코를
       // 전제로 기다리므로 여기서는 원문처럼 raw page.keyboard.type을 쓴다(대기 없음).
       await page.keyboard.type("os.pa");
       await press("Tab");

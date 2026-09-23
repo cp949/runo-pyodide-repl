@@ -29,6 +29,7 @@
     "e2e:block-history": "node e2e/checks/block-history-check.mjs",
     "e2e:tab": "node e2e/checks/tab-check.mjs",
     "e2e:selection-copy": "node e2e/checks/selection-copy-check.mjs",
+    "e2e:type-ahead": "node e2e/checks/type-ahead-check.mjs",
     "e2e:boot-press": "node e2e/measure/boot-press.mjs",
     "e2e:press-loss": "node e2e/measure/press-loss.mjs",
     "e2e:burst-matrix": "node e2e/measure/burst-matrix.mjs",
