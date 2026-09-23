@@ -82,8 +82,19 @@ const SETS = [
   { file: "checks/selection-copy-check.mjs", server: "dev", trailingArgs: ["preview"] },
 ];
 
-/** `measure`가 순차로 돌릴 스크립트 목록(DELTA-04부터 채움). SETS와 같은 이유로 이 DELTA는 빈 배열이다. */
-const MEASURE_SET = [];
+/**
+ * `measure`가 순차로 돌릴 스크립트 목록(RD-018 DELTA-04). `boot-press.mjs`는 `baseline` 세트 소속(N=30, 판정)이라
+ * 여기 없다 — DELTA-05가 SETS에 배선한다. 나머지 5종은 dev에서만 돈다(measure는 preview 부분집합이 없다). 판정선은
+ * 각 스크립트 안에 있고 이 실행기는 exit code만 본다(baseline의 `writeSummary()`처럼 결과 JSON을 대조하지 않는다 —
+ * 측정값은 판정 대상이 아니라 기록이기 때문, DELTA-04 "## 계획" 확정 15).
+ */
+const MEASURE_SET = [
+  { file: "measure/keys-after-enter-probe.mjs", server: "dev" },
+  { file: "measure/press-loss.mjs", server: "dev" },
+  { file: "measure/burst-matrix.mjs", server: "dev" },
+  { file: "measure/input-burst-matrix.mjs", server: "dev" },
+  { file: "measure/sleep-await-check.mjs", server: "dev" },
+];
 
 /** url에 짧은 타임아웃으로 요청해 응답이 오는지(포트가 이미 쓰이고 있는지) 본다. 응답만 오면 상태 코드는 무관하다. */
 async function probe(url, timeoutMs = 1000) {
@@ -365,9 +376,8 @@ async function cmdBaseline() {
 async function cmdMeasure() {
   const servers = await ensureServers(["dev"]);
   try {
-    // DELTA-04부터: MEASURE_SET을 축소 N으로 돌려 배선을 확인한다. 이 DELTA는 빈 배열이다.
-    for (const _entry of MEASURE_SET) {
-      throw new Error("MEASURE_SET 실행은 DELTA-04부터 구현된다");
+    for (const entry of MEASURE_SET) {
+      await runOneScript(entry);
     }
   } finally {
     await teardown(servers);
