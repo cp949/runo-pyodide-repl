@@ -8,14 +8,39 @@
 //   await h.waitPrompt(">>>");
 //   ...
 //   await h.finish(); // pageErrors 계수 포함 결과를 JSON으로 출력하고 브라우저를 닫는다
+//   await h.finish({ label: "preview" }); // 결과 파일 이름에만 쓰이는 label(기본 "dev")
 //
 // 전제: `pnpm --filter demo dev`(또는 `preview`)가 떠 있고, `pnpm exec playwright install chromium`이
 // 끝나 있어야 한다.
+//
+// 결과 파일(RD-018 DELTA-01): `finish()`가 stdout JSON을 그대로 찍으면서 같은 내용을
+// `process.env.E2E_RESULTS_DIR`(기본 `apps/demo/e2e/results/`)에 `<호출 스크립트 파일명>-<label>.json`으로도
+// 쓴다. 같은 프로세스에서 같은 조합이 반복되면 `-2`·`-3` 접미가 붙는다.
 //
 // 규칙(RD-004 DELTA-08 계승): 고정 sleep 대신 조건이 참이 될 때까지 폴링한다. 행 텍스트는 `.xterm-rows > div`(NBSP → 공백,
 // 행 끝 공백 제거), 색은 span 클래스(`xterm-fg-1` 빨강, `xterm-fg-2` 초록). 개행 수는 커서 행 번호로 단언한다(TRP-006).
 // 입력은 새 프롬프트 행(`>>> ` 또는 꼬리+`>>> `)이 보인 뒤에 보낸다(TRP-005).
 import { chromium } from "playwright";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const e2eDir = path.dirname(fileURLToPath(import.meta.url));
+
+// RD-018 DELTA-01: finish()가 결과 파일을 쓸 때 호출 스크립트 파일명을 기준으로 삼는데, 같은 프로세스에서
+// 같은 스크립트가 label을 바꿔가며(또는 같은 label로) finish()를 여러 번 부를 수 있다(dev·preview 등). 그
+// 반복을 세어 `-2`·`-3` 접미를 붙이는 카운터. 모듈 스코프라 프로세스 하나당 하나만 존재한다.
+const resultFileCounts = new Map();
+
+/** `<스크립트 파일명>-<label>[-N].json` 형태의 결과 파일 이름을 만든다(같은 조합 반복 시 N을 2부터 붙인다). */
+function resultFileName(label) {
+  const scriptPath = process.argv[1] ?? "script";
+  const base = path.basename(scriptPath, path.extname(scriptPath));
+  const key = `${base}-${label}`;
+  const count = (resultFileCounts.get(key) ?? 0) + 1;
+  resultFileCounts.set(key, count);
+  return count === 1 ? `${key}.json` : `${key}-${count}.json`;
+}
 
 /** 브라우저를 띄워 url을 연다. 반환한 객체의 헬퍼가 화면·입력·콘솔 기록·페이지 내부 시계를 다룬다. */
 export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
@@ -434,32 +459,37 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
   /**
    * 결과를 JSON으로 출력하고 브라우저를 닫는다. 종료 코드는 호출자가 정한다.
    * `ok`는 `pageErrors`(전체, 재보고 포함) 0도 요구한다. `webLoopReraises`는 진단용으로만 남긴다.
+   *
+   * RD-018 DELTA-01: `label`(기본 `"dev"`)은 stdout에는 찍히지 않고, 결과 파일 이름(`<호출 스크립트
+   * 파일명>-<label>.json`, `resultFileName` 참고)에만 쓰인다. stdout JSON 자체는 이전과 같은 모양이고
+   * (기존 호출자가 `label` 없이 부르면 파일은 `dev`로 저장돼 호환된다), 파일 내용은 그 stdout JSON과
+   * 동일하다(`checks` 전체 맵도 함께 담아 실행기(`run.mjs`)가 ID 단위로 대조할 수 있게 한다).
    */
-  async function finish(extra = {}) {
+  async function finish({ label = "dev", ...extra } = {}) {
     const finalRows = (await rows()).filter((r) => r !== "");
     await browser.close();
     const ok = Object.values(checks).every(Boolean) && pageErrors.length === 0;
-    console.log(
-      JSON.stringify(
-        {
-          url,
-          ok,
-          passed: Object.values(checks).filter(Boolean).length,
-          total: Object.keys(checks).length,
-          failed: Object.entries(checks)
-            .filter(([, v]) => !v)
-            .map(([k]) => k),
-          notes,
-          finalRows: finalRows.slice(-8),
-          problemLogs: problemLogs(),
-          webLoopReraises: pageErrors.length - otherPageErrors().length,
-          pageErrors,
-          ...extra,
-        },
-        null,
-        2,
-      ),
-    );
+    const result = {
+      url,
+      ok,
+      passed: Object.values(checks).filter(Boolean).length,
+      total: Object.keys(checks).length,
+      failed: Object.entries(checks)
+        .filter(([, v]) => !v)
+        .map(([k]) => k),
+      notes,
+      finalRows: finalRows.slice(-8),
+      problemLogs: problemLogs(),
+      webLoopReraises: pageErrors.length - otherPageErrors().length,
+      pageErrors,
+      checks,
+      ...extra,
+    };
+    const json = JSON.stringify(result, null, 2);
+    console.log(json);
+    const resultsDir = process.env.E2E_RESULTS_DIR ?? path.join(e2eDir, "results");
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(path.join(resultsDir, resultFileName(label)), json);
     return ok;
   }
 
