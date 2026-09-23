@@ -492,7 +492,7 @@ Ctrl+U로 지운 줄)뿐이고, RD-014의 ↑ 삼킴은 이 경로만 다룬다.
   영역). 단위: 취소 시 `interruptCompletion` 정확히 1회, Enter 종료·요청 없음·이미 끝남은 0회
   (`tab-reader.test.ts`).
 - `input()` 중 Tab 무동작·`\t` 없음(C9a·C9b, `stdin-reader.ts`에 `readOptions`가 없어 벤더가 무시) + 단위
-  (`index.test.ts`: 가짜 `complete` 0회). `from os import pa` 무동작(C9c).
+  (`index.test.ts`: 가짜 `complete` 0회). `from os import pa` 무동작(C9c). (2026-09-24 정정: C9c는 Tab 직후 `!` 입력이 완성 왕복보다 먼저 도착해 통과한 것이다 — `rlcompleter`는 `pa`에 키워드 `pass`를 내며, `import os.pa`도 속성 후보 5개라 채워지지 않는다. RD-016이 C9c를 `path` 채우기로 재정의한다.)
 - 세션 리셋 뒤 Tab 동작·삽입 1회(C11a), `exit()` 뒤 무동작(C11b), `exit()` 뒤 리셋 세션에서 동작(C11c).
 - 지연(C12, 페이지 내부 시계 TRP-022, dev Chromium headless, 웜(세션 첫 Tab 제외) N=20): `a.` 속성 후보
   중앙값 **25.8ms**·최대 **33.5ms**, 빈 스템 공백 중앙값 **10.9ms**·최대 **17.0ms**. 정지 0, 둘 다 필수
@@ -543,7 +543,13 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 
 시나리오: `import os.pa` Tab → `import os.path`. `import xml.dom.m` Tab → `xml.dom.mini`. `import ` Tab 두 번 → 모듈 목록. `from os import pa` → `path`. `import os; os.pa`는 속성 완성.
 
-완료 기준: 이전 RD-016a 브라우저 129개 시나리오와 같은 결과, 3.14 pty 케이스 A01~A36 중 32개 + X01 대조, 게이트 코퍼스 53줄 일치, 호출마다 `ZipStdlibModuleCompleter` 새 인스턴스(`loadPackage` 뒤 후보 반영 시험), zip stdlib 보정으로 `collections.abc` 등 복원.
+완료 기준(2026-09-24 그릴링 확정 — 이전 RD-016a 129/129·A 32개·코퍼스 53줄은 이력이며 합격 조건이 아니다, 검증은 L0 + L1, `docs/agents/rubber-workflow.md` "검증 실행 예산"):
+- L0 정확성(node + 실제 pyodide): `complete_source` 결과를 3.14.4 pty 기준 A01~A36·X01~X04 전부와 대조(기대값은 케이스 ID와 함께 시험 리터럴로 옮김, 원본 JSON은 `apps/demo/e2e/pty/rd-016/`). 네이티브와 pyodide 모듈 집합이 갈리는 케이스(편차 18, `native_vs_pyodide.json`)는 후보 리터럴이 아니라 삽입 결과 구조로 판정(TRAP-27). A37은 3.14 quirk 단위 시험.
+- 게이트 코퍼스 55줄(53 + 대소문자 변형 2): JS 게이트 `mentionsImportKeyword` 단위 시험 + "게이트 거짓인 줄은 `ModuleCompleter`가 `None`" 안전성 시험(node + 실제 pyodide, TRAP-33).
+- zip stdlib 보정: 원본 `ModuleCompleter`가 `import collections.a`에 `[]`이고 보정 서브클래스가 `['collections.abc']`, 사설 이름(`_stdlib_path` str·`_is_stdlib_module`) 사전 조건 단정(TRAP-10). 호출마다 새 인스턴스(site-packages 가짜 패키지 `zz_fake_pkg`로 대리 시험). `_pyrepl` import 실패는 worker 부팅 실패. 모듈 분기도 `KeyboardInterrupt`를 삼키지 않는다.
+- L1 배선(dev, `tab-check.mjs` C15 절, `waitFor`·마커 판정만 — `09-testing.md` 9.7): `import os.pa`→`os.path`, `from os import pa`→`path`(C9c 재정의), `import collections.a`→`abc`, `import xml.dom.m`→`mini`, `import ` Tab 두 번 목록(`os`·`sys` 포함, 개수 단정 없음), `if True:` 블록 `pending` 경로, `import os; os.pa` 속성 폴백. C5e(`important = ` 8연타 32칸)는 "게이트 참·왕복 + 큐" 셀로 제목 정정. C12 `import os.pa` 지연은 N=20 기록만(판정선 없음) — `baseline.json` `unrun` 제거, `BASELINE.md` 갱신.
+- 200개 상한 브라우저 시험·실제 `loadPackage`·pty 재측정은 하지 않는다. 전체 `e2e:baseline`·preview는 사용자 지시 때만.
+- 계획서: `_works/20260924-21-rd-016-module-completion/`.
 
 ### RD-017 — 선택 영역 복사(선택 시 자동 복사, 선택 중 Ctrl+C는 복사)
 
