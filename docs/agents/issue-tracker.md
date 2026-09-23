@@ -14,7 +14,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 
 후속 이슈가 조사 → 새 이슈로 끝없이 이어지는 것을 막는다. 등록 전에 아래 기준으로 `Status`를 정한다.
 
-`Status` 값: `open`(착수 대상) · `deferred`(기록만, 재개 조건 명시) · `done` · `wontfix`(사유 명시).
+`Status` 값: `open`(착수 대상) · `deferred`(기록만, 재개 조건 명시) · `done` · `wontfix`(사유 명시) · `promoted (RD-NNN)`(ROADMAP RD로 승격, 이후 추적은 RD).
 
 `open`으로 등록할 수 있는 것:
 

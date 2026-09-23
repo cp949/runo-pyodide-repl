@@ -583,6 +583,22 @@ RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이
 검사로 교차 확인됐다(`_works/_completed/…/pending-issues/01·03·06.md`) — 승격하지 않았다. `verify/` 스크립트
 자체가 RD-018에서 다시 손댈 임시물이라 지금 보강하는 대신 옮길 때 함께 다듬는다.
 
+### RD-019 — 읽기가 없는 구간에 친 키 버퍼링(type-ahead)
+
+상태: 대기 · 이전: 없음(이전 구현 미구현. 2026-09-24 `.scratch/type-ahead/issues/01-keys-dropped-while-no-active-read.md`에서 승격 — 이전 구현의 "RD-019"는 RD-013 자동 들여쓰기이며 무관) · 설계: `06-editing.md` 6.1(벤더 소스 수정 방침), `04-stdin-input.md`(read-guard), `03-ctrl-c.md` 2.x(읽기 전 갭), `10-parity-deviations.md` 32 — 규칙 절은 착수 시 `06-editing.md` 6.7로 신설
+
+시나리오: `time.sleep(2)` 실행 중 `abc`를 치면 실행이 끝난 뒤 프롬프트에 `>>> abc`가 보이고 커서가 그 끝에 있다. 실행 중 `print(1)` Enter를 치면 실행이 끝난 뒤 그 줄이 제출돼 `1`이 나온다. Enter 직후(다음 프롬프트가 그려지기 전) 친 키가 다음 프롬프트에 들어온다. 실행 중 친 키 뒤 `input()`이 다음 읽기면 그 키는 `input()` 값이 된다(다음 읽기가 소비 — tty 입력 큐와 같다). 실행 중 Ctrl+C는 버퍼에 쌓이지 않고 기존 중단 경로(RD-007)로 가며, 그때까지 쌓인 키는 버린다(tty `ISIG`의 입력 큐 비움과 같다). 창 안의 붙여넣기는 낡은 `State`에 그려지지 않고 버퍼에 들어간다.
+
+완료 기준:
+- 위 시나리오 전부를 새 판정 스크립트 `apps/demo/e2e/checks/type-ahead-check.mjs`로 확인(L1, dev). 판정은 마커 배리어·`waitFor`로만 한다 — 고정 대기 뒤 부재·존재 판정과 ms 상한 없음(`09-testing.md` 9.7). "Enter 직후" 셀은 지연 0ms 입력 1회 결정적 판정이다(통계 반복 없음).
+- 3.14.4 pty 기준 데이터(`apps/demo/e2e/pty/rd-019/`)와 대조: 실행 뒤 프롬프트 줄 내용·커서 위치, 선입력 줄 제출 결과, Ctrl+C 뒤 선입력 폐기. pty에서 실행 **중**에 tty가 키를 에코하는 동작은 따르지 않는다(웹은 다음 읽기에서 그린다) — 실측에서 에코가 확인되면 `10-parity-deviations.md`에 편차로 등록한다.
+- 단위(jsdom + 실제 `Readline` + 가짜 터미널, `09-testing.md` 9.2): 비활성 구간 키가 다음 활성 읽기에 순서대로 재생된다, Ctrl+C는 쌓이지 않고 버퍼를 비운다, `dispose()` 뒤 버퍼가 비고 재생하지 않는다, 붙여넣기가 버퍼에 들어간다 — 전부 RED 확인 + 변이 검사.
+- 기존 판정 회귀 없음: `ctrl-c-check`·`prompt-cancel-check`·`input-cancel-check`·`stdin-input-check`·`tab-check`의 영향 절을 `ONLY=`로 L1 실행. 선입력 키를 "버려진다"로 기대하던 셀(편차 32 전제, 예: `keys-after-enter-probe.mjs`·TRP-005 우회 셀)은 새 동작으로 기대값을 갱신하고 `BASELINE.md` 해당 행을 고친다.
+- 문서: `10-parity-deviations.md` 32 해소 표시(번호 유지), `04-stdin-input.md` 71행·`03-ctrl-c.md` 162행의 "버린다" 서술 갱신, `DESIGN.md` 편차 건수.
+- 전체 `e2e:baseline`·`e2e:measure`는 사용자 지시 때만(`docs/agents/rubber-workflow.md` "검증 실행 예산").
+
+착수 시 DELTA "## 결정"으로 남길 설계 선택(완료 기준에는 영향 없음): 버퍼 위치(벤더 `Readline` 소스 vs 코어 래퍼 — `06-editing.md` 6.1은 벤더 소스 수정 방침), 버퍼 상한, read-guard(`terminal/read-guard.ts`)와 재생 순서.
+
 ## Phase 3 — 검증 자산
 
 ### RD-018 — 브라우저 회귀 하니스와 3.14 기준 데이터를 저장소 안에 보관

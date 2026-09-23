@@ -1,6 +1,6 @@
 # 읽기가 없는 구간에 친 키가 버려진다(입력 버퍼링)
 
-Status: open
+Status: promoted (RD-019)
 Origin: RD-003 브라우저 검증에서 발견. `docs/design/10-parity-deviations.md` 32, `docs/traps/TRP-005`.
 
 ## 현상
@@ -41,3 +41,4 @@ Origin: RD-003 브라우저 검증에서 발견. `docs/design/10-parity-deviatio
 - RD-006 시점: `input()`(stdin 읽기) 시작 전에 친 키는 버려진다. 벤더 `Readline`은 활성 읽기가 없으면 단일 키를 버리고, stdin 읽기는 worker가 `readInput` 알림을 보낸 뒤 main이 `readline.read()`로 읽기를 시작할 때까지가 창이다. 프롬프트 글자(`x: `)는 `write` 알림이 먼저 그려 화면만 보고 키를 보내면 이 창에 걸린다(RD-006 브라우저 하니스는 첫 글자가 에코될 때까지 재시도한다). read-guard(`terminal/read-guard.ts`)는 활성 REPL 읽기가 끝난 뒤로 stdin 읽기의 시작을 미룰 뿐 키 버퍼와 무관하다: 미루는 동안 친 키는 활성 REPL 읽기가 받아 REPL 줄이 된다. 위 "결정이 필요한 것"의 `input()`·read-guard 상호작용에 대한 RD-006 시점 답은 "버퍼링 없음"이다. 상태는 `open` 유지.
 
 - 2026-09-24 재분류: `open` 유지(`docs/agents/issue-tracker.md` "등록·분류 기준"). 사용자 시나리오·완료 기준이 있다. 본문 "결정이 필요한 것"(버퍼링 위치·read-guard 상호작용)과 RD 승격 여부는 사용자 결정 전이다.
+- 2026-09-24 사용자 지시로 `ROADMAP.md` RD-019로 승격. 이후 추적은 RD-019. 완료 기준의 "프로브 N=10에서 0ms 10/10"은 `09-testing.md` 9.7에 맞춰 결정적 판정 1회로 바꿨고, `input()` 상호작용은 "다음 읽기가 소비"로, 실행 중 Ctrl+C는 "버퍼 비움"으로 정했다(RD-019 시나리오).
