@@ -15,6 +15,10 @@ import {
 } from "../protocol/interrupt-protocol";
 import { createRpc } from "../protocol/rpc";
 import { createMailboxReader } from "../protocol/stdin-mailbox";
+import {
+  loadCompleteSource,
+  type CompleteSource,
+} from "./complete-source";
 import { createConsole, type ConsoleSinks, type ReplConsole } from "./console";
 import { connectInterrupts } from "./interrupt-buffer";
 import { startInterruptWatch } from "./interrupt-watch";
@@ -39,11 +43,23 @@ export interface BootDeps {
  * 2.5)는 루프 직전에 켜고 루프가 끝나면(`exit()`) `finally`에서 끈다. `ready` 알림 뒤(배너·러너·감시·REPL 루프)의
  * 잡히지 않은 예외는 ntf crashed({ message: String(error) })로 나간다(RD-010, worker는 살아 있을 수 있다).
  */
+/** `atPrompt`가 아니거나 `completer`가 아직 없을 때(콘솔 생성 전) `complete` 요청에 돌려주는 빈 응답. */
+function emptyCompletion() {
+  return { completions: [], start: 0 };
+}
+
 export async function bootReplWorker(
   frame: InitFrame,
   deps: BootDeps,
 ): Promise<void> {
-  const rpc = createRpc(frame.rpcPort); // 이 RD에는 main→worker 요청 핸들러가 없다(complete는 RD-015)
+  // complete 핸들러는 createRpc 생성 시에만 등록할 수 있다(protocol/rpc.ts, 나중 등록 API 없음). 콘솔이 아직 없는
+  // 동안(로드 중)과 프롬프트 대기 중이 아닌 동안(실행 중)은 completer/atPrompt를 클로저로 읽어 빈 응답으로 답한다.
+  let completer: CompleteSource | null = null;
+  let atPrompt = false;
+  const rpc = createRpc(frame.rpcPort, {
+    complete: (source: string, pending: string | undefined) =>
+      atPrompt && completer ? completer(source, pending) : emptyCompletion(),
+  });
   const interruptBuffer = frame.interruptBuffer;
   const sinks: ConsoleSinks = {
     write: (text) => rpc.notify("write", text),
@@ -57,6 +73,7 @@ export async function bootReplWorker(
     repl = createConsole(pyodide, sinks, {
       topLevelAwait: frame.topLevelAwait,
     });
+    completer = loadCompleteSource(pyodide, repl.pyconsole);
     // WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제. 세션당 1회, 실패해도 REPL 동작은 그대로다(경고만 남는다).
     suppressWebLoopReraise(pyodide, {
       warn: (message) => console.warn(message),
@@ -112,8 +129,8 @@ export async function bootReplWorker(
       },
       { splitPaste },
     );
-    // 루프의 readLine 대기 중(atPrompt=true)인지를 감시 타이머의 프롬프트 유휴 폐기가 읽는다(03-ctrl-c.md 2.5).
-    let atPrompt = false;
+    // 루프의 readLine 대기 중(atPrompt=true)인지를 감시 타이머의 프롬프트 유휴 폐기와 `complete` 핸들러가 읽는다
+    // (03-ctrl-c.md 2.5, 01-protocols.md 1.2). 선언은 createRpc 앞으로 옮겼다(호이스팅에 기대지 않는다).
     const stopWatch = startInterruptWatch({
       interruptIdle,
       atPrompt: () => atPrompt,

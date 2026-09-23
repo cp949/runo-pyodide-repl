@@ -101,6 +101,7 @@ function createMainSide(script: unknown[] = []) {
     channel.port1.close();
     channel.port2.close();
   });
+  // complete 시험이 main 쪽에서 직접 `rpc.call("complete", ...)`을 보내야 하므로 rpc도 내놓는다.
   /** 알림은 `MessagePort`를 타므로 `await bootReplWorker` 뒤에도 늦게 도착할 수 있다. 50ms 간격으로 최대 5초 기다린다. */
   async function waitFor(predicate: () => boolean): Promise<void> {
     for (let waited = 0; waited < 5000; waited += 50) {
@@ -109,7 +110,7 @@ function createMainSide(script: unknown[] = []) {
     }
     throw new Error("기다리던 알림이 오지 않았다");
   }
-  return { frame, events, waitFor, writer };
+  return { frame, events, waitFor, writer, rpc };
 }
 
 const PROMPT_REQUEST = ["readLine", ">>> ", undefined, true];
@@ -599,5 +600,51 @@ describe("bootReplWorker", () => {
 
     // 버려진 SIGINT는 다음 실행으로 새지 않는다: writeOutput("2")(값 에코)만 오고 writeError는 없다.
     expect(events.slice(2)).toEqual(CLEAN_SESSION.slice(2));
+  }, 30_000);
+
+  test("프롬프트 대기 중(atPrompt)에만 complete가 실제 후보를 계산하고, 대기 전·실행 중에는 빈 응답이다(RD-015)", async () => {
+    let resolveSecondLine: ((line: string) => void) | undefined;
+    const { frame, events, waitFor, rpc } = createMainSide([
+      "import asyncio; import os",
+      () =>
+        new Promise<string>((resolve) => {
+          resolveSecondLine = resolve;
+        }),
+      "exit()",
+    ]);
+
+    void bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    // 콘솔 생성 전(ready 전, completer가 아직 없다): 빈 응답. createRpc는 부팅 함수의 첫 await 전에 handlers를
+    // 등록하므로 pyodide 로드가 끝나기 전에 온 요청도 즉시(빈 값으로) 답한다.
+    await expect(rpc.call("complete", "os.pa", undefined)).resolves.toEqual({
+      completions: [],
+      start: 0,
+    });
+
+    // 두 번째 readLine이 열려 있는 동안(atPrompt=true, 아직 응답 전): 실제 후보.
+    await waitFor(
+      () => events.filter((e) => e[0] === "readLine").length >= 2,
+    );
+    const duringPrompt = await rpc.call<{ completions: string[]; start: number }>(
+      "complete",
+      "os.pa",
+      undefined,
+    );
+    expect(duringPrompt.completions.length).toBeGreaterThan(0);
+    expect(duringPrompt.completions).toContain("os.path");
+
+    // asyncio.sleep으로 실행 중(atPrompt=false)에 보낸 complete는 빈 응답이다. WebLoop의 협조적 양보 덕에 실행
+    // 중에도 이벤트 루프가 살아 있어 이 요청이 처리된다(RD-009 sleep-await).
+    resolveSecondLine?.("asyncio.run(asyncio.sleep(1))");
+    await sleep(50);
+    await expect(rpc.call("complete", "os.pa", undefined)).resolves.toEqual({
+      completions: [],
+      start: 0,
+    });
+
+    await waitFor(
+      () => events.filter((e) => e[0] === "readLine").length >= 3,
+    );
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
   }, 30_000);
 });
