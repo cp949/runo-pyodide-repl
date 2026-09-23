@@ -32,3 +32,4 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-026](./TRP-026-recall-helper-cursor-accumulates-across-calls.md) | 한 시험 안에서 history 재호출 도우미를 연달아 부르면 cursor가 누적돼 변이를 가린다 | ACTIVE | `Readline.history.cursor`가 `read()` 시작 시 리셋되지 않는 성질에 기대 ↑ 재호출로 history를 관찰하는 시험에서, 재호출 도우미를 한 시험 안에 2회 이상 부를 때 |
 | [TRP-027](./TRP-027-pnpm-child-kill-silently-fails.md) | pnpm 자식 프로세스 kill이 조용히 실패한다(버전 관리자 재실행) | ACTIVE | pnpm 버전 관리자(pin 위임) 환경에서 `child_process.spawn("pnpm", …)`의 `child.kill()`로 서버를 내리려 할 때 |
 | [TRP-028](./TRP-028-intended-pageerror-sum-forces-ok-false.md) | 스크립트 자신의 "forced pageerror 1건만" 확인이 통과해도, 순진한 합산은 `ok`를 항상 거짓으로 만든다 | ACTIVE | 여러 확인 스크립트의 결과를 하나의 `summary.json`/`ok`로 합산하는 실행기에서, 일부 스크립트가 의도된 pageerror를 스스로 걸러내는 구조일 때 |
+| [TRP-029](./TRP-029-positive-control-docstring-correction-dropped-on-handoff.md) | 계획 단계에 쓴 양성 대조 드라이버 docstring이 실측 뒤 정정 목록에서 빠져 다음 RD로 그대로 이관된다 | ACTIVE | 양성 대조 드라이버를 쓰거나 다른 작업 폴더·저장소 경로로 이관할 때 |
