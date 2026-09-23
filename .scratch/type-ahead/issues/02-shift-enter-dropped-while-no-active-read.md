@@ -20,3 +20,7 @@ Origin: RD-019 벤더 `Readline` 버퍼 구현 중 코드 읽기로 발견(브�
 ## 비고
 
 3.14 tty에서는 Shift+Enter가 Enter와 같은 `\r`이라 이 기능의 3.14 대응이 없다(웹 고유 키). 우선순위 낮음.
+
+## Comments
+
+- 2026-09-24 그릴링 확정(Q1~Q7 전부 추천안). 처리 경로는 이 이슈 기준 rubber-workflow 소규모 실행(ROADMAP RD 없음). 재생은 웹 의미를 따른다(`readKey(ShiftEnter)` → `onKey` 자동 들여쓰기, Enter로 제출하지 않음). 형제 결함도 범위에 넣는다: `printAbove` 재그리기(`redrawing`) 중 Shift+Enter가 `queued`를 거치지 않아 순서가 뒤집힐 수 있다(코드 읽기, 미재현). 버퍼 항목은 `string | Input`, Shift+Enter 길이는 1. 검증은 L0(벤더 단위 시험 RED → GREEN) + L1(`type-ahead-check.mjs` T12 `ONLY=T12` 1회). 계획서는 `_works/20260924-23-type-ahead-shift-enter/`(브랜치 `type-ahead-shift-enter`), 구현은 다른 에이전트가 맡는다. `Status`는 `open` 유지.
