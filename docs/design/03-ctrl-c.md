@@ -159,7 +159,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   - `alive`: worker 생성부터 `sessionTerminated`·`loadFailed`·`dispose()` 전까지. 그 뒤에는 눌림이 닿을
     코드가 없다(3.14에도 프로세스가 없으므로 편차가 아니다).
   - `!readLinePending`: 수락한 `readLine`의 읽기가 끝나기 전. 요청 도착부터 응답이 포트에 올라가기 전까지라
-    **읽기가 실제로 열리기 전의 갭(약 20ms)도 포함한다** — 그 사이 눌림은 에코 없이 버려진다(편차 32).
+    **읽기가 실제로 열리기 전의 갭(약 20ms)도 포함한다** — 그 사이 눌림은 에코 없이 버려진다(Ctrl+C는 쌓이지 않는다. 대신 그때까지 쌓인 키를 비운다 — RD-019, `06-editing.md` 6.7. 편차 32 해소 뒤에도 이 Ctrl+C 손실은 남는다, `docs/traps/TRP-005`).
   - `inputReadsPending === 0`: `readInput` 알림 도착부터 `deliver`/`fail`/`cancel`이 끝날 때까지. 값을 다 전달한
     시점이 worker가 깨어나 실행을 재개하는 시점이다.
   - `!cancelSettling`(RD-008): REPL 읽기가 취소(`null` 응답)로 끝난 continuation에서 참이 되고, **`readLine`

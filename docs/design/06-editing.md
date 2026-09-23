@@ -10,6 +10,7 @@
 - `History`의 `localStorage` 자동 저장/복원은 옵션으로 끈다(벤더링했으므로 no-op 덮어쓰기 대신 생성자 옵션 `persist: false`).
 - `Readline.dispose()`는 리스너를 해제하고 `term`을 비우며 대기 중인 읽기(write 콜백 대기 중이라 `activeRead`가 없는 것 포함)를 `Error("readline disposed")`로 reject한다. 두 번째 호출은 무동작이다(RD-003). `term.dispose()`가 로드된 addon을 다시 dispose하므로 멱등이 필수다. dispose 뒤 `read()`는 reject하고 `println`·`print`는 터미널에 쓰지 않는다. 실제 xterm 6은 `term.dispose()` 뒤에도 write 콜백을 돌리고 그 안의 `term.buffer` 읽기는 `DisposableStore` 경고를 낸다.
 - `Tty`·`State`·`InputType`·`History`를 패키지에서 export한다. 코어(`packages/pyodide-repl`)는 이 export만 쓰고 private 멤버에 손대지 않는다. 코어가 필요로 하는 진입점은 벤더에 **공개 훅**으로 추가한다: 입력 준비 알림(프리필, `ReadOptions.prefill` — RD-013 완료), 키 가로채기(`ReadOptions.onKey`, RD-013이 범용으로 추가했고 Tab은 RD-015가 그 훅을 그대로 쓴다, `07-tab-completion.md` 7.1), 입력줄 위 출력(`Readline.printAbove(text: string): Promise<void>`, RD-015 완료 — 활성 읽기를 그대로 둔 채 입력줄 위에 텍스트를 찍고 같은 읽기로 다시 그린다. 재그리기 중 들어온 키는 큐에 쌓았다가 순서대로 재생한다. 활성 읽기가 없으면 `println`과 같다. `07-tab-completion.md` 7.3). 키 이벤트 가로채기(`ReadlineOptions.onKeyEvent?: (event: KeyboardEvent) => boolean`, RD-017 완료 — xterm `attachCustomKeyEventHandler` 수준에서 벤더 처리 앞에 불리고 `true`면 xterm 기본 처리를 생략한다. 선택 중 Ctrl+C 복사가 쓴다, 6.6). 붙여넣기 탭 보존(TRP-006)은 훅이 아니라 `readPaste` 소스 수정으로 했다(RD-011 완료: `readPaste`의 매핑 단계에서 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격. Tab은 REPL 읽기의 `onKey`(Tab 리더, `createTabReader`)가 소비하고, `input()` 읽기는 `readOptions`가 없어 벤더가 그대로 무시한다, RD-015 완료).
+- RD-019가 소스에 더한 내부 동작(공개 API 추가 없음, `index.ts` 값 export 목록 불변): 활성 읽기가 없는 구간에 들어온 키를 `Readline`이 쌓았다가 다음 읽기에서 재생한다. 규칙은 6.7.
 - RD-008이 소스에 더한 공개 API: `read(prompt: string): Promise<string>` / `read(prompt: string, options: ReadOptions): Promise<string | null>` 오버로드와 `ReadOptions = { cancelable?: boolean }`(기본 `false` = 원본 `^C` + 같은 프롬프트 재그리기). `cancelable`이면 활성 읽기 중 Ctrl+C가 읽기를 `null`로 끝낸다(6.3). 오버로드라 기존 `read(prompt)` 호출부의 반환형은 `Promise<string>`으로 남는다. `ReadOptions`도 export한다.
 - RD-010이 더한 `cancelRead(): void`: 열린 읽기(활성 읽기 + `read()`의 write 콜백을 기다리는 읽기)를 `ReadCancelledError`(export)로 끝내는 **프로그램에 의한** 취소. `dispose()`와 달리 리스너·`term`·history·state는 건드리지 않고 화면에도 아무것도 쓰지 않는다(커서 이동·개행·재그리기 없음 — 개행 여부는 코어가 결정, `08-session.md`). 콜백이 아직 오지 않은 읽기는 `dispose()`처럼 콜백 안에서 취소 여부를 확인해 늦게 온 콜백이 `activeRead`를 되살리지 않는다. 열린 읽기가 없으면 무동작. 코어의 `reset()`이 옛 세션의 열린 읽기를 끝내는 데 쓴다(`08-session.md`).
 - RD-013이 소스에 더한 공개 API: `ReadOptions.prefill?: string`(`read()`의 write 콜백 안, `new State` 직후 1회 `state.update(prefill)`로 채운다 — 커서는 끝, 빈 문자열·미지정은 원본과 같이 `state.refresh()`만 부른다. `cancelable`이 아닌 읽기의 `^C` 재그리기는 다시 채우지 않는다). `ReadOptions.onKey?: (input: Input) => boolean`(활성 읽기의 키마다 벤더 처리 앞에서 부르고 `true`면 처리를 생략한다. `readPaste`가 `editInsert`로 바로 넣는 `Text` 토큰은 거치지 않는다. 활성 읽기가 없으면 부르지 않는다). `Readline.getCursor(): number`(UTF-16 커서 위치, `State.cursor()` 경유)·`editInsert(text)`·`editBackspace(n)`(`getLine`/`updateLine`과 같은 수준으로 활성 읽기가 없어도 현재 state에 작용한다). `ReadlineOptions.skipBlankHistory?: boolean`(기본 `false`, 켜면 Enter 분기에서 trim 결과가 빈 문자열인 제출을 `history.append` 대신 `history.resetCursor()`만 한다). `Input` 타입도 export한다(값 export 목록은 불변).
@@ -197,3 +198,32 @@
 이전 구현 설계 문서 `09-auto-indent.md`, `10-block-history.md`,
 `/work/cp949/pyodide-samples/docs/repl/traps/`(TRP-001·004·006·008·016·017·030)
 
+## 6.7 읽기가 없는 구간의 키 버퍼링(type-ahead, RD-019 완료)
+
+3.14는 실행 중 tty가 입력을 큐에 쌓고 다음 프롬프트가 그 큐를 읽는다. 벤더 `Readline`이 같은 일을 한다(코어 래퍼가 아니다 — 재생이 `read()` write 콜백 안,
+`new State`·`prefill` 직후여야 하고 코어는 그 타이밍을 볼 수 없다). 공개 API 추가 없음.
+
+- **쌓는 구간**: `activeRead`가 없는 모든 때. 실행 중, Enter 직후 `read()` write 콜백 대기 중(약 20ms, `10-parity-deviations.md` 32의 옛 측정), `cancelSettling`, 부팅·로딩 중.
+  부팅 중 친 키는 쌓였다가 첫 프롬프트에서 재생한다(별도 코드 없음).
+- **쌓는 대상**: `onData` 덩어리 중 아래 둘을 뺀 전부(글자·Enter·Tab·방향키·Backspace·Ctrl+D·U·K·붙여넣기). 원본 문자열째 쌓는다. `parseInput` 결과가 토큰 1개이고 `CtrlC`·`CtrlL`일
+  때만 "즉시 처리"로 본다. `ab\x03cd` 같은 다중 토큰 덩어리는 덩어리째 쌓이고 재생 때 활성 읽기의 Ctrl+C로 처리된다(xterm은 키마다 `onData`를 따로 부르고 덩어리는 붙여넣기에서만 오므로 드문 경우).
+- **쌓지 않는 것**:
+  - **Ctrl+L**은 지금처럼 즉시 화면을 지운다(쌓지 않는다). 실행 중 Ctrl+L의 꼬리 규칙은 편차 40.
+  - **Ctrl+C**는 쌓지 않고 버퍼를 **무조건** 비운 뒤 `ctrlCHandler`를 부른다(게이트 결과와 무관, tty `ISIG`의 입력 큐 비움과 같다). 창 안의 Ctrl+C 자체는 여전히 에코·전송이
+    없다(`03-ctrl-c.md` 2.7). 그래서 Ctrl+C는 새 프롬프트가 보인 뒤에 보내야 한다(`docs/traps/TRP-005`).
+  - **Shift+Enter**는 `handleKeyEvent`가 `keydown`에서 `readKey`를 직접 불러 `onData`를 거치지 않으므로 활성 읽기가 없으면 예전처럼 버려진다(이 RD의 범위 밖, `.scratch/type-ahead/issues/02-*.md`).
+- **상한**: 합계 4096 UTF-16 코드 유닛(`TYPE_AHEAD_LIMIT`). 넘치는 덩어리는 **통째로** 버리고(앞에 쌓인 것은 유지, 이후의 작은 덩어리는 여전히 받는다) 알림이 없다. 앞에서부터
+  잘라 채우지 않는다(서로게이트 쌍·이스케이프 시퀀스 중간 절단 방지). 3.14 tty는 한 줄 4095자까지 남기고 나머지를 버린다(편차 49).
+- **수명 주기**: `cancelRead()`(세션 리셋의 `terminate()`가 유일한 호출처)가 버퍼를 비운다 — 리셋은 새 프로세스라 옛 맥락의 키를 넘기지 않는다. 이후 새 세션 부팅 중 친 키는 다시 쌓인다.
+  `dispose()`는 비우고 재생하지 않는다. `Readline`은 핸들이 하나만 만들어 세션 리셋 사이에도 공유하므로 이 두 곳이 버퍼의 유일한 폐기 지점이다(Ctrl+C 제외).
+- **재생**: `read()`의 write 콜백에서 `activeRead` 설정·`new State`·`prefill` 뒤 동기로 한다. 스냅샷을 먼저 꺼내 비운 뒤 덩어리마다 `readData`로 다시 넣으므로 `onKey` 훅(Tab 리더·자동 들여쓰기)과
+  `readPaste` 경로를 그대로 탄다. 낡은 `State`에는 그리지 않는다(붙여넣기 포함).
+- **읽기당 소비**: 재생 중 Enter로 읽기가 끝나면 남은 덩어리는 `activeRead`가 없어 다시 버퍼로 들어가 순서가 보존되고 다음 읽기가 받는다. 실행 중 `ab⏎cd`는 첫 줄 `ab`가 제출되고 `cd`가
+  다음 프롬프트 `>>> cd`에 남는다. 다음 읽기가 `input()`이면 첫 줄이 그 값이다(read-guard는 stdin 읽기 시작을 활성 REPL 읽기가 끝난 뒤로 미룰 뿐 버퍼와 무관하다, `04-stdin-input.md`).
+- **`printAbove`의 `queued`와의 관계**: 별개로 둔다(통합하지 않는다). `queued`는 재그리기(`redrawing`) 중 도착한 키를 재그리기 콜백에서 재생하고, type-ahead는 `activeRead`가 없을 때를 맡는다.
+  재생 키가 `printAbove`(Tab 완성 목록 등)로 재그리기를 시작하면 남은 덩어리는 `readData`의 `redrawing` 분기로 `queued`에 들어가 순서가 보존된다(벤더 시험 "재생 키가 printAbove로 …").
+- **알려진 경계**: Tab 뒤에 키가 이어진 입력(`os.getc`+Tab+`()`)은 재생이 한 틱에 끝나 Tab의 worker 왕복 응답 전에 뒤 키가 들어가 완성이 버려진다(편차 48). `cancelRead()` 뒤
+  `printAbove` 재그리기 콜백 전 창에 친 키는 `queued`를 거쳐 버려진다(`.scratch/type-ahead/issues/03-*.md`, 미재현).
+- **에코**: 실행 중에는 아무것도 그리지 않고 다음 읽기에서 입력줄로만 그린다. 3.14의 tty 에코는 따르지 않는다(편차 45). 실행 중 `←`·Ctrl+D·Tab 뒤 키는 편차 46~48이다.
+- **시험**: 벤더 `type-ahead.test.ts`(재생·순서·Ctrl+C·Ctrl+L·`cancelRead`·`dispose`·붙여넣기·상한·`onKey`·`printAbove` 순서·pty 대조 값), 브라우저
+  `apps/demo/e2e/checks/type-ahead-check.mjs`(`e2e:type-ahead`), 3.14.4 pty 기준 `apps/demo/e2e/pty/rd-019/`.

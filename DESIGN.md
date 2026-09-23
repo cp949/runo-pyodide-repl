@@ -15,10 +15,10 @@
    - `03-ctrl-c.md` SIGINT 프로토콜(요청 번호·ack·재전송, Python 핸들러, 감시 타이머, sleep 조각)
    - `04-stdin-input.md` `input()` 읽기·취소·read-guard·프롬프트 꼬리
    - `05-output.md` sink 4종·전역 스트림·배너
-   - `06-editing.md` 벤더링 xterm-readline·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사
+   - `06-editing.md` 벤더링 xterm-readline·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사·읽기 없는 구간의 키 버퍼링
    - `07-tab-completion.md` Tab 완성
    - `08-session.md` 리셋·이중 마운트·종료 후 상태
-4. **검증과 한계**: `09-testing.md`, `10-parity-deviations.md`(3.14 편차 44건 등록: 해소 22·28과 동등 항목 23 포함, 범위 밖은 별도), `11-known-traps.md`(함정 33건)
+4. **검증과 한계**: `09-testing.md`, `10-parity-deviations.md`(3.14 편차 49건 등록: 해소 22·28·32와 동등 항목 23 포함, 범위 밖은 별도), `11-known-traps.md`(함정 33건)
 5. **이전 구현 참조**: `12-previous-implementation.md`(이전 RD 인벤토리·모듈 지도)
 
 ## 결정된 스택

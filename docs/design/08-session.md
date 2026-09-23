@@ -47,7 +47,7 @@ sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들�
 소유한다.
 
 화면·history는 유지된다: `Readline`이 핸들 소유라 벤더 `History`(`persist: false`, 메모리만)가 세션을
-넘어 산다. 리셋 시 미제출 입력·대기 읽기는 버린다(history 미기록, 화면에는 남긴다) — `cancelRead()`가
+넘어 산다. 리셋 시 미제출 입력·대기 읽기·쌓인 type-ahead 키(`06-editing.md` 6.7)는 버린다(history 미기록, 화면에는 남긴다) — `cancelRead()`가
 벤더 읽기를 화면·history를 건드리지 않고 끝내기 때문이다.
 
 옛 세션의 열린 읽기: `cancelRead()`로 `ReadCancelledError`가 되면 `session.ts`의 `readLine`/`readInput`

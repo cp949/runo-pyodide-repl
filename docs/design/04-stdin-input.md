@@ -68,7 +68,7 @@
   재조회 → `resetTail` → `readline.read(꼬리, { cancelable })`이고 **SGR 리셋을 붙이지 않는다**: 프롬프트의 열린 색은 tty처럼 입력에 이어진다(색이 닫힌
   프롬프트의 입력은 기본색). 꼬리가 없으면 프롬프트 없이 읽는다. 둘을 한 함수로 일반화하지 않았다(합성과 SGR 리셋이 다르다).
   `createRepl`이 REPL 리더와 같은 "`dispose()` 뒤 write 콜백을 전달하지 않는 터미널 뷰"(`00-architecture.md` 4.1, TRP-004)를 준다.
-  `rewindTail`의 flush 콜백은 해제 여부를 스스로 알 수 없다. 키 버퍼링은 없다: `input()` 시작 전에 친 키는 벤더 readline이 버린다(편차 32).
+  `rewindTail`의 flush 콜백은 해제 여부를 스스로 알 수 없다. `input()` 시작 전에 친 키(프롬프트 글자가 그려진 뒤 `readline.read()`가 시작되기 전, 실행 중 포함)는 벤더 readline이 버리지 않고 쌓았다가 읽기가 시작될 때 재생해 `input()` 값이 된다(RD-019, `06-editing.md` 6.7, 편차 32 해소). 읽기당 소비라 첫 줄만 값이 되고 나머지는 다음 읽기가 받는다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02b-input-ctrl-c.md`,
 이전 구현 설계 문서 `11-stdin-prompt.md`,

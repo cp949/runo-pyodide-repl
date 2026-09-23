@@ -613,7 +613,7 @@ RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이
 
 ### RD-019 — 읽기가 없는 구간에 친 키 버퍼링(type-ahead)
 
-상태: 대기 · 이전: 없음(이전 구현 미구현. 2026-09-24 `.scratch/type-ahead/issues/01-keys-dropped-while-no-active-read.md`에서 승격 — 이전 구현의 "RD-019"는 RD-013 자동 들여쓰기이며 무관) · 설계: `06-editing.md` 6.1(벤더 소스 수정 방침), `04-stdin-input.md`(read-guard), `03-ctrl-c.md` 2.x(읽기 전 갭), `10-parity-deviations.md` 32 — 규칙 절은 착수 시 `06-editing.md` 6.7로 신설
+상태: 완료 · 이전: 없음(이전 구현 미구현. 2026-09-24 `.scratch/type-ahead/issues/01-keys-dropped-while-no-active-read.md`에서 승격 — 이전 구현의 "RD-019"는 RD-013 자동 들여쓰기이며 무관) · 설계: `06-editing.md` 6.7(규칙)·6.1(벤더 소스 수정 방침), `04-stdin-input.md`(read-guard), `03-ctrl-c.md` 2.7(읽기 전 갭), `10-parity-deviations.md` 32(해소)·45~49
 
 시나리오: `time.sleep(2)` 실행 중 `abc`를 치면 실행이 끝난 뒤 프롬프트에 `>>> abc`가 보이고 커서가 그 끝에 있다. 실행 중 `print(1)` Enter를 치면 실행이 끝난 뒤 그 줄이 제출돼 `1`이 나온다. Enter 직후(다음 프롬프트가 그려지기 전) 친 키가 다음 프롬프트에 들어온다. 실행 중 친 키 뒤 `input()`이 다음 읽기면 그 키는 `input()` 값이 된다(다음 읽기가 소비 — tty 입력 큐와 같다). 실행 중 Ctrl+C는 버퍼에 쌓이지 않고 기존 중단 경로(RD-007)로 가며, 그때까지 쌓인 키는 버린다(tty `ISIG`의 입력 큐 비움과 같다). 창 안의 붙여넣기는 낡은 `State`에 그려지지 않고 버퍼에 들어간다.
 
@@ -632,6 +632,15 @@ Ctrl+C는 활성 읽기가 없으면 게이트와 무관하게 버퍼를 비운 
 쌓아 첫 프롬프트에서 재생한다. `apps/demo/e2e/lib.mjs`의 `typeWhenReading`·`cancelWhenReading` 재시도 루프는 버퍼링 뒤 글자를 중복시키므로 제거하고
 (영향: `stdin-input-check`·`input-cancel-check` 전체 L1), `docs/traps/TRP-005`는 Ctrl+C 손실 중심으로 좁혀 유지한다. pty 필수 4건은 완료 기준, 실행 중
 Backspace·←·Ctrl+U·Ctrl+D·Tab은 관찰 뒤 웹과 다르면 편차 등록(완료 기준 아님). 분할: DELTA-01 벤더 버퍼(L0), 02 하니스·`type-ahead-check`·L1 회귀, 03 pty, 04 문서.
+
+결과: 벤더 `Readline`이 활성 읽기 없는 구간의 `onData` 덩어리를 원본 문자열째 쌓았다가(Ctrl+C·Ctrl+L 단독 제외, 상한 4096 UTF-16 코드 유닛, 초과 덩어리 통째 폐기) `read()` write 콜백 안 `new State`·`prefill` 직후 `readData`로 재생한다(공개 API 추가 없음, `06-editing.md` 6.7). 편차 32 해소.
+- 벤더 단위 `type-ahead.test.ts` 21건(계획 11 + 보조 5 + pty 대조 제어 키 5), 벤더 전체 18 파일 151/151, 코어 43 파일 1185/1185. 변이 검사 14/14 killed(재생 제거·순서 뒤집기·스냅샷 미비움·Ctrl+C 비움 제거·`dispose`/`cancelRead` 비움 제거·상한 제거 등).
+- 브라우저 `type-ahead-check.mjs`(dev L1) 13/13: T01~T09·T11 통과, `pageerror` 0. T10(상한)은 브라우저 셀 없이 벤더 단위로 대체했다. **T11은 Tab이 마지막 키인 입력(`os.getc`+Tab → `os.getcwd`)만 판정한다** — Tab 뒤에 키가 이어지면 Tab의 worker 왕복 응답 전에 뒤 키가 삽입돼 완성이 버려진다(편차 48, 키 순서 역전·중복은 없음). 양성 대조 1건(재생 제거 → `ONLY=T01` FAIL → 원복 → 통과).
+- 영향 L1 회귀 0: `stdin-input-check` 19/19, `input-cancel-check` 26/26, `ctrl-c-check ONLY=S1` 3/3, `prompt-cancel-check ONLY=E1` 2/2, `tab-check ONLY=C7,C9,C11` 14/14, `session-reset-check ONLY=reset,carry,exit` 14/14. 기대값이 바뀐 셀 없음. `lib.mjs`의 `typeWhenReading`·`cancelWhenReading` 재시도 루프는 제거했다(재시도하면 글자가 중복된다).
+- 3.14.4 pty(`apps/demo/e2e/pty/rd-019/`): 필수 4건 P1~P4 웹과 **일치**(에코 접두를 뺀 프롬프트 부분·프롬프트 시작 기준 열로 비교, 3.14의 실행 중 tty 에코는 편차 45). 제어 키 관찰: Backspace·Ctrl+U·Tab 마지막 키 일치, `←`(ESC[D) 뒤 글자 소실은 편차 46, Ctrl+D의 NUL은 편차 47, Tab 뒤 키 이어짐은 편차 48. 상한 초과(한 줄 5000자): 3.14는 앞 4095자를 남기고 웹은 덩어리를 통째로 버리므로 편차 49(여러 줄 누적 4096 초과의 3.14 동작은 미실측).
+- 예외·미실행: 전체 `e2e:baseline`(L2)과 `e2e:measure`·`keys-after-enter-probe` N=10(L3)은 실행하지 않았다(사용자 지시 때만). preview 미실행(dev 전용 셀). pty 값은 자동 대조가 아니라 손으로 옮긴 표이며, 웹의 C5b 값은 `type-ahead-check` T11 1회차 1건이다. Shift+Enter는 `onData`를 거치지 않아 쌓이지 않고 버려진다(`.scratch/type-ahead/issues/02-*.md`, open), 리셋 직후 `printAbove` 창의 키 유실은 추정만 있다(`03-*.md`, deferred). `TRP-005`는 Ctrl+C 손실 중심으로 좁혀 유지했고 pty 관찰 함정은 `TRP-032`로 승격했다.
+
+인계: 확인 도구는 저장소에 있다 — `apps/demo/e2e/checks/type-ahead-check.mjs`(`e2e:type-ahead`), `apps/demo/e2e/positive-controls/rd-019.md`(양성 대조 절차), `apps/demo/e2e/pty/rd-019/`(`pty_type_ahead.py`·`raw.txt`·`results.md`), 벤더 `packages/xterm-readline/src/type-ahead.test.ts`. 실행 로그·변이 검사기·결과 JSON은 `_works/_completed/20260924-22-rd-019-type-ahead/verify/`에 있다(`mutate-safe.mjs`, `mutations-delta01.json`).
 
 ## Phase 3 — 검증 자산
 

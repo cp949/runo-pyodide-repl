@@ -1,6 +1,6 @@
 # 읽기가 없는 구간에 친 키가 버려진다(입력 버퍼링)
 
-Status: promoted (RD-019)
+Status: done
 Origin: RD-003 브라우저 검증에서 발견. `docs/design/10-parity-deviations.md` 32, `docs/traps/TRP-005`.
 
 ## 현상
@@ -42,3 +42,4 @@ Origin: RD-003 브라우저 검증에서 발견. `docs/design/10-parity-deviatio
 
 - 2026-09-24 재분류: `open` 유지(`docs/agents/issue-tracker.md` "등록·분류 기준"). 사용자 시나리오·완료 기준이 있다. 본문 "결정이 필요한 것"(버퍼링 위치·read-guard 상호작용)과 RD 승격 여부는 사용자 결정 전이다.
 - 2026-09-24 사용자 지시로 `ROADMAP.md` RD-019로 승격. 이후 추적은 RD-019. 완료 기준의 "프로브 N=10에서 0ms 10/10"은 `09-testing.md` 9.7에 맞춰 결정적 판정 1회로 바꿨고, `input()` 상호작용은 "다음 읽기가 소비"로, 실행 중 Ctrl+C는 "버퍼 비움"으로 정했다(RD-019 시나리오).
+- 2026-09-24 RD-019 완료로 종결(`Status: done`). 벤더 `Readline`이 읽기 없는 구간의 키를 쌓았다가 다음 읽기에서 재생한다(`docs/design/06-editing.md` 6.7, 편차 32 해소). 완료 기준 4건 전부 `type-ahead-check.mjs`(T01 실행 중 `abc`, T06 Ctrl+C, T07 붙여넣기)와 벤더 단위 시험으로 확인했다. "프로브 N=10에서 0ms 10/10"은 위 재분류대로 결정적 판정 1회(T04)로 대체했고 `keys-after-enter-probe.mjs` N=10 재측정은 L3라 실행하지 않았다. 남은 차이: 편차 45~49(tty 에코, `←`, Ctrl+D, Tab 뒤 키, 상한), Shift+Enter는 [02](./02-shift-enter-dropped-while-no-active-read.md), 리셋 창 키 유실은 [03](./03-cancelread-printabove-window-drops-keys.md).
