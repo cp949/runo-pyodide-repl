@@ -1,7 +1,7 @@
 // RD-019 DELTA-02 브라우저 확인: 읽기가 없는 구간(실행 중·Enter 직후·부팅 중·리셋 직후)에 친 키를 벤더 Readline이
 // 쌓았다가 다음 활성 읽기에서 순서대로 재생한다(편차 32 해소). 3.14 tty 입력 큐와 같은 결과를 기대한다.
 //
-// 셀(체크리스트 T01~T11):
+// 셀(체크리스트 T01~T12):
 //   T01 실행 중 `abc` → 종료 뒤 마지막 행 `>>> abc`, 커서가 그 끝(브라우저 양성 대조 대상)
 //   T02 실행 중 `print(...)`+Enter → 종료 뒤 제출돼 출력 행과 새 프롬프트
 //   T03 실행 중 `ab`+Enter+`cd` → 첫 줄만 제출(NameError), `>>> cd`가 남는다(읽기당 소비)
@@ -15,6 +15,7 @@
 //       폐기·앞 유지·작은 덩어리 수용)이 같은 결과를 이미 결정적으로 고정한다. 브라우저에서 4096자를 넘겨 치면 시간만 들고 새로
 //       알게 되는 것이 없다.
 //   T11 실행 중 Tab 포함 입력 → Tab 리더 훅을 거쳐 재생(완성이 적용된다)
+//   T12 실행 중 `if 1:`+Shift+Enter+`pass` → 재생된 Shift+Enter가 자동 들여쓰기를 거쳐 `>>> if 1:` / `    pass`(type-ahead-shift-enter)
 //
 // 판정은 마커 배리어·`waitFor`로만 한다(`docs/design/09-testing.md` 9.7): 실행이 "진행 중"임은 출력 행 마커(`RUNnn`)가
 // 보인 뒤에 키를 쳐 확인하고, 재생 결과는 마지막 행이 기대 프롬프트가 될 때까지 기다린다. 고정 대기 뒤 부재·존재 판정과 ms 상한은
@@ -244,6 +245,27 @@ await taStep("T11 실행 중 Tab 포함 입력 `os.getc`+Tab → Tab 리더 훅�
   await press("Tab");
   await waitLineEnd(">>> os.getcwd");
   await clearInput();
+});
+
+// Shift+Enter는 xterm `onData`가 아니라 벤더 `handleKeyEvent`의 `keydown`으로 들어와 `Input` 항목으로 쌓인다. 재생은 `readKey`를 거쳐
+// `onKey` 훅(자동 들여쓰기)이 개행 뒤 4칸을 넣는다(`docs/design/06-editing.md` 6.3·6.7). 단위 시험은 훅이 `ShiftEnter`를 받는 것까지만
+// 보므로 실제 들여쓰기는 이 셀이 처음 확인한다. 웹은 Enter 1회로 여러 줄을 실행하고(편차 7) 둘째 줄에 `... ` 접두사가 없다(편차 10).
+await taStep("T12 실행 중 `if 1:`+Shift+Enter+`pass` → 자동 들여쓰기를 거쳐 `>>> if 1:` / `    pass`", async () => {
+  await startRunning("RUN12", 2);
+  await page.keyboard.type("if 1:");
+  await press("Shift+Enter");
+  await page.keyboard.type("pass");
+  // 마지막 행이 `    pass`이고 커서가 그 끝(열 8)일 때까지 기다린 뒤 첫 행을 확인한다(`waitLineEnd`는 마지막 행만 본다).
+  await waitLineEnd("    pass");
+  const t = await tail(2);
+  if (!same(t, [">>> if 1:", "    pass"])) throw new Error(`마지막 2행 = ${show(t)}`);
+  // Enter 1회로 실행되고(편차 7) 새 프롬프트가 뜬다. 그 사이에 오류 행이 없어야 한다(입력 행이 아니라 출력 행 기준).
+  await enter();
+  await waitPrompt(">>>", 20000);
+  const after = await tail(4);
+  if (after.some((r) => r.startsWith("SyntaxError") || r.startsWith("Traceback") || r.includes("IndentationError"))) {
+    throw new Error(`실행 뒤 오류 행이 있다 — ${show(after)}`);
+  }
 });
 
 await step("콘솔 경고·오류·pageerror가 없다", async () => {

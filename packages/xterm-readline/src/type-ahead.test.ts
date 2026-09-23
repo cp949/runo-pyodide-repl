@@ -4,10 +4,13 @@
  * 뺀 전부 원본 문자열째 버퍼에 쌓이고, 다음 `read()`의 write 콜백 안(`new State`·`prefill` 직후)에서
  * `readData`로 하나씩 재생된다. Ctrl+C는 쌓이지 않고 버퍼를 비운 뒤 `ctrlCHandler`로 간다. 버퍼는
  * `cancelRead()`·`dispose()`가 비우고 상한은 4096 UTF-16 코드 유닛이다.
+ * Shift+Enter(`attachCustomKeyEventHandler`로 오는 키)도 같은 분기를 탄다(`_works/20260924-23-type-ahead-
+ * shift-enter/checklist.md` 확정 2~5): 활성 읽기가 없으면 `Input`째 쌓아 재생 때 `readKey`로 처리하고(`onKey`
+ * 훅 통과), `printAbove` 재그리기 중이면 `queued`에 쌓아 앞선 키와 순서를 지킨다. 길이는 1로 센다.
  * 스텁 터미널은 `print-above.test.ts`와 같은 패턴이다(`asyncWrite`로 write 콜백을 `flush()`까지 미룬다).
  */
 import { describe, expect, test, vi } from "vitest";
-import type { Input } from "./keymap";
+import { InputType, type Input } from "./keymap";
 import { Readline } from "./readline";
 import { VTerm } from "./vterm";
 
@@ -27,6 +30,7 @@ class StubTerminal {
   public vt: VTerm;
   private onDataHandlers: ((data: string) => void)[] = [];
   private queue: (() => void)[] = [];
+  private keyEventHandler: ((event: KeyboardEvent) => boolean) | undefined;
 
   constructor(cols: number, rows: number) {
     this.cols = cols;
@@ -44,8 +48,8 @@ class StubTerminal {
     return { dispose: () => {} };
   }
 
-  attachCustomKeyEventHandler(_fn: (event: KeyboardEvent) => boolean) {
-    return;
+  attachCustomKeyEventHandler(fn: (event: KeyboardEvent) => boolean) {
+    this.keyEventHandler = fn;
   }
 
   write(text: string, cb?: () => void) {
@@ -69,6 +73,15 @@ class StubTerminal {
   /** `onData` 덩어리 하나를 흘린다. 여러 글자를 한 번에 넣으면 붙여넣기 경로로 간다. */
   feed(data: string) {
     for (const handler of this.onDataHandlers) handler(data);
+  }
+
+  /** Shift+Enter는 `onData`가 아니라 `attachCustomKeyEventHandler`로 온다(`on-key.test.ts`와 같은 패턴). */
+  pressShiftEnter() {
+    this.keyEventHandler?.({
+      key: "Enter",
+      shiftKey: true,
+      type: "keydown",
+    } as KeyboardEvent);
   }
 
   /** 문자열을 코드포인트 단위로 하나씩 타이핑한다. */
@@ -325,6 +338,98 @@ describe("type-ahead 버퍼", () => {
     // 재생 때 읽기가 살아 있으므로 붙여넣은 Ctrl+C는 그 읽기의 Ctrl+C(줄 다시 그리기)로 처리된다.
     expect(onCtrlC).not.toHaveBeenCalled();
     expect(readline.getLine()).toBe("cd");
+  });
+});
+
+describe("type-ahead Shift+Enter", () => {
+  test("활성 읽기가 없을 때 친 a Shift+Enter b는 다음 read()에서 순서대로 재생되어 버퍼가 줄 바꿈 사이에 둔 a와 b이고 커서는 끝이다", () => {
+    const { term, readline } = setup();
+
+    term.type("a");
+    term.pressShiftEnter();
+    term.type("b");
+    // 읽기 전에는 화면에 아무것도 그리지 않는다.
+    expect(term.vt.screen()).toBe("");
+
+    void readline.read(">>> ");
+
+    expect(readline.getLine()).toBe("a\nb");
+    expect(readline.getCursor()).toBe(3);
+  });
+
+  test("재생된 Shift+Enter는 onKey 훅이 InputType.ShiftEnter로 받고 소비하면 벤더 개행 삽입이 생략된다", () => {
+    const { term, readline } = setup();
+    const seen: InputType[] = [];
+    const onKey = (input: Input) => {
+      seen.push(input.inputType);
+      // 자동 들여쓰기 훅처럼 ShiftEnter를 소비하고 직접 개행+들여쓰기를 넣는다.
+      if (input.inputType !== InputType.ShiftEnter) return false;
+      readline.editInsert("\n  ");
+      return true;
+    };
+
+    term.type("a");
+    term.pressShiftEnter();
+    term.type("b");
+    void readline.read(">>> ", { onKey });
+
+    expect(seen).toEqual([InputType.Text, InputType.ShiftEnter, InputType.Text]);
+    // 벤더가 개행을 한 번 더 넣었다면 "a\n\n  b"가 된다.
+    expect(readline.getLine()).toBe("a\n  b");
+  });
+
+  test("a Shift+Enter 뒤 Ctrl+C가 오면 버퍼가 비어 다음 read()에서 아무것도 재생되지 않는다", () => {
+    const { term, readline } = setup();
+    const onCtrlC = vi.fn();
+    readline.setCtrlCHandler(onCtrlC);
+    const seen: InputType[] = [];
+
+    term.type("a");
+    term.pressShiftEnter();
+    term.feed(CTRL_C);
+    expect(onCtrlC).toHaveBeenCalledTimes(1);
+
+    void readline.read(">>> ", {
+      onKey: (input) => {
+        seen.push(input.inputType);
+        return false;
+      },
+    });
+
+    expect(seen).toEqual([]);
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("printAbove 재그리기 대기 중 친 c Shift+Enter d는 queued를 거쳐 순서가 보존되어 버퍼 끝이 줄 바꿈 사이에 둔 c와 d가 된다", () => {
+    const { term, readline } = setup();
+    term.asyncWrite = true;
+
+    void readline.read(">>> ");
+    term.flush();
+    void readline.printAbove("cand");
+    // 재그리기 콜백이 오기 전(redrawing)에 친 키다.
+    term.type("c");
+    term.pressShiftEnter();
+    term.type("d");
+    term.flush();
+
+    expect(readline.getLine()).toBe("c\nd");
+    expect(readline.getCursor()).toBe(3);
+  });
+
+  test("재생 중 Enter로 읽기가 끝나면 뒤의 Shift+Enter는 다음 읽기로 넘어간다: x Enter Shift+Enter y", async () => {
+    const { term, readline } = setup();
+
+    term.type("x");
+    term.feed("\r");
+    term.pressShiftEnter();
+    term.type("y");
+
+    expect(await readline.read(">>> ")).toBe("x");
+
+    void readline.read(">>> ");
+    expect(readline.getLine()).toBe("\ny");
+    expect(readline.getCursor()).toBe(2);
   });
 });
 

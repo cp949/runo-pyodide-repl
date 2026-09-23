@@ -52,7 +52,7 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 | `block-history-check.mjs` | A·B·C·X 절 29개 | `초기,A,B,C` 11/11 | 통과 |
 | `tab-check.mjs` | C1~C15(C12 왕복 지연 포함) 76개 = 기존 C1~C14 68개 + RD-016 C15 8개(a·b·c·d×2·e×2·f) | `C1·C3·C8·C11` 30/30 | 통과. RD-016(2026-09-24): C15 절 8개 추가, C9c를 `from os import pa` → `path` 채움으로 재정의, C5e 제목 정정(왕복 + 큐), C12에 `import os.pa` 지연 기록 추가(판정 없음, 웜 N=20 중앙값·최대는 결과 JSON `notes`). dev `ONLY=C5,C9,C12,C15` 20/20(C15 8개 포함, `pageErrors` 0)만 실측했고 76개 전체 재실행은 하지 않았다(L2). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2) |
 | `selection-copy-check.mjs` | S01~S12 등 14개 | `S01,S02,S05,S07` 4/4 | 통과 |
-| `type-ahead-check.mjs` | 초기·T01~T09(T08·T09a·T09b 포함, T10 제외)·T11·콘솔/`pageerror` 확인 13개(T10 상한 4096은 벤더 단위 시험이 고정해 브라우저 셀 없음) | 미실행(dev 전용) | 통과 13/13(2026-09-24 RD-019 dev L1 1회, `pageErrors` 0. T11은 Tab이 마지막 키인 입력만 판정 — Tab 뒤 이어진 키는 응답 적용 조건으로 완성이 버려진다) |
+| `type-ahead-check.mjs` | 초기·T01~T09(T08·T09a·T09b 포함, T10 제외)·T11·T12·콘솔/`pageerror` 확인 14개(T10 상한 4096은 벤더 단위 시험이 고정해 브라우저 셀 없음) | 미실행(dev 전용) | 통과 13/13(2026-09-24 RD-019 dev L1 1회, `pageErrors` 0. T11은 Tab이 마지막 키인 입력만 판정 — Tab 뒤 이어진 키는 응답 적용 조건으로 완성이 버려진다). T12(실행 중 `if 1:`+Shift+Enter+`pass` → `>>> if 1:` / `    pass`, 커서 열 8)는 2026-09-24 L1 `ONLY=T12` 1회만 통과 2/2(초기 포함, `pageErrors` 0. 나머지 셀은 위 RD-019 기록 유지) |
 | `measure/boot-press.mjs`(baseline 세트 소속, DELTA-05가 배선) | 부팅 중 Ctrl+C N=30 | 미실행(baseline dev 전용) | 통과 30/30 |
 
 [^repl-log]: `repl-check.mjs`는 dev에서 `normal`·`cdn-blocked`·`not-isolated`(4174) 세 모드를 각각

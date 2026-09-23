@@ -188,7 +188,7 @@ eslint·tsc는 계속 `e2e/**`를 무시한다(`apps/demo/eslint.config.js`의 `
   `Readline`이 버리지 않고 쌓았다가 다음 읽기가 시작될 때 재생하므로(RD-019 type-ahead), 에코가 없다고 첫 글자를 다시
   치면 글자가 중복된다(`x: `에 `abc` → `aabc`). 첫 글자를 한 번 치고 그 에코(재생 = 읽기 시작)를 `waitFor`한 뒤 나머지를
   친다. 취소 helper는 에코 뒤에 Ctrl+C를 누른다 — 읽기 전 Ctrl+C는 쌓이지 않고 쌓인 키를 비운 채 게이트에 막힌다.
-- 실행 중·부팅 중에 친 키가 "다음 프롬프트에 그대로 들어온다"는 판정은 `checks/type-ahead-check.mjs`(T01~T11)가 한다.
+- 실행 중·부팅 중에 친 키가 "다음 프롬프트에 그대로 들어온다"는 판정은 `checks/type-ahead-check.mjs`(T01~T12)가 한다.
 - 실행 중(읽기 없음)에는 `paste()`를 쓸 수 없다: 붙여넣기 뒤 화면이 바뀔 때까지(1.5초 두 번) 기다리다 시간 초과로 던진다. `type-ahead-check.mjs`의 `pasteSilently`처럼 `.xterm-helper-textarea`에 `ClipboardEvent("paste")`를 직접 dispatch한다. 여러 줄 붙여넣기는 첫 줄이 `>>> …`, 둘째 줄은 `... ` 접두 없이 그려지고 커서가 마지막 줄 끝에 있다.
 - 결과 JSON 이름은 `<스크립트>-<label>.json`이고 `-2` 접미 카운터는 프로세스 안에서만 센다. 같은 `E2E_RESULTS_DIR`로 전 셀을 돌린 뒤 `ONLY=`로 다시 돌리면 전 셀 결과가 덮어써진다. 근거 JSON을 남길 때는 실행마다 `E2E_RESULTS_DIR`을 다르게 준다.
 
