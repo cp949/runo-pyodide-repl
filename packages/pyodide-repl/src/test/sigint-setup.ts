@@ -279,7 +279,6 @@ export function teardownConsoleRunner(
 ): void {
   for (const timer of pendingWakes.splice(0)) clearTimeout(timer);
   for (const idle of liveInterruptIdles.splice(0)) idle.destroy();
-  restoreRunSync(pyodide);
   pyodide.setInterruptBuffer(
     undefined as unknown as Parameters<
       PyodideInterface["setInterruptBuffer"]
@@ -289,4 +288,6 @@ export function teardownConsoleRunner(
   pyodide.runPython(
     "import signal\nsignal.signal(signal.SIGINT, signal.default_int_handler)",
   );
+  // Python을 돌리므로 버퍼를 뗀 뒤에 되돌린다.
+  restoreRunSync(pyodide);
 }

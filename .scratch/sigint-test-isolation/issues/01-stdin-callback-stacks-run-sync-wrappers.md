@@ -41,3 +41,15 @@ export하고(`setupConsoleRunner`·`teardownConsoleRunner`도 이것을 쓴다),
 - 관찰: `stdin-callback.test.ts`와 `sigint-handler.test.ts`를 병렬로 돌리면 변경 전에도 10회 중 1회
   `sigint-handler.test.ts:368`(`"20\n"` 기대, `"19\n"` 수신)이 실패한다(변경 후 5회 중 1회). 이 변경과 무관한
   기존 현상이며 이슈 02의 범위다.
+
+## 리뷰 정정
+
+2026-09-23. `restoreRunSync`가 Python을 돌리는데 두 해체(`stdin-callback.test.ts`의 첫 `afterEach`,
+`teardownConsoleRunner`) 모두 버퍼를 떼기 전에 불렀다. 남은 SIGINT가 있으면 이 실행이 그것을 받는다(해체 주석의
+"버퍼를 먼저 떼고" 불변식 위반). 두 곳 모두 SIGINT 핸들러를 기본으로 되돌린 뒤로 옮겼다.
+
+- 검증: 파일 끝 임시 시험(삭제함)이 앞선 `setupConsole()` 반복 뒤 `pyodide.ffi.run_sync`·`pyodide.webloop.run_sync`가
+  `_test_original_run_sync`와 같음을 확인(27건 통과). 대조로 `restoreRunSync`를 주석 처리하면 `[false, false]`로 실패.
+  `pnpm check-types`·`pnpm lint` 통과, `pnpm test` 41 파일 939건 통과.
+- 남김: `stdin-callback.test.ts`의 `setupConsole()`은 `installSigintHandler`가 돌려준 `interrupt_idle` proxy를
+  destroy하지 않는다(`teardownConsoleRunner`는 한다). 겹쌓임은 아니라 동작 영향이 없어 이 이슈에서는 고치지 않았다.

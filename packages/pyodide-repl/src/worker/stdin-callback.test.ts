@@ -48,8 +48,6 @@ beforeAll(async () => {
 let connected: Int32Array | undefined;
 
 afterEach(() => {
-  // 설치가 바꾼 `run_sync` 래퍼를 걷어내 시험마다 층이 쌓이지 않게 한다(저장한 적 없으면 무동작).
-  restoreRunSync(pyodide);
   // 남은 SIGINT가 다음 시험의 Python 실행을 끊지 않도록 버퍼를 먼저 떼고 비운 뒤 핸들러를 기본으로 되돌린다.
   pyodide.setInterruptBuffer(
     undefined as unknown as Parameters<
@@ -61,6 +59,9 @@ afterEach(() => {
   pyodide.runPython(
     "import signal\nsignal.signal(signal.SIGINT, signal.default_int_handler)",
   );
+  // 설치가 바꾼 `run_sync` 래퍼를 걷어내 시험마다 층이 쌓이지 않게 한다(저장한 적 없으면 무동작). Python을 돌리므로
+  // 버퍼를 뗀 뒤에 부른다.
+  restoreRunSync(pyodide);
 });
 
 afterEach(() => {
