@@ -1,12 +1,24 @@
 import { createRepl } from "@cp949/runo-pyodide-repl";
-import type { ReplHandle, ReplStatus } from "@cp949/runo-pyodide-repl";
+import type { CopyResult, ReplHandle, ReplStatus } from "@cp949/runo-pyodide-repl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createWorker } from "./create-worker";
 
 /** `globalThis.crossOriginIsolated`가 거짓이면 세션이 없어 리셋 버튼도 못 쓴다(RD-010 확정 8). */
 const isolated = globalThis.crossOriginIsolated === true;
+
+/** 드래그 자동 복사 on/off를 저장하는 localStorage 키(RD-017 확정 6). */
+const COPY_ON_SELECT_KEY = "runo-repl.copyOnSelect";
+
+/** localStorage에서 저장된 값을 읽는다. `"0"`이면 꺼짐, 그 외·없음·읽기 에러면 켜짐(기본값). */
+function readCopyOnSelect(): boolean {
+  try {
+    return localStorage.getItem(COPY_ON_SELECT_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 /**
  * xterm Terminal을 마운트하고 `createRepl`로 세션을 시작한다(RD-004). Terminal은 이 컴포넌트가 소유한다.
@@ -15,7 +27,9 @@ const isolated = globalThis.crossOriginIsolated === true;
  * 재시작 버튼이 뜬다. 리셋 버튼은 상시 있고 `reset()`을 부른다(RD-010). 터미널은 크래시 중에도 렌더한다 —
  * 화면의 출력이 단서다. top-level await 체크박스는 바뀔 때마다 즉시 `reset({ topLevelAwait })`를 부른다
  * (RD-012). 저장하지 않으므로 새로고침하면 항상 꺼짐이다. 리셋 버튼·크래시 재시작은 무인자라 마지막
- * 값을 유지한다(sticky, 코어가 보관).
+ * 값을 유지한다(sticky, 코어가 보관). "선택 시 자동 복사" 체크박스는 localStorage에 저장되고
+ * (`COPY_ON_SELECT_KEY`), Ctrl+C 복사는 이 값과 무관하게 항상 동작한다(RD-017). 복사 결과는 우측
+ * 하단 토스트로 1초간 보여준다.
  */
 export function ReplView() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,6 +37,20 @@ export function ReplView() {
   const [status, setStatus] = useState<ReplStatus>("loading");
   const [crashMessage, setCrashMessage] = useState<string | null>(null);
   const [topLevelAwait, setTopLevelAwait] = useState(false);
+  const [copyOnSelect, setCopyOnSelect] = useState(readCopyOnSelect);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // `setToast`·`toastTimerRef`만 참조하는 안정된 콜백(useCallback 빈 deps) — 아래 마운트 effect의
+  // deps에 넣어도 재마운트를 일으키지 않는다.
+  const showToast = useCallback((result: CopyResult) => {
+    setToast(result.ok ? `copied ${result.chars} chars to clipboard` : "copy failed");
+    if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, 1000);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -36,6 +64,10 @@ export function ReplView() {
       createWorker,
       onStatus: setStatus,
       onCrash: setCrashMessage,
+      // 마운트 시점 값만 쓴다(state를 그대로 참조하면 이 effect가 `copyOnSelect`를 deps에 요구해
+      // 매 토글마다 재마운트된다) — 이후 토글은 `handle.setCopyOnSelect()`로 흐른다.
+      copyOnSelect: readCopyOnSelect(),
+      onCopy: showToast,
     });
     replRef.current = repl;
 
@@ -44,6 +76,13 @@ export function ReplView() {
       replRef.current = null;
       repl.dispose();
       terminal.dispose();
+    };
+  }, [showToast]);
+
+  // 언마운트 시 토스트 타이머를 정리한다(위 마운트 effect와 독립적인 별도 effect).
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
     };
   }, []);
 
@@ -74,6 +113,24 @@ export function ReplView() {
         />{" "}
         top-level await
       </label>
+      <label>
+        <input
+          type="checkbox"
+          data-testid="copy-on-select"
+          checked={copyOnSelect}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setCopyOnSelect(on);
+            try {
+              localStorage.setItem(COPY_ON_SELECT_KEY, on ? "1" : "0");
+            } catch {
+              // localStorage 접근 불가(사생활 보호 모드 등) — state만 유지하고 넘어간다.
+            }
+            replRef.current?.setCopyOnSelect(on);
+          }}
+        />{" "}
+        선택 시 자동 복사
+      </label>
       {status === "terminated" && (
         <div role="alert" data-testid="terminated">
           Python session terminated. "세션 리셋" 버튼으로 새 세션을 시작하세요.
@@ -95,6 +152,24 @@ export function ReplView() {
         </div>
       )}
       <div ref={containerRef} data-testid="terminal" />
+      {toast !== null && (
+        <div
+          role="status"
+          data-testid="copy-toast"
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            fontSize: 12,
+            padding: "4px 8px",
+            borderRadius: 4,
+            background: "#333",
+            color: "#fff",
+          }}
+        >
+          {toast}
+        </div>
+      )}
     </>
   );
 }

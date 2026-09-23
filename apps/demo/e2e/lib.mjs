@@ -517,6 +517,121 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
   };
 }
 
+// RD-017: 선택 복사 도우미. `open()`이 반환하는 핸들의 클로저가 아니라 `page`를 인자로 받는 독립 함수다
+// (계획서 DELTA-04 "가정" — `open` 자체와 같은 형태). 좌표는 실제 마우스 이벤트로 드래그를 만들기 위해
+// `.xterm-rows > div`의 `getBoundingClientRect()`를 쓴다(데모에 `window.__term`이 없다).
+
+/**
+ * `endOutside`용 x좌표: `.xterm` 요소 오른쪽 바깥, 뷰포트 안쪽 중간. `.xterm-screen`보다 오른쪽이라 터미널
+ * 요소 밖에서 mouseup이 일어나 document 리스너 경로를 탄다(실측, DELTA-04 2차 정정). 같은 행 y를 유지해야
+ * 한다 — 터미널 위쪽(y가 작은 곳)으로 떼면 xterm이 선택 방향을 뒤집어 드래그한 텍스트 자체가 선택에서
+ * 빠지고 스크롤 위치에 따라 클립보드가 달라진다.
+ *
+ * 주의(DELTA-04 2차 정정 — "선택 범위를 안 건드린다"는 최초 서술은 틀렸다): 이 x좌표로 마우스를 이동하면
+ * xterm은 **열 좌표를 그 행 끝으로 clamp**한다. 즉 `toCol`은 무시되고 "`fromCol`부터 그 행 끝까지"가
+ * 선택된다(실측 반례: `hello world` 행에서 `selectRows(r,0,r,5)`가 `endOutside:false`면 `"hello"`,
+ * `endOutside:true`면 `"hello world"`). `toCol`이 그 행의 마지막 글자가 아닌 한 이 옵션으로 정확한 부분
+ * 문자열을 검증할 수 없다 — "행 전체" 또는 "그 행 끝까지"를 확인하고 싶을 때만 `endOutside: true`를 써라.
+ *
+ * 전제: 뷰포트 폭이 `.xterm-screen`의 오른쪽 경계(80열 고정, body 기본 여백 8px 기준 대략 735px)보다
+ * 충분히 넓어야 한다. 좁으면 mouseup이 `.xterm` 요소 **안**(`.xterm-screen` 위)에서 일어나 버려 document
+ * 리스너 경로가 검증되지 않는다(조용한 거짓 양성 — clamp 때문에 클립보드 값 자체는 우연히 맞을 수 있다).
+ * `selectRows`는 이 경우를 `elementFromPoint`로 확인해 에러를 던진다. 기본 뷰포트(1280×720)에서는 안전하다.
+ */
+async function xtermOutsideRightX(page) {
+  return page.evaluate(() => {
+    const el = document.querySelector(".xterm");
+    if (!el) throw new Error(".xterm 요소가 없다");
+    const rect = el.getBoundingClientRect();
+    return rect.right + (window.innerWidth - rect.right) / 2;
+  });
+}
+
+/** `.xterm-rows > div`의 `row`번째 행에서 `col`번째 칸 중심 좌표(px). 셀 폭 = 행 폭 / 80(xterm 기본 cols, `ReplView` 참고). */
+async function cellCenter(page, row, col) {
+  const box = await page.evaluate((r) => {
+    const el = document.querySelectorAll(".xterm-rows > div")[r];
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+  }, row);
+  if (box === null) throw new Error(`행 ${row}이 없다(.xterm-rows > div)`);
+  const cellWidth = box.width / 80;
+  return { x: box.left + cellWidth * col + cellWidth / 2, y: box.top + box.height / 2 };
+}
+
+/**
+ * `fromRow`행 `fromCol`열에서 `toRow`행 `toCol`열까지 마우스로 드래그해 선택을 만든다(`mouse.move → down →
+ * move(steps: 5) → up`). `endOutside`가 참이면 같은 행의 y를 유지한 채 `.xterm` 요소 오른쪽 바깥(뷰포트
+ * 안)에서 뗀다 — xterm의 드래그 종료 리스너는 `document`에 걸려 있어 터미널 밖에서 떼도 선택이 확정된다
+ * (S11). 단, 이 좌표에서는 xterm이 열 좌표를 그 행 끝으로 **clamp**한다 — `toCol`은 무시되고 `fromCol`부터
+ * 그 행 끝까지가 선택된다(`xtermOutsideRightX` 참고, DELTA-04 2차 정정). "행 전체/행 끝까지"를 확인하고
+ * 싶을 때만 `endOutside: true`를 써라. 뷰포트가 좁아 mouseup이 실제로 `.xterm` 안에서 일어나면(전제:
+ * `xtermOutsideRightX` 참고) 조용히 넘어가지 않고 에러를 던진다.
+ */
+export async function selectRows(page, fromRow, fromCol, toRow, toCol, { endOutside = false } = {}) {
+  const from = await cellCenter(page, fromRow, fromCol);
+  const to = await cellCenter(page, toRow, toCol);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  if (endOutside) {
+    const outsideX = await xtermOutsideRightX(page);
+    await page.mouse.move(outsideX, to.y, { steps: 2 });
+    const stillInsideXterm = await page.evaluate(
+      ([x, y]) => {
+        const el = document.elementFromPoint(x, y);
+        return el != null && el.closest(".xterm") != null;
+      },
+      [outsideX, to.y],
+    );
+    if (stillInsideXterm) {
+      await page.mouse.up();
+      throw new Error(
+        "selectRows: endOutside 좌표가 .xterm 안쪽입니다(뷰포트가 좁아 .xterm-screen이 오른쪽 여백을 다 채웠습니다). " +
+          "뷰포트를 넓히세요(기본 1280x720이면 안전).",
+      );
+    }
+  }
+  await page.mouse.up();
+}
+
+/** `row`행 `col`열 칸을 더블클릭한다(xterm의 단어 선택, S06). */
+export async function dblclickCell(page, row, col) {
+  const { x, y } = await cellCenter(page, row, col);
+  await page.mouse.dblclick(x, y);
+}
+
+/** 클립보드 텍스트를 읽는다(`open()`이 이미 `clipboard-read` 권한을 받아 둔다). */
+export const readClipboard = (page) => page.evaluate(() => navigator.clipboard.readText());
+
+/** 시험 전 클립보드에 사전 값을 넣는다(복사가 안 일어났음을 대조하는 시나리오용, 예: S07). */
+export const seedClipboard = (page, text) =>
+  page.evaluate((t) => navigator.clipboard.writeText(t), text);
+
+/**
+ * "선택 시 자동 복사" 체크박스(`data-testid=copy-on-select`)를 `on`에 맞춘다. `setTopLevelAwait`와 달리
+ * 이 체크박스는 세션을 리셋하지 않으므로 상태 전환을 기다릴 필요가 없다 — 이미 같으면 무동작, 다르면
+ * 클릭만 한다. 클릭이 xterm의 숨은 textarea에서 포커스를 가져가므로 끝에 되돌린다.
+ */
+export async function setCopyOnSelect(page, on) {
+  const checkbox = page.locator('[data-testid="copy-on-select"]');
+  const checked = await checkbox.isChecked();
+  if (checked !== on) await checkbox.click();
+  await page.evaluate(() => document.querySelector(".xterm-helper-textarea")?.focus());
+}
+
+/**
+ * 토스트(`data-testid=copy-toast`) 텍스트. 떠 있지 않으면 `null`. Locator로 존재 확인(`count()`)과 텍스트
+ * 읽기(`textContent()`)를 나눠 부르면(DELTA-04 3차 정정 전 구현) 그 사이에 토스트가 1초 자동 소멸 타이머로
+ * 사라져 `textContent()`가 요소를 못 찾고 기본 타임아웃까지 기다리다 던지는 경쟁 조건이 있었다(재현: 6회
+ * 반복 중 1회, locator timeout 30000ms). `page.evaluate`로 존재 확인과 텍스트 읽기를 같은 DOM 스냅샷 안에서
+ * 동기로 끝내 경쟁 조건을 없앤다.
+ */
+export async function toastText(page) {
+  return page.evaluate(() => document.querySelector('[data-testid="copy-toast"]')?.textContent ?? null);
+}
+
 export const hasFg = (classes, n) => classes.includes(`xterm-fg-${n}`);
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 export const show = (v) => JSON.stringify(v);
