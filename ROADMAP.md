@@ -546,11 +546,38 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 
 ### RD-017 — 선택 영역 복사(선택 시 자동 복사, 선택 중 Ctrl+C는 복사)
 
-상태: 대기 · 이전: RD-013 · 설계: `06-editing.md` 6.6
+상태: 완료 · 이전: RD-013 · 설계: `06-editing.md` 6.6
 
 시나리오: 출력 텍스트를 마우스로 드래그해 놓으면(버튼을 뗀 순간) 클립보드에 그대로 들어가고 화면 우측 하단에 작은 글씨로 `copied 20 chars to clipboard`가 1초 표시된다. 선택이 있는 채 Ctrl+C → 복사만 하고 선택을 지운다 — 실행 중(`while True: pass`)이면 인터럽트하지 않고, `>>> `·`... `·`input()` 읽기 중이면 취소하지 않으며 `^C`도 찍지 않는다. 같은 자리 두 번째 Ctrl+C(선택 없음)는 기존 동작(RD-007 인터럽트·RD-008 취소) 그대로다. Ctrl+Shift+C도 선택이 있으면 같은 복사다. 데모의 "선택 시 자동 복사" 체크박스(기본 켜짐, localStorage 저장)를 끄면 드래그해도 복사되지 않고 Ctrl+C 복사만 남는다. 더블클릭(단어)·트리플클릭(줄) 선택도 드래그와 같다. 복사가 실패하면(`navigator.clipboard.writeText` reject) `copy failed`가 같은 자리에 1초 표시된다.
 
 완료 기준: 위 시나리오 전부(브라우저, `verify/selection-copy-check.mjs`) + preview 재실행. 규칙·API는 `06-editing.md` 6.6과 `00-architecture.md` 4.1(`ReplOptions.copyOnSelect`·`onCopy`, `ReplHandle.setCopyOnSelect`)에 적힌 대로다. 벤더 `packages/xterm-readline`에 키 이벤트 훅 `ReadlineOptions.onKeyEvent?: (event: KeyboardEvent) => boolean` 하나만 추가한다(`true`면 xterm 기본 처리 생략 — 코어가 `attachCustomKeyEventHandler`를 덮어쓰지 않는다). 단위: 판정 순수 함수(`ctrlKey`·`shiftKey`·`altKey`·`metaKey`·`key`·선택 유무 → `copy`/`pass`)·정책 객체(가짜 터미널: 선택 있으면 Ctrl+C가 벤더에 닿지 않고 `clearSelection` 1회, 선택 없으면 원래 경로, `mouseup`(`button === 0`, 터미널 안에서 시작한 드래그만) 자동 복사, `copyOnSelect` 끄면 `mouseup` 무동작이되 Ctrl+C 복사는 유지, `writeText` reject → `onCopy({ ok: false })`, `dispose()` 뒤 리스너 0 + 벤더 훅에서 `false`)·`chars`는 코드포인트 수(`"😀"` 1) 전부 RED 확인 + 변이 검사(`hasSelection` 가드 제거·`clearSelection` 제거·`copyOnSelect` 게이트 제거·`dispose` 해제 제거·`preventDefault` 제거 killed). 양성 대조 2건(서버 재시작 필수): `hasSelection` 가드 제거 → 선택 없는 Ctrl+C 인터럽트 셀 실패, `clearSelection` 제거 → 두 번째 Ctrl+C 인터럽트 셀 실패. 편차 등록: `10-parity-deviations.md`에 "선택이 있으면 Ctrl+C가 SIGINT·취소 대신 복사(3.14 pty는 선택 개념이 없어 항상 SIGINT)" + "선택 시 자동 복사(tty에 없음)" 1건. 총 `pageerror` 0, 루트 4종 통과. 브라우저 기준선(RD-018)에 이식 세트로 인계한다.
+
+결과: 벤더 `ReadlineOptions.onKeyEvent` 훅(DELTA-01, 벤더 시험 4건 추가 130/130) → 코어
+`terminal/selection-copy.ts`(`decideKey` 순수 함수 + `createSelectionCopy` 정책 객체, DELTA-02, 단위
+22개 + 변이 5/5 killed) → `createRepl` 배선(`copyOnSelect`·`onCopy`·`setCopyOnSelect`·`CopyResult`
+export, DELTA-03, 코어 회귀 0·939/939 PASS) → 데모 체크박스·토스트 + e2e 도우미 6종(DELTA-04, `lib.mjs`의
+`selectRows`·`dblclickCell`·`readClipboard`·`seedClipboard`·`setCopyOnSelect`·`toastText`) → 브라우저
+확인(DELTA-05). 브라우저 `verify/selection-copy-check.mjs` dev 14/14 PASS(S01~S12 + Ctrl+Shift+C 변형
+S03b + 추가 S08b, `pageerror` 0, 3회 반복 재현), preview 4/4 PASS(S01·S02·S05·S07). 양성 대조 2/2 계획대로
+실패(`hasSelection` 가드 제거 → S05 실패, `clearSelection` 제거 → S02 2차 Ctrl+C 셀 실패). 단위 시험은
+코어 41개 파일·939개 전부 PASS(`selection-copy.test.ts` 22개 포함), 벤더 130개 전부 PASS. 루트 4종
+(`check-types`·`lint`·`test`·`build`) 통과. 편차 43 등록(`10-parity-deviations.md`). 실측으로 확인된 것:
+`mouseup`에서 `getSelection()`을 동기로 읽어도 항상 드래그 최종값이라 `setTimeout(0)` 우회는 필요 없었다.
+xterm 6.0.0 DOM 렌더러의 선택 해제 관찰 셀렉터는 계획서가 가정한 `.xterm-selection-layer`가 아니라
+`.xterm-selection`이었다(`docs/design/06-editing.md` 6.6, DELTA-05 "## 결정"). e2e 도우미 `selectRows`의
+`endOutside`는 열 좌표를 행 끝으로 clamp한다는 것도 실측으로 확인해 JSDoc·README에 반영했다(DELTA-04
+"## 결정").
+
+인계(RD-018): 확인 스크립트는 `_works/_completed/20260923-17-rd-017-selection-copy/verify/`에 있다 —
+`selection-copy-check.mjs`(S01~S12 + S03b·S08b, `apps/demo/e2e/lib.mjs`만 import), `positive-controls.md`
+(2건), 결과는 `results/dev.json`·`results/preview.json`. 이 RD가 `apps/demo/e2e/lib.mjs`에 이미 넣은
+`selectRows`·`dblclickCell`·`readClipboard`·`seedClipboard`·`setCopyOnSelect`·`toastText` 6종은 저장소에
+있어 추가 이관이 필요 없다 — RD-018은 `selection-copy-check.mjs` 스크립트 파일 자체의 이동만 하면 된다.
+시험 강도 공백 소수(`selection-copy.test.ts`의 빈 문자열 방어 경로 미도달, `dragging` 리셋 회귀 시험
+부재, `index.test.ts`의 `copyOnSelect`/`onCopy` 배선 검증 없음, `selection-copy-check.mjs`의 S02 300ms
+유예 없음·S06/S07 토스트 텍스트 미확인 등)이 리뷰로 발견됐으나 전부 "현재 구현 정확성에 영향 없음"이 변이
+검사로 교차 확인됐다(`_works/_completed/…/pending-issues/01·03·06.md`) — 승격하지 않았다. `verify/` 스크립트
+자체가 RD-018에서 다시 손댈 임시물이라 지금 보강하는 대신 옮길 때 함께 다듬는다.
 
 ## Phase 3 — 검증 자산
 

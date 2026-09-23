@@ -107,6 +107,14 @@ stdin 읽기의 끝:
     함께 `input()` 읽기에는 전부 꺼져 있어(`06-editing.md` 6.3, 확정 4) 벤더 원본 동작(개행만) 그대로다.
     3.14의 `raw_input`은 Enter로만 제출받고 편집 중 개행 삽입이 없어 대응하는 3.14 동작이 없다.
 
+선택 복사:
+
+43. **선택이 있으면 Ctrl+C(Shift 무관)가 SIGINT·취소 대신 복사하고 선택을 지운다.** 실행 중이면 인터럽트하지
+    않고, `>>> `·`... `·`input()` 읽기 중이면 취소하지 않으며 `^C`도 찍지 않는다(`decideKey`가 선택 유무로
+    분기, `06-editing.md` 6.6). 선택 시 자동 복사(마우스를 뗀 순간의 `mouseup`)도 3.14 pty에는 없는 동작이다.
+    3.14 pty에는 선택 개념이 없어 Ctrl+C는 항상 SIGINT다(RD-017, 사용자 결정 — Windows Terminal·VS Code
+    통합 터미널의 "선택 있으면 Ctrl+C=복사, 없으면 SIGINT" 관례를 따른 의도적 선택).
+
 top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 한 줄로 끝나고 `except KeyboardInterrupt`로는 잡히지 않는 것(우리 구현은 콘솔 task를 취소하고 표지 예외 `IdleInterrupt`를 한 줄로 표시한다. `except asyncio.CancelledError`는 잡고 `finally`는 돈다)은 **편차로 등록하지 않는다**. 대기 중 Ctrl+C를 task 취소로 처리하고 한 줄만 내는 것은 3.14의 `python -m asyncio`와 같은 동작이고, 우리 TLA 옵션의 기준이 기본 REPL이 아니라 `python -m asyncio`이기 때문이다(편차 1과 같은 정렬). 2절 "범위 밖"에도 넣지 않는다 — 재현하지 않기로 한 차이가 아니라 차이가 아니다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약"), RD-008 pty 재측정 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/pty/results.md`
