@@ -89,6 +89,20 @@
   `FileFinder`만 인정해 `HARDCODED_SUBMODULES`가 빠진다. **그 판정만 오버라이드**해 zipimporter의
   `archive == _stdlib_path`도 인정한다(vendoring·`pkgutil` 패치 없음).
 - 3.14의 삽입 quirk(스템이 파싱이 아니라 구분자 기반이라 생기는 어긋남)도 그대로 따른다.
+- 구현 위치: worker `packages/pyodide-repl/src/worker/complete-source.py`(`ZipStdlibModuleCompleter`·`complete_source`의 모듈
+  분기, 클래스 import 실패는 try/except 없이 `loadCompleteSource` 실패 = 부팅 실패, TRAP-10). main
+  `packages/pyodide-repl/src/terminal/tab-completion.ts`의 `mentionsImportKeyword`와 `planTab(buf, pos, pending?)`(스템이 빈 분기에서만
+  게이트를 평가), `terminal/tab-reader.ts`가 `pendingBlock || undefined`를 넘긴다. RPC 변경 없음.
+- 시험 위치: `worker/module-completion-parity.test.ts`(3.14.4 pty 기준 A01~A36·X01~X04, 실제 pyodide),
+  `worker/complete-source.test.ts`(모듈 분기·zip 보정 사전 조건·새 인스턴스·정렬 없음·게이트 안전성·quirk A37·편차 23),
+  `terminal/import-gate.test.ts`(코퍼스 55줄 `mentionsImportKeyword`), `terminal/tab-completion.test.ts`·`terminal/tab-reader.test.ts`
+  (`planTab` 게이트 분기·`pending`·연타 큐·오래된 응답 버리기), 브라우저 `apps/demo/e2e/checks/tab-check.mjs` C15(6종 8개 확인).
+  기준 데이터는 `apps/demo/e2e/pty/rd-016/`(재측정 없음)이고 시험은 이를 읽지 않고 케이스 ID와 리터럴로 옮겨 둔다.
+- `completer_word_break_characters`(pyodide `Console`)와 `tab-completion.ts`의 `STEM_DELIMITERS`는 같은 33자 문자열이다
+  (`Console({}).completer_word_break_characters === STEM_DELIMITERS`, 2026-09-24 pyodide 314.0.7 실측). worker의 모듈 분기
+  `start` 계산은 이 문자열을 그대로 쓰므로 둘이 어긋나면 삽입 시작 위치가 어긋난다. `tab-completion.test.ts`가 33자 개수와
+  구분자 뒤 `indent` 판정을 고정한다.
+- 알려진 차이: 편차 18(모듈 집합 178 대 192)·19·20·21·23(`10-parity-deviations.md`).
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/06-tab-completion.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/{tab-completion,tab-reader,complete-source}.ts`,

@@ -496,7 +496,7 @@ Ctrl+U로 지운 줄)뿐이고, RD-014의 ↑ 삼킴은 이 경로만 다룬다.
 - 세션 리셋 뒤 Tab 동작·삽입 1회(C11a), `exit()` 뒤 무동작(C11b), `exit()` 뒤 리셋 세션에서 동작(C11c).
 - 지연(C12, 페이지 내부 시계 TRP-022, dev Chromium headless, 웜(세션 첫 Tab 제외) N=20): `a.` 속성 후보
   중앙값 **25.8ms**·최대 **33.5ms**, 빈 스템 공백 중앙값 **10.9ms**·최대 **17.0ms**. 정지 0, 둘 다 필수
-  기준(200ms) 이내(참고 30ms 안쪽). `import os.pa`(지연 측정 3종째)는 RD-016 뒤로 미룸(미실행).
+  기준(200ms) 이내(참고 30ms 안쪽). `import os.pa`(지연 측정 3종째)는 RD-016 뒤로 미룸(미실행). (2026-09-24 갱신: RD-016이 C12에 기록 전용으로 추가, 중앙값 26.2ms·최대 33.4ms.)
 - 코드포인트↔UTF-16: `x = "😀" ; a.at` Tab에서 Python `start`(코드포인트)와 JS `pos`(UTF-16) 변환이 맞아
   서로게이트 쌍이 잘리지 않는다(`tab-completion.test.ts` 61건 + `complete-source.test.ts`의 `start === 10`
   실측).
@@ -531,7 +531,7 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 게이트(`mentionsImportKeyword`) 삽입 자리는 `terminal/tab-completion.ts`의 `planTab` 앞(현재는 게이트
 없이 스템 유무만 본다, `07-tab-completion.md` 7.5). `terminal/tab-reader.ts`의 `handleTab`이 이미
 `deps.complete(plan.source, pendingBlock || undefined)`로 `pending`을 넘기고 있어 프로토콜 변경이 필요
-없다. 지연 측정 3종째(`import os.pa`)는 이 RD가 미실행으로 남겼다.
+없다. 지연 측정 3종째(`import os.pa`)는 이 RD가 미실행으로 남겼다(RD-016이 C12에 기록 전용으로 채움).
 
 인계(RD-018): 확인 스크립트·pty 기준 데이터는 `_works/_completed/20260923-16-rd-015-tab-completion/verify/`의
 `tab-check.mjs`(68개 절)·`pty/`(`res_s*.json` 복사, 3.14.4 기준)·`positive-controls.md`(3건)·
@@ -539,7 +539,7 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 
 ### RD-016 — `import`/`from` 줄의 모듈 완성
 
-상태: 대기 · 이전: RD-016a · 설계: `07-tab-completion.md` 7.5
+상태: 완료 · 이전: RD-016a · 설계: `07-tab-completion.md` 7.5
 
 시나리오: `import os.pa` Tab → `import os.path`. `import xml.dom.m` Tab → `xml.dom.mini`. `import ` Tab 두 번 → 모듈 목록. `from os import pa` → `path`. `import os; os.pa`는 속성 완성.
 
@@ -549,7 +549,29 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 - zip stdlib 보정: 원본 `ModuleCompleter`가 `import collections.a`에 `[]`이고 보정 서브클래스가 `['collections.abc']`, 사설 이름(`_stdlib_path` str·`_is_stdlib_module`) 사전 조건 단정(TRAP-10). 호출마다 새 인스턴스(site-packages 가짜 패키지 `zz_fake_pkg`로 대리 시험). `_pyrepl` import 실패는 worker 부팅 실패. 모듈 분기도 `KeyboardInterrupt`를 삼키지 않는다.
 - L1 배선(dev, `tab-check.mjs` C15 절, `waitFor`·마커 판정만 — `09-testing.md` 9.7): `import os.pa`→`os.path`, `from os import pa`→`path`(C9c 재정의), `import collections.a`→`abc`, `import xml.dom.m`→`mini`, `import ` Tab 두 번 목록(`os`·`sys` 포함, 개수 단정 없음), `if True:` 블록 `pending` 경로, `import os; os.pa` 속성 폴백. C5e(`important = ` 8연타 32칸)는 "게이트 참·왕복 + 큐" 셀로 제목 정정. C12 `import os.pa` 지연은 N=20 기록만(판정선 없음) — `baseline.json` `unrun` 제거, `BASELINE.md` 갱신.
 - 200개 상한 브라우저 시험·실제 `loadPackage`·pty 재측정은 하지 않는다. 전체 `e2e:baseline`·preview는 사용자 지시 때만.
-- 계획서: `_works/20260924-21-rd-016-module-completion/`.
+- 계획서: `_works/_completed/20260924-21-rd-016-module-completion/`.
+
+결과(2026-09-24, L0 + L1, `docs/agents/rubber-workflow.md` "검증 실행 예산"): worker `worker/complete-source.py`에
+`ZipStdlibModuleCompleter`(`_is_stdlib_module`만 오버라이드) 모듈 분기, main `terminal/tab-completion.ts`에
+`mentionsImportKeyword`(`/import|from/`, 부분 문자열)와 `planTab(buf, pos, pending?)`, `terminal/tab-reader.ts`가 `pending`을 전달한다(RPC 변경 없음).
+- L0: 3.14.4 pty 대조 `worker/module-completion-parity.test.ts` **40/40**(A01~A36·X01~X04, 편차 18 케이스 A11·A12 두 번째 Tab 목록만 구조 판정),
+  A37·편차 23 quirk 단위 통과. 게이트 코퍼스 `terminal/import-gate.test.ts` **61/61**(55줄 + 대소문자 변형 확인) + `complete-source.test.ts` 133건(게이트 안전성 "거짓 ⇒ `None`",
+  zip 보정 사전 조건, 새 인스턴스 `zz_fake_pkg`, 정렬 없음, `KeyboardInterrupt` 통과, `_pyrepl` import 실패 시 `loadCompleteSource` 실패) 통과.
+  `tab-completion.test.ts` 71·`tab-reader.test.ts` 33 통과. 변이 검사 worker 10건·main 6건 전부 killed(게이트 상시 거짓·상시 참·`\b` 게이트·zip 보정 제거·인스턴스 캐시·
+  모듈 후보 정렬·공백 분기 제거·`pending` 미결합·`tab-reader` `pending` 미전달 포함).
+  루트 `pnpm check-types`·`lint`·`test`(pyodide-repl 43파일 1185건·xterm-readline 130건·demo 3건)·`build` `--force`(turbo 캐시 없이) 통과.
+- L1(dev, `tab-check.mjs`): `ONLY=C5,C9,C12,C15` **20/20**, 총 `pageerror` 0. C15 절 6종 8개 확인(C15a `import os.pa`→`os.path`, C15b `import collections.a`→`abc`,
+  C15c `import xml.dom.m`→`mini`, C15d `import ` Tab 두 번 목록, C15e `if True:` 블록 `pending` 경로, C15f `import os; os.pa` 속성 폴백), C9c를 `from os import pa`→`path` 채움으로
+  재정의, C5e 제목 정정. 양성 대조 1건: 게이트 상시 거짓 → C15d 2개 실패, 원복 뒤 20/20. C12 `import os.pa` 지연(웜 N=20, 기록 전용): 중앙값 26.2ms·최대 33.4ms
+  (같은 실행 `a.` 중앙값 28.7ms·최대 34.0ms). `baseline.json`의 `unrun`은 빈 배열, `BASELINE.md` 2절 `tab-check` 행 갱신.
+- **미실행(예외)**: 전체 `e2e:baseline`(L2)·`e2e:measure`·preview는 사용자 지시가 없어 돌리지 않았다. `tab-check.mjs` 76개 중 실측은 20개이고 나머지 56개(C1~C4·C6~C8·C10·C11·C13·C14)는
+  이 RD 뒤 재실행하지 않았다(C15는 전역을 바꾸지 않아 세션 상태 영향은 예상하지 않으나 확인은 아님). 3.14.4 pty 재측정도 하지 않았다(기준 데이터는 3.14.4 원본 복사, 번들은 3.14.2, 편차 19).
+- 허용 편차: 18(모듈 집합 192 대 178)·19·20(미로드 패키지 후보 없음)·21(열 폭 근사)·23(`import os.pa  # c` → `# cs.path`). 새 편차 등록 0(목록 쪽 넘김 없음은 편차 16·18). 편차 건수 44 유지.
+- 실측으로 확인한 사실: `Console({}).completer_word_break_characters`는 `STEM_DELIMITERS` 33자와 같은 문자열이다. 게이트 참·빈 스템 줄은 이제 worker 왕복을 만들어 Tab 연타 뒤 바로 입력하면
+  남은 큐 Tab이 그 문자를 스템으로 재생한다(`07-tab-completion.md` 7.1 큐 규칙과 일치, 제품 결함 아님). 모듈 목록은 178개라 한 화면을 넘는다.
+
+기준선(RD-018) 반영: 확인 스크립트는 이미 `apps/demo/e2e/checks/tab-check.mjs`(C1~C15 76개), pty 기준 데이터는 `apps/demo/e2e/pty/rd-016/`에 있고 `BASELINE.md`·`baseline.json`이 갱신됐다.
+전체 `e2e:baseline` 재확인은 사용자가 L2를 지시할 때 한다. 양성 대조 수행 기록은 작업 폴더(`_works/`)에만 있고 `apps/demo/e2e/positive-controls/`에는 이관하지 않았다.
 
 ### RD-017 — 선택 영역 복사(선택 시 자동 복사, 선택 중 Ctrl+C는 복사)
 
@@ -620,7 +642,7 @@ RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이
 전부 + preview 부분) `failed: []` — 실패 0. (2) `skipped-ids.md` 3판(RD-006·007·008)을 재집계한
 결과 73개(RD-006b 원본 선언 기준 1절 23 + 2절 20 + 3절 30, 옛 "74"와 1건 차이 — 원인 미상,
 `BASELINE.md` 5절·`pending-issues/08.md`) 전부 복원 실행 확인, 미실행은 RD-016 담당 1건
-(`import os.pa` 지연 측정)뿐. (3) `boot-press` N=30 **30/30 OK**. (4) 총 `pageerror` **0**(`baseline.json`의
+(`import os.pa` 지연 측정, 2026-09-24 RD-016이 C12에 추가해 해소)뿐. (3) `boot-press` N=30 **30/30 OK**. (4) 총 `pageerror` **0**(`baseline.json`의
 `expectedPageErrors`로 의도된 forced 3건 — session-reset dev·preview `crash` 절, tla dev `sticky` 절 —
 을 제외, 초과분은 그대로 잡힌다). 허용 편차 1건(AD, 꼬리 든 프롬프트에서 Ctrl+L, 편차 44) + 양성 대조
 허용 예외 1건(rd-007.py #3은 `burst-matrix COMBOS=a`에서 검출력 없음을 실측 확인한 무해한 회귀).

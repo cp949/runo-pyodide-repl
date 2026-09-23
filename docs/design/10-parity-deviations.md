@@ -39,7 +39,7 @@ Tab 완성:
 
 16. **`[ not unique ]`·`[ complete but not unique ]` 계열 메시지가 없다.** 목록이 스크롤백에 남고 입력줄이 목록 위아래로 중복된다. 메뉴 필터·쪽 넘김·선택 UI 없음.
 17. **`input()` 안 Tab 무동작**(3.14는 완성한다).
-18. **환경 모듈 집합 차이**: 빈 cwd 기준 3.14 pty `import ` 후보 192개(3.14.4), pyodide 178개(314.0.7). 네이티브에만 있는 밑줄 없는 15개(`curses`, `dbm`, `ensurepip`, `grp`, `idlelib`, `pip`, `pwd`, `pydoc_data`, `readline`, `resource`, `syslog`, `tkinter`, `turtle`, `turtledemo`, `venv`)와 밑줄 17개가 없고, pyodide에만 있는 8개 중 `pyodide`와 `_test*`는 후보에 남는다(`INTERNAL_PREFIXES`가 `_pyodide*`만 거른다).
+18. **환경 모듈 집합 차이**: 빈 cwd 기준 3.14 pty `import ` 후보 192개(3.14.4), pyodide 178개(314.0.7). 네이티브에만 있는 밑줄 없는 15개(`curses`, `dbm`, `ensurepip`, `grp`, `idlelib`, `pip`, `pwd`, `pydoc_data`, `readline`, `resource`, `syslog`, `tkinter`, `turtle`, `turtledemo`, `venv`)와 밑줄 17개가 없고, pyodide에만 있는 8개 중 `pyodide`는 `import ` 빈 스템 후보에 남고 `_test*` 5개는 `import _` 스템에서 후보에 남는다(`INTERNAL_PREFIXES`가 `_pyodide*`만 거른다). 178 = 192 − 밑줄 없는 15 + `pyodide`(RD-016 구현 뒤 `ModuleCompleter().get_completions('import ')` 178개 실측). `import ` 목록은 3.14가 22행 쪽으로 넘기고 `108 more...`를 붙이는 반면 이 저장소는 178개를 한 번에 그린다(편차 16).
 19. **번들 pyodide는 Python 3.14.2, 기준 pty는 3.14.4**. 95케이스 대조에서 zip 보정 뒤 파서 결과 차이는 없었으나 소스 차이 자체를 배제하지는 않았다.
 20. **미로드 배포 패키지는 후보에 없다**(numpy 등).
 21. **열 정렬은 문자열 길이 근사**(전각 문자 2칸 미반영).

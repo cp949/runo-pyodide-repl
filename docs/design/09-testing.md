@@ -12,9 +12,19 @@
 `submission-runner.test.ts`, `multiline.test.ts`, `stdin-callback.test.ts`,
 `top-level-await.test.ts`(콘솔 플래그 토글 + RD-012 `asyncio.run(main())` TLA 꺼짐/켜짐 둘 다 완료),
 `terminal-sinks.test.ts`(실제 `PyodideConsole`·sink·`Readline`의 터미널 바이트),
-`complete-source.test.ts`, `import-gate.test.ts`, `tab-completion.test.ts`,
-`tab-completion-flow.test.ts`(main·worker 루프·실제 후보 계산 통합), `auto-indent-parity.test.ts`
+`complete-source.test.ts`, `module-completion-parity.test.ts`(RD-016, 아래 별도 항목), `auto-indent-parity.test.ts`
 (pyodide에 든 `_pyrepl.readline` 함수와 차분 검증), `rpc.test.ts`(실제 `MessageChannel`).
+- 파일 지정 실행: `pnpm --filter @cp949/runo-pyodide-repl test -- <이름>`은 필터가 적용되지 않아 패키지 전체(43개 파일·1185건, 약 18초)를 돌린다(2026-09-24 실측).
+  대상만 돌리려면 `cd packages/pyodide-repl && pnpm exec vitest run <파일 일부 이름...> [--reporter=verbose]`.
+- **모듈 완성(RD-016)**: `worker/complete-source.test.ts`는 실제 pyodide에서 `complete_source`의 모듈 분기를 본다 — 후보(`os.path`·`path`·`collections.abc`),
+  zip 보정 사전 조건(원본 `ModuleCompleter`가 `import collections.a`에 `[]`, `_stdlib_path`가 `str` `'/lib/python314.zip'`, `_is_stdlib_module` 존재, TRAP-10),
+  호출마다 새 인스턴스(site-packages 가짜 패키지 `zz_fake_pkg`를 첫 호출 뒤에 만들어 후보로 잡히는지), 내부 이름 제외, 정렬 없음(기반 클래스 스텁), `[]` 무동작,
+  `None` 공백 후보, `pending` 결합, 3.14 삽입 quirk(A37·편차 23), 모듈 분기 `KeyboardInterrupt` 통과, `_pyrepl` import 실패 시 `loadCompleteSource` 실패,
+  게이트 안전성("`mentionsImportKeyword`가 거짓인 줄은 `ModuleCompleter`가 `None`", 코퍼스 55줄, TRAP-33).
+  `worker/module-completion-parity.test.ts`는 3.14.4 pty 기준 케이스 40개(A01~A36·X01~X04)를 실제 pyodide로 대조한다: 시뮬레이터가 Tab마다 `planTab` →
+  `completeSource` → `resolveCompletion`/`formatCompletionList`(80열)를 거쳐 pty의 `screen`·`cursor`와 비교한다. 기대값은 원본 JSON을 읽지 않고 케이스 ID와 함께 시험 파일
+  리터럴로 옮겨 둔다(패키지가 `apps/demo`를 읽지 않는다). 편차 18로 화면이 같을 수 없는 `import `·`from ` 두 번째 Tab의 목록만 구조로 판정한다(입력 행·커서 동일,
+  목록이 열림, 행 80열 이하). 함정: `[ not unique ]` 행은 편차 16이라 비교에서 뺀다. 리터럴 생성은 옮김 스크립트 없이 손으로 하지 않고 원본 ID 목록(41개)과 대조했다.
 - 새 구현의 Ctrl+C 파일: `worker/sigint-handler.test.ts`(요청 번호 확인·ack·`<console>` 프레임 규칙·절단·
   catch-loop·TLA 켜짐 연타), `worker/interrupt-buffer.test.ts`(`connectInterrupts`의 조각 → 설치 → 폐기 → 연결
   순서와 조각 코드 객체 배선), `worker/boot.test.ts`(연결이 `setStdin`·`ready`보다 먼저, 부팅 전 눌림, 감시 타이머
@@ -104,7 +114,10 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 `history-entry.test.ts`도 같은 `StubTerminal` 패턴으로 `historyEntry` 훅을 본다 — 벤더 `packages/xterm-readline`의
 `print-above.test.ts`도 같은 패턴으로 `printAbove`(버퍼·커서 유지, 재그리기 중 키 큐 순서 보존, 커서 끝·이모지
 버퍼, 활성 읽기 없을 때 `println` 동등, dispose 뒤 콜백 무해, 다중 행 블록·감긴 단일 행에서 소실 없음,
-`cancelRead()` 경합 무해, RD-015 DELTA-01·01a·04a 11건)를 본다), `tab-reader.test.ts`, `stdin-reader.test.ts`,
+`cancelRead()` 경합 무해, RD-015 DELTA-01·01a·04a 11건)를 본다), `tab-completion.test.ts`(`planTab`·`resolveCompletion`·`formatCompletionList`,
+ RD-016이 `planTab` 게이트 분기 10건 추가: 빈 스템 `import `·`from os import ` → complete, `x = ` → indent, `important = ` → complete, `pending`에만 `import`가 있는 경우),
+`import-gate.test.ts`(`mentionsImportKeyword` 코퍼스 55줄 61건: 게이트 거짓 16·오탐 28·비`None` 11·대소문자 2, 코퍼스 정의는 `terminal/import-gate-corpus.ts`, `complete-source.test.ts`가 같은 코퍼스로 안전성을 본다),
+`tab-reader.test.ts`(RD-016이 게이트 참 빈 스템 배선 6건 추가: `pending` 전달, `x = ` 무왕복 공백, 8연타 큐 → 32칸, Tab 직후 입력·커서 이동 → 응답 버림), `stdin-reader.test.ts`,
 `repl-reader.test.ts`, `rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
 `worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
 요청 거절 정책, **`setAtPrompt` 호출 순서**(`true` → `readLine` → `false` → `discardPendingInterrupt` → `run`, 취소
@@ -296,13 +309,13 @@ RD-013의 `auto-indent-check.mjs`(`_works/_completed/20260923-14-rd-013-auto-ind
 않는다), ② `onKey` 제거(`backspace`·`shift`·`alt`·`cancel` 대부분 실패). 둘을 합치면 배선 전체가 커버된다.
 
 RD-015의 `tab-check.mjs`(`_works/_completed/20260923-16-rd-015-tab-completion/verify/`)는 이전 RD-016
-브라우저 58개(C1~C12)를 절 단위로 이식하고 C13(큐)·C14(완성 중 Ctrl+C)를 더해 총 68개 확인을 순서대로
+브라우저 58개(C1~C12)를 절 단위로 이식하고 C13(큐)·C14(완성 중 Ctrl+C)를 더해 총 68개 확인(RD-016이 C15 8개를 더해 76개)을 순서대로
 돌리고, preview(4173)에 대해 C1·C3·C8·C11 4절(30개)을 재실행한다. C12(지연 측정)는 페이지 내부
 keydown 리스너 + `MutationObserver`(같은 `performance.now()` 시계, TRP-022)로 `a.` 속성 후보(두 번째 Tab이
 목록을 화면에 반영한 시각, N=20)와 빈 스템 공백 삽입(첫 Tab이 동기 삽입한 시각, N=20)을 웜(세션 첫 Tab
 제외)으로 잰다 — 필수 판정은 정지 0 + 최대 200ms 이내(RD-009 시나리오와 같은 판정선), 30ms는 참고치로만
 기록한다(실측: `a.` 중앙값 25.8ms·최대 33.5ms, 빈 스템 중앙값 10.9ms·최대 17.0ms). `import os.pa`(지연
-측정 3종째)는 RD-016 뒤로 미룬다(미실행). 양성 대조 3건은 `verify/positive-controls.md`에 RD-010과 같은
+측정 3종째)는 RD-016이 C12에 기록 전용으로 더했다(아래). 양성 대조 3건은 `verify/positive-controls.md`에 RD-010과 같은
 방식으로 기록한다 — 큐(`queuedTabs.push`) 제거는 브라우저 C13 실패로 확인했지만, `readEnded` 배선 제거·
 `interruptCompletion` 무력화는 계획한 브라우저 시나리오(C8·C14) 대신 `index.test.ts`의 세션 조립 수준
 단위 시험("프롬프트 취소 중 완성 요청이 있으면 SIGINT를 1회 보낸다")으로 확인했다 — C8은 Playwright의
@@ -310,6 +323,15 @@ keydown 리스너 + `MutationObserver`(같은 `performance.now()` 시계, TRP-02
 `exec()`/`eval()` 아티팩트(아래)로 정상 코드에서도 한때 실패해 변이 구분력이 없었기 때문이다(`DELTA-05.md`
 "## 결정"). C14는 재현 클래스를 `exec()`가 아니라 REPL 프롬프트에 직접 멀티라인으로 타이핑해 정의해야
 `co_filename == "<console>"` 규칙이 매치돼 정상 복귀한다(`10-parity-deviations.md`에 좁은 경계 사례로 등록).
+
+RD-016은 같은 `tab-check.mjs`(현재 위치 `apps/demo/e2e/checks/`)에 C15 절 6종 8개 확인(C15a `import os.pa`→`os.path`, C15b `import collections.a`→`abc`
+(브라우저 번들 zip 보정), C15c `import xml.dom.m`→`mini`, C15d `import ` Tab 두 번 모듈 목록(개수 단정 없음, TRAP-27), C15e `if True:` 블록 안 `pending` 경로,
+C15f `import os; os.pa` 속성 폴백)을 더했다. 모듈 목록은 178개라 한 화면(24행)을 넘어 `os`·`sys`가 뷰포트 밖에 있으므로 C15d는 `Shift+PageUp` 스크롤백으로
+단어 집합을 모은다. C9c는 `from os import pa` → `from os import path` 채우기 셀로 재정의했고(예전 셀은 Tab 직후 `!`가 완성 왕복보다 먼저 도착해 통과한 것으로 판단하며
+채우기 동작을 확인하지 못했다), C5e(`important = ` 8연타)는 게이트 참 빈 스템이 worker 왕복을 만들어 큐로 32칸이 되는 셀로 제목을 정정했고 연타 뒤 입력 전 커서 열
+`waitFor`를 더했다(왕복 중 도착한 문자가 남은 큐 Tab의 스템이 된다, 7.1 큐 규칙). C12에는 `import os.pa` 지연(웜 N=20)을 기록 전용으로 더했다(판정 step 없음,
+RD-016 실측 중앙값 26.2ms·최대 33.4ms, 같은 실행 `a.` 중앙값 28.7ms·최대 34.0ms). 이로써 지연 측정 3종이 모두 코드에 있다. 확인은 L1
+`ONLY=C5,C9,C12,C15` 20/20·`pageerror` 0이고 전체 76개(C1~C15) 재실행은 하지 않았다(L2 미실행). 양성 대조 1건: 게이트를 상시 거짓으로 변조 → C15d 실패.
 
 ## 9.7 시간을 쓰는 판정 (2026-09-24 사용자 확정)
 
