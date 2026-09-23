@@ -572,7 +572,10 @@ xterm 6.0.0 DOM 렌더러의 선택 해제 관찰 셀렉터는 계획서가 가�
 `selection-copy-check.mjs`(S01~S12 + S03b·S08b, `apps/demo/e2e/lib.mjs`만 import), `positive-controls.md`
 (2건), 결과는 `results/dev.json`·`results/preview.json`. 이 RD가 `apps/demo/e2e/lib.mjs`에 이미 넣은
 `selectRows`·`dblclickCell`·`readClipboard`·`seedClipboard`·`setCopyOnSelect`·`toastText` 6종은 저장소에
-있어 추가 이관이 필요 없다 — RD-018은 `selection-copy-check.mjs` 스크립트 파일 자체의 이동만 하면 된다.
+있어 추가 이관이 필요 없다 — RD-018은 `selection-copy-check.mjs` 파일을 옮기면서 `apps/demo/e2e/lib.mjs`를
+가리키는 상대 import 경로(`../../../apps/demo/e2e/lib.mjs`)도 새 위치에 맞게 고쳐야 한다(최종 통합 리뷰가
+`_works/_completed/`로 옮긴 뒤 그대로 실행하면 `ERR_MODULE_NOT_FOUND`가 남을 것을 실측으로 확인했다 —
+RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이 경로 보정을 포함해야 한다).
 시험 강도 공백 소수(`selection-copy.test.ts`의 빈 문자열 방어 경로 미도달, `dragging` 리셋 회귀 시험
 부재, `index.test.ts`의 `copyOnSelect`/`onCopy` 배선 검증 없음, `selection-copy-check.mjs`의 S02 300ms
 유예 없음·S06/S07 토스트 텍스트 미확인 등)이 리뷰로 발견됐으나 전부 "현재 구현 정확성에 영향 없음"이 변이
