@@ -205,25 +205,27 @@
 
 - **쌓는 구간**: `activeRead`가 없는 모든 때. 실행 중, Enter 직후 `read()` write 콜백 대기 중(약 20ms, `10-parity-deviations.md` 32의 옛 측정), `cancelSettling`, 부팅·로딩 중.
   부팅 중 친 키는 쌓였다가 첫 프롬프트에서 재생한다(별도 코드 없음).
-- **쌓는 대상**: `onData` 덩어리 중 아래 둘을 뺀 전부(글자·Enter·Tab·방향키·Backspace·Ctrl+D·U·K·붙여넣기). 원본 문자열째 쌓는다. `parseInput` 결과가 토큰 1개이고 `CtrlC`·`CtrlL`일
+- **쌓는 대상**: `onData` 덩어리 중 아래 둘을 뺀 전부(글자·Enter·Tab·방향키·Backspace·Ctrl+D·U·K·붙여넣기). 원본 문자열째 쌓는다. **Shift+Enter**도 쌓는다: `handleKeyEvent`가 `keydown`에서
+  `readData`와 같은 분기(`dispatch`)로 보내 `Input` 항목(`InputType.ShiftEnter`, 길이 1)으로 쌓는다(버퍼 항목 타입은 `string | Input`). `parseInput` 결과가 토큰 1개이고 `CtrlC`·`CtrlL`일
   때만 "즉시 처리"로 본다. `ab\x03cd` 같은 다중 토큰 덩어리는 덩어리째 쌓이고 재생 때 활성 읽기의 Ctrl+C로 처리된다(xterm은 키마다 `onData`를 따로 부르고 덩어리는 붙여넣기에서만 오므로 드문 경우).
 - **쌓지 않는 것**:
   - **Ctrl+L**은 지금처럼 즉시 화면을 지운다(쌓지 않는다). 실행 중 Ctrl+L의 꼬리 규칙은 편차 40.
   - **Ctrl+C**는 쌓지 않고 버퍼를 **무조건** 비운 뒤 `ctrlCHandler`를 부른다(게이트 결과와 무관, tty `ISIG`의 입력 큐 비움과 같다). 창 안의 Ctrl+C 자체는 여전히 에코·전송이
     없다(`03-ctrl-c.md` 2.7). 그래서 Ctrl+C는 새 프롬프트가 보인 뒤에 보내야 한다(`docs/traps/TRP-005`).
-  - **Shift+Enter**는 `handleKeyEvent`가 `keydown`에서 `readKey`를 직접 불러 `onData`를 거치지 않으므로 활성 읽기가 없으면 예전처럼 버려진다(이 RD의 범위 밖, `.scratch/type-ahead/issues/02-*.md`).
 - **상한**: 합계 4096 UTF-16 코드 유닛(`TYPE_AHEAD_LIMIT`). 넘치는 덩어리는 **통째로** 버리고(앞에 쌓인 것은 유지, 이후의 작은 덩어리는 여전히 받는다) 알림이 없다. 앞에서부터
   잘라 채우지 않는다(서로게이트 쌍·이스케이프 시퀀스 중간 절단 방지). 3.14 tty는 한 줄 4095자까지 남기고 나머지를 버린다(편차 49).
 - **수명 주기**: `cancelRead()`(세션 리셋의 `terminate()`가 유일한 호출처)가 버퍼를 비운다 — 리셋은 새 프로세스라 옛 맥락의 키를 넘기지 않는다. 이후 새 세션 부팅 중 친 키는 다시 쌓인다.
   `dispose()`는 비우고 재생하지 않는다. `Readline`은 핸들이 하나만 만들어 세션 리셋 사이에도 공유하므로 이 두 곳이 버퍼의 유일한 폐기 지점이다(Ctrl+C 제외).
 - **재생**: `read()`의 write 콜백에서 `activeRead` 설정·`new State`·`prefill` 뒤 동기로 한다. 스냅샷을 먼저 꺼내 비운 뒤 덩어리마다 `readData`로 다시 넣으므로 `onKey` 훅(Tab 리더·자동 들여쓰기)과
-  `readPaste` 경로를 그대로 탄다. 낡은 `State`에는 그리지 않는다(붙여넣기 포함).
+  `readPaste` 경로를 그대로 탄다. `Input` 항목(Shift+Enter)은 `readKey`로 가서 `onKey` 훅(자동 들여쓰기, 6.3)을 거친다 — 실행 중 `if 1:` Shift+Enter `pass`는 다음 프롬프트에
+  `>>> if 1:` / `    pass`(4칸 들여쓰기)로 재생된다. 낡은 `State`에는 그리지 않는다(붙여넣기 포함).
 - **읽기당 소비**: 재생 중 Enter로 읽기가 끝나면 남은 덩어리는 `activeRead`가 없어 다시 버퍼로 들어가 순서가 보존되고 다음 읽기가 받는다. 실행 중 `ab⏎cd`는 첫 줄 `ab`가 제출되고 `cd`가
   다음 프롬프트 `>>> cd`에 남는다. 다음 읽기가 `input()`이면 첫 줄이 그 값이다(read-guard는 stdin 읽기 시작을 활성 REPL 읽기가 끝난 뒤로 미룰 뿐 버퍼와 무관하다, `04-stdin-input.md`).
 - **`printAbove`의 `queued`와의 관계**: 별개로 둔다(통합하지 않는다). `queued`는 재그리기(`redrawing`) 중 도착한 키를 재그리기 콜백에서 재생하고, type-ahead는 `activeRead`가 없을 때를 맡는다.
   재생 키가 `printAbove`(Tab 완성 목록 등)로 재그리기를 시작하면 남은 덩어리는 `readData`의 `redrawing` 분기로 `queued`에 들어가 순서가 보존된다(벤더 시험 "재생 키가 printAbove로 …").
+  Shift+Enter도 같은 분기를 타므로 재그리기 중 친 Shift+Enter가 먼저 친 키보다 앞서 적용되지 않고 `queued`를 거쳐 순서를 지킨다.
 - **알려진 경계**: Tab 뒤에 키가 이어진 입력(`os.getc`+Tab+`()`)은 재생이 한 틱에 끝나 Tab의 worker 왕복 응답 전에 뒤 키가 들어가 완성이 버려진다(편차 48). `cancelRead()` 뒤
   `printAbove` 재그리기 콜백 전 창에 친 키는 `queued`를 거쳐 버려진다(`.scratch/type-ahead/issues/03-*.md`, 미재현).
 - **에코**: 실행 중에는 아무것도 그리지 않고 다음 읽기에서 입력줄로만 그린다. 3.14의 tty 에코는 따르지 않는다(편차 45). 실행 중 `←`·Ctrl+D·Tab 뒤 키는 편차 46~48이다.
 - **시험**: 벤더 `type-ahead.test.ts`(재생·순서·Ctrl+C·Ctrl+L·`cancelRead`·`dispose`·붙여넣기·상한·`onKey`·`printAbove` 순서·pty 대조 값), 브라우저
-  `apps/demo/e2e/checks/type-ahead-check.mjs`(`e2e:type-ahead`), 3.14.4 pty 기준 `apps/demo/e2e/pty/rd-019/`.
+  `apps/demo/e2e/checks/type-ahead-check.mjs`(`e2e:type-ahead`, Shift+Enter는 T12), 3.14.4 pty 기준 `apps/demo/e2e/pty/rd-019/`.
