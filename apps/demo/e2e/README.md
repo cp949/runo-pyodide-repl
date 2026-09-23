@@ -8,6 +8,10 @@
 기준선(시나리오 ID별 현재 기대 결과)은 `apps/demo/e2e/BASELINE.md`에 있다. 이 문서는 실행법·폴더
 규칙·버전 차이·함정만 다룬다.
 
+**실행 횟수 제한**: 전체 `e2e:baseline`은 1회 약 8분 이상 걸린다. 작업 폴더 하나에서 1회 이하로
+잡고, RED·수정 후 재확인은 기존 로그·브라우저 없는 하니스·개별 스크립트(`N=` 축소)로 한다
+(`docs/agents/rubber-workflow.md` "검증 실행 예산").
+
 ## 실행 전제
 
 - `pnpm exec playwright install chromium`이 끝나 있어야 한다(devDependency `playwright`,
