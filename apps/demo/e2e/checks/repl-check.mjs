@@ -6,7 +6,10 @@
 //   not-isolated : 헤더 없는 서버에서 노란 경고 한 줄 + 상태 not-isolated + worker 없음
 // 사용: node repl-check.mjs <normal|cdn-blocked|not-isolated> <url> [screenshot-prefix.png]
 //   normal에서 screenshot-prefix가 `x.png`이면 `x.png`(t>>> abc·트레이스백)와 `x-terminated.png`(exit() 뒤)를 남긴다.
-//   url 생략 시 http://localhost:5173. 결과 파일 label은 url 포트 4173이면 preview, 그 밖(5173·4174 등)은 dev(RD-018 DELTA-02 결정).
+//   url 생략 시 http://localhost:5173. 결과 파일 label은 `<모드>-<서버>`다: 서버는 url 포트 4173이면 preview, 그 밖(5173·4174 등)은
+//   dev(RD-018 DELTA-02 결정). 모드를 넣는 이유: `run.mjs baseline`이 세 모드를 별도 프로세스로 돌려 `lib.mjs`의 `-2`·`-3`
+//   접미 카운터가 매번 1부터 시작하므로, 모드가 없으면 세 모드가 같은 `repl-check-dev.json`을 덮어쓴다.
+//   결과 파일: `repl-check-normal-dev.json`·`repl-check-cdn-blocked-dev.json`·`repl-check-not-isolated-dev.json`·`repl-check-normal-preview.json`.
 // RD-018 DELTA-02 갱신: ③은 RD-013(자동 들여쓰기) 프리필을 그대로 쓰도록 수동 들여쓰기를 뺐고(화면 문자열은 불변),
 // ⑦은 RD-010(세션 리셋)이 덧붙인 종료 안내 문구로 기대값을 갱신했다(낡은 기대값, 판정 의도는 불변).
 import { hasFg, open, same, show } from "../lib.mjs";
@@ -16,7 +19,8 @@ if (!["normal", "cdn-blocked", "not-isolated"].includes(mode) || !url) {
   console.error("사용: node repl-check.mjs <normal|cdn-blocked|not-isolated> <url> [screenshot.png]");
   process.exit(2);
 }
-const label = url.includes(":4173") ? "preview" : "dev";
+// 결과 파일 이름에만 쓰인다(stdout JSON에는 `mode` 필드로 따로 남는다).
+const label = `${mode}-${url.includes(":4173") ? "preview" : "dev"}`;
 
 const BANNER_FIRST = /^Python 3\.14\.2 \(.*\) on WebAssembly\/Emscripten$/;
 const BANNER_SECOND = 'Type "help", "copyright", "credits" or "license" for more information.';

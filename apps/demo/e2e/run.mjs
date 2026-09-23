@@ -42,7 +42,8 @@ const STATIC_URL = "http://localhost:4174";
  * 집합만(`carryover`·`prompt-join`·`trailing-newline`은 preview 실행 없음 — RD-005 인계 기록 근거).
  * `not-isolated`는 4174(static, 헤더 없는 정적 서버)에 대해 돌지만 label은 dev로 잡힌다(4173이 아닌
  * 모든 URL은 dev, DELTA-02 "## 결정" 참고) — 이 SETS의 `server: "static"`과는 별개로, 결과 파일
- * label은 각 스크립트가 자기 url을 보고 스스로 정한다.
+ * label은 각 스크립트가 자기 url을 보고 스스로 정한다. `repl-check`는 세 모드가 별도 프로세스라 label에
+ * 모드를 넣어 `repl-check-<모드>-<dev|preview>.json`으로 나눠 쓴다(같은 이름이면 마지막 모드만 남는다).
  *
  * RD-018 DELTA-03: RD-010~017 판정 스크립트 7종. 이 스크립트들은 (DELTA-02의 9종과 달리) dev·preview를
  * **한 프로세스 안에서** 이어 돈다 — `session-reset-check`·`multiline-check`·`tla-check`·

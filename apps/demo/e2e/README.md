@@ -109,12 +109,10 @@
 `<호출 스크립트 파일명(확장자 제외)>-<label>.json`을 쓴다. `label`은 보통 `"dev"`(5173·4174 공용,
 DELTA-02 "## 결정")·`"preview"`(4173)다. 같은 프로세스에서 같은 이름이 반복되면 `-2`·`-3` 접미가 붙는다.
 
-**알려진 제약**: `repl-check.mjs`는 dev에서 세 모드(`normal`·`cdn-blocked`·`not-isolated`)를 **각각
-별도 프로세스**로 돌리는데(`run.mjs`의 `SETS`), 세 모드 다 같은 파일 이름 `repl-check-dev.json`을 써서
-마지막 모드(`not-isolated`)만 남고 앞 두 모드의 결과 파일은 덮어써진다 — 통과 자체는 실행 로그의 `PASS`
-줄로 확인할 수 있지만, `summary.json`의 `scripts` 배열만으로는 `normal`·`cdn-blocked`이 돌았는지 구분할
-수 없다(조용한 거짓 양성 위험, 아직 미해결 — `lib.mjs`의 `resultFileName()`이 모드별 접미사를 모른다).
-새 확인 스크립트를 같은 파일로 여러 모드 나눠 돌릴 계획이면 이 제약을 먼저 확인한다.
+`repl-check.mjs`는 dev에서 세 모드(`normal`·`cdn-blocked`·`not-isolated`)를 각각 별도 프로세스로 돌리므로
+프로세스별 `-2` 접미로는 구분되지 않는다. 그래서 label에 모드를 넣어
+`repl-check-<mode>-<dev|preview>.json`(예: `repl-check-normal-dev.json`)을 쓴다. 같은 스크립트를 여러 모드로
+나눠 돌리는 새 스크립트도 label에 모드를 넣는다.
 
 ## 기준 인터프리터 차이
 

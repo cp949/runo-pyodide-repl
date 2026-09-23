@@ -54,10 +54,10 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 | `measure/boot-press.mjs`(baseline 세트 소속, DELTA-05가 배선) | 부팅 중 Ctrl+C N=30 | 미실행(baseline dev 전용) | 통과 30/30 |
 
 [^repl-log]: `repl-check.mjs`는 dev에서 `normal`·`cdn-blocked`·`not-isolated`(4174) 세 모드를 각각
-    별도 프로세스로 실행해 결과 파일(`repl-check-dev.json`)이 마지막 모드로 덮어써진다
-    (`pending-issues/04.md`, DELTA-06 정리 대상). 개수는 `node run.mjs baseline` 표준출력의
-    `PASS` 줄을 모드 구간별로 센 값이다(정정 실행, 2026-09-23: normal 15/15, cdn-blocked 5/5,
-    not-isolated 4/4 — 전부 일치).
+    별도 프로세스로 실행하고, 결과 파일은 모드별 `repl-check-<mode>-dev.json`으로 남는다(2026-09-24
+    정정 전에는 `repl-check-dev.json` 하나를 마지막 모드가 덮어썼다). 기준 개수: normal 15/15,
+    cdn-blocked 5/5, not-isolated 4/4(2026-09-23 표준출력 `PASS` 줄 집계, 2026-09-24 모드별 결과 파일로
+    같은 값 확인).
 [^e1]: "history E1"은 RD-013 시점 기대(마지막 본문 줄만 재호출)에서 RD-014 `block-history`가
     도입한 실제 동작(블록 전체 재호출)으로 DELTA-03이 갱신했다(사용자 확정,
     `_works/20260923-18-rd-018-e2e-baseline/DELTA-03.md` "## 결정").
