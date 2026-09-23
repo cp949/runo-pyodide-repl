@@ -261,8 +261,10 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 `open(url)`을 export한다 — Playwright로 페이지를 열고 화면 행 읽기(`rows`·`tail`·`rowClasses`·`cursorRow`),
 타이핑·Enter·대기(`type`·`enter`·`submit`·`waitPrompt`·`waitFor`·`typeWhenReading`·`cancelWhenReading`),
 Ctrl+C 계열(`ctrlC`·`holdCtrlC`·`ctrlCBurst`), 확인 기록(`step`·`checks`·`notes`·`finish`)을 돌려준다. 각
-RD의 확인 스크립트는 이 파일을 **복사하지 않고 import**하며 `_works/<작업>/verify/`에 둔다(저장소 코드가
-아니다, `.gitignore` 대상). `ONLY=<이름,…>` 환경변수로 `step` 이름이 그 접두어로 시작하는 것만 골라 돈다.
+RD의 확인 스크립트는 이 파일을 **복사하지 않고 import**하며 `apps/demo/e2e/checks/`에 두고 저장소에
+커밋한다(RD-018부터 — 그 전에는 `_works/<작업>/verify/`에 두고 `.gitignore` 대상이었다, 아래 각 RD
+문단의 경로는 그 시점 기록이라 고치지 않는다). `ONLY=<이름,…>` 환경변수로 `step` 이름이 그 접두어로
+시작하는 것만 골라 돈다.
 
 RD-010의 `session-reset-check.mjs`(`_works/_completed/20260922-11-rd-010-session-reset/verify/`)가 이
 구조의 첫 사례다: dev 서버(5173)에 대해 절 8개(`reset`·`cursor`·`ctrll`·`carry`·`ccreset`·`exit`·`crash`·

@@ -1,20 +1,150 @@
 # apps/demo/e2e
 
-실제 xterm 6 + 실제 브라우저(chromium)로 데모를 조작하는 Playwright 하니스.
-`lib.mjs` 하나만 저장소에 둔다. 각 RD의 확인 스크립트 자체는 `_works/<작업>/verify/`에 두고
-`import { open, ... } from "<repo>/apps/demo/e2e/lib.mjs"`로 이 파일만 가져온다(복사 금지).
+실제 xterm 6 + 실제 브라우저(chromium)로 데모를 조작하는 Playwright 하니스. 판정 스크립트·측정
+스크립트·pty 기준 데이터·양성 대조 드라이버·node 통계를 전부 이 폴더 안에 저장소 코드로 커밋한다
+(RD-018부터, 옛 `_works/<작업>/verify/`는 이력이다 — `docs/design/12-previous-implementation.md`·
+각 RD의 ROADMAP 인계 문단 참고).
+
+기준선(시나리오 ID별 현재 기대 결과)은 `apps/demo/e2e/BASELINE.md`에 있다. 이 문서는 실행법·폴더
+규칙·버전 차이·함정만 다룬다.
 
 ## 실행 전제
 
-- `pnpm --filter demo dev`(포트 5173) 또는 `pnpm --filter demo build && pnpm --filter demo preview`가 떠 있어야 한다.
-- `pnpm exec playwright install chromium`이 끝나 있어야 한다(devDependency `playwright`, `apps/demo/package.json`).
+- `pnpm exec playwright install chromium`이 끝나 있어야 한다(devDependency `playwright`,
+  `apps/demo/package.json`).
+- `pnpm --filter demo e2e:baseline`·`e2e:measure`는 서버(5173 dev·4173 preview·4174 비격리 정적)가
+  비어 있으면 스스로 기동하고 끝나면 자기가 띄운 것만 내린다(`e2e/run.mjs`). 이미 떠 있으면 "기존
+  사용"으로 표기하고 그대로 쓰며 종료 시에도 내리지 않는다.
+- `pnpm --filter demo e2e:<이름>`(개별 스크립트)은 서버가 **미리 떠 있어야** 한다 — 보통
+  `pnpm --filter demo dev`(5173).
+- 서버 기동 확인은 `lsof`(포트 기준 프로세스 조회)에 의존한다 — 이 sandbox에는 있지만 `lsof`가 없는
+  환경에서는 `e2e/run.mjs`가 "이미 죽었다"로 조용히 오판할 수 있다(`pending-traps/01.md` 계열,
+  아래 함정 절 참고).
 
-## 스크립트 위치 규칙
+## 명령 표(25항목, `apps/demo/package.json`)
 
-- `apps/demo/e2e/lib.mjs`: 공용 하니스(화면 읽기·입력·대기·pageerror 계수). eslint·tsc 대상 밖
-  (`apps/demo/eslint.config.js`의 `ignores: ["e2e/**"]`, `tsconfig.json`의 `include`가 `src`뿐).
-- `_works/<yyyyMMdd>-NN-<작업>/verify/*.mjs`: RD별 확인 스크립트. 저장소에 커밋되지 않는다
-  (`_works/`는 `.gitignore` 대상).
+| 이름 | 실행 |
+| --- | --- |
+| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 16종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
+| `e2e:measure` | `node e2e/run.mjs measure` — dev만 기동, 측정 5종(`boot-press` 제외) 순차 실행 |
+| `e2e:check` | `node e2e/run.mjs check` — `checks/`·`measure/`·`node/`의 `.mjs`를 `node --check`로 정적 구문 검사만(eslint·tsc는 `e2e/**` 계속 무시, 아래 "정적 검사" 참고) |
+| `e2e:repl-check` | `node e2e/checks/repl-check.mjs normal`(`cdn-blocked`·`not-isolated`는 인자로 직접 지정) |
+| `e2e:prompt-join` | `node e2e/checks/prompt-join-check.mjs` |
+| `e2e:trailing-newline` | `node e2e/checks/trailing-newline-check.mjs` |
+| `e2e:carryover` | `node e2e/checks/carryover-check.mjs` |
+| `e2e:stdin-input` | `node e2e/checks/stdin-input-check.mjs` |
+| `e2e:bg-input-guard` | `node e2e/checks/bg-input-guard-probe.mjs` |
+| `e2e:ctrl-c` | `node e2e/checks/ctrl-c-check.mjs` |
+| `e2e:prompt-cancel` | `node e2e/checks/prompt-cancel-check.mjs` |
+| `e2e:input-cancel` | `node e2e/checks/input-cancel-check.mjs` |
+| `e2e:session-reset` | `node e2e/checks/session-reset-check.mjs` |
+| `e2e:multiline` | `node e2e/checks/multiline-check.mjs` |
+| `e2e:tla` | `node e2e/checks/tla-check.mjs` |
+| `e2e:auto-indent` | `node e2e/checks/auto-indent-check.mjs` |
+| `e2e:block-history` | `node e2e/checks/block-history-check.mjs` |
+| `e2e:tab` | `node e2e/checks/tab-check.mjs` |
+| `e2e:selection-copy` | `node e2e/checks/selection-copy-check.mjs` |
+| `e2e:boot-press` | `node e2e/measure/boot-press.mjs` |
+| `e2e:press-loss` | `node e2e/measure/press-loss.mjs` |
+| `e2e:burst-matrix` | `node e2e/measure/burst-matrix.mjs` |
+| `e2e:input-burst-matrix` | `node e2e/measure/input-burst-matrix.mjs` |
+| `e2e:sleep-await` | `node e2e/measure/sleep-await-check.mjs` |
+| `e2e:keys-after-enter` | `node e2e/measure/keys-after-enter-probe.mjs` |
+
+개별 스크립트는 `node <파일> [url] [...]` 형태로도 직접 돌릴 수 있다(`url` 기본값
+`http://localhost:5173`). `ONLY=<이름 접두어,…>` 환경변수로 일부 확인만 골라 돌릴 수 있고, 측정
+스크립트는 `N=<정수>`로 반복 횟수를 줄일 수 있다(예: `N=2 pnpm --filter demo e2e:sleep-await`).
+
+## node 통계(수동 실행)
+
+브라우저를 쓰지 않고 node에서 실제 pyodide + 저장소 worker 모듈을 직접 배선해 재는 통계다. 5분 이상
+걸리는 것도 있어 `pnpm test`·`e2e:baseline`/`e2e:measure`에는 없다 — 필요할 때 손으로 돌린다.
+
+- `apps/demo/e2e/node/rd-007/`(눌림 소실·폴링 비용): 실행법·판정선·양성 대조는
+  `apps/demo/e2e/node/rd-007/README.md`.
+- `apps/demo/e2e/node/rd-009/`(유휴 sleep 중 Ctrl+C): 실행법·판정선·`--dry` 양성 대조는
+  `apps/demo/e2e/node/rd-009/README.md`.
+
+두 폴더 모두 `console.ts`·`sigint-handler.ts`·`sleep-slice.ts`가 Python 소스를 `?raw`로 import하므로
+`ts-resolve-hook.mjs` **먼저**, `py-raw-hook.mjs`(`node/rd-009/py-raw-hook.mjs`, 두 폴더가 공유) **나중**
+순서로 `--import`해야 한다(node 훅 체인은 스택 — 나중 등록이 먼저 실행된다, `pending-traps/02.md`).
+결과는 `E2E_RESULTS_DIR`(기본 `apps/demo/e2e/results/`)에 `node-*.json`으로 쓴다.
+
+## 양성 대조(positive-controls)
+
+`apps/demo/e2e/positive-controls/rd-0NN.{py,md}` — 판정 스크립트가 실제로 결함을 검출하는지 증명하는
+드라이버(소스 변조 → 대상 확인 실행 → 기대 셀만 실패 → `git checkout --` 원복 → 재실행 통과).
+
+**깨끗한 트리에서만 실행한다** — 시작 전 `git status --short`가 빈 출력이어야 한다(대상 파일이 이미
+수정 상태면 원복 확인이 무의미해진다).
+
+- `rd-005.py`~`rd-009.py`(5개, RD-005~009): 파이썬 드라이버가 **자기 스스로** dev 서버(5173)를
+  변조·원복마다 재기동한다(TRP-007 — vite dev가 되돌린 파일의 재변조를 낡은 모듈로 계속 주는 것을
+  피하려고). 실행: `python3 apps/demo/e2e/positive-controls/rd-0NN.py <번호>`(번호는 파일 머리
+  주석·`rd-0NN.py` 안 `CONTROLS` 딕셔너리 참고). 끝나면 드라이버가 띄운 dev 서버가 하나 남는다 —
+  직접 정리한다.
+- `rd-010.md`~`rd-017.md`(7개, RD-010~017 중 RD-016 제외): 자동 드라이버가 아니라 수행한 변조·명령·
+  결과를 손으로 기록한 절차 문서다. 재현하려면 문서에 적힌 순서(소스 변조 → `pnpm --filter demo dev`
+  **재시작** → `ONLY=`로 대상 셀 실행 → 원복 → 재시작 → 전체 재통과)를 직접 따른다 — dev 재시작은
+  이 경우 실행자의 몫이다(`.py` 5개와 다르다).
+
+## 폴더 규칙
+
+| 폴더 | 내용 |
+| --- | --- |
+| `lib.mjs` | 공용 하니스(화면 읽기·입력·대기·pageerror 계수·`finish()`). eslint·tsc 대상 밖(`apps/demo/eslint.config.js`의 `ignores: ["e2e/**"]`, `tsconfig.json`의 `include`가 `src`뿐) |
+| `run.mjs` | 묶음 실행기(`baseline`\|`measure`\|`check`, 서버 관리 + 결과 대조) |
+| `checks/` | 판정 스크립트(pass/fail이 있는 확인) |
+| `measure/` | 측정 스크립트(판정선 있음, `e2e:baseline`·`e2e:measure`가 도는 것과 `boot-press`처럼 baseline 세트 소속인 것이 섞여 있다 — `BASELINE.md` 4절 참고) |
+| `node/rd-0NN/` | node 전용 통계(브라우저 미사용) |
+| `pty/rd-0NN/` | CPython 3.14.4 pty 기준 데이터(기대 행 스냅샷) |
+| `positive-controls/` | 양성 대조 드라이버(`.py`)·기록(`.md`) |
+| `results/` | 실행 결과 JSON(`.gitignore` 대상, 커밋하지 않는다) |
+| `BASELINE.md`·`baseline.json` | 기준선 문서(사람용)·기계용 사본(`run.mjs`가 읽는다) |
+
+## 결과 파일 규칙
+
+`lib.mjs`의 `finish({ label = "dev", ...extra } = {})`는 stdout에 결과 JSON을 찍는 것과 별개로
+`process.env.E2E_RESULTS_DIR`(기본 `apps/demo/e2e/results/`)에
+`<호출 스크립트 파일명(확장자 제외)>-<label>.json`을 쓴다. `label`은 보통 `"dev"`(5173·4174 공용,
+DELTA-02 "## 결정")·`"preview"`(4173)다. 같은 프로세스에서 같은 이름이 반복되면 `-2`·`-3` 접미가 붙는다.
+
+**알려진 제약**: `repl-check.mjs`는 dev에서 세 모드(`normal`·`cdn-blocked`·`not-isolated`)를 **각각
+별도 프로세스**로 돌리는데(`run.mjs`의 `SETS`), 세 모드 다 같은 파일 이름 `repl-check-dev.json`을 써서
+마지막 모드(`not-isolated`)만 남고 앞 두 모드의 결과 파일은 덮어써진다 — 통과 자체는 실행 로그의 `PASS`
+줄로 확인할 수 있지만, `summary.json`의 `scripts` 배열만으로는 `normal`·`cdn-blocked`이 돌았는지 구분할
+수 없다(조용한 거짓 양성 위험, 아직 미해결 — `lib.mjs`의 `resultFileName()`이 모드별 접미사를 모른다).
+새 확인 스크립트를 같은 파일로 여러 모드 나눠 돌릴 계획이면 이 제약을 먼저 확인한다.
+
+## 기준 인터프리터 차이
+
+- pty 대조 기준: **CPython 3.14.4**(24×80, `TERM=xterm`).
+- 브라우저에서 실제로 도는 인터프리터: **pyodide 번들 3.14.2**(패키지 버전 표기 `314.0.7`).
+- 두 버전은 소스 패치 레벨이 다르다(`docs/design/10-parity-deviations.md` 편차 19) — 95케이스 대조에서
+  zip 보정 뒤 파서 결과 차이는 없었지만 소스 차이 자체를 배제하지는 않는다.
+- **Tab 완성 후보 집합이 다르다**(편차 18): 빈 cwd 기준 `import ` 후보가 3.14.4는 192개, pyodide는
+  178개다(네이티브 전용 15개 불포함 등). `tab-check.mjs`의 판정은 이 차이를 반영한 후보 목록을 쓴다.
+- 화면 지우기(Ctrl+L) 관련 편차는 편차 40·44(꼬리 든 프롬프트에서 Ctrl+L, `AD` 절, 아래).
+
+## 함정 링크
+
+이 폴더의 하니스·확인 스크립트를 고치거나 새로 만들 때 부딪히기 쉬운 함정(`docs/traps/`):
+
+- `docs/traps/TRP-005` 자동화 입력은 새 프롬프트가 보인 뒤에 보내야 한다
+- `docs/traps/TRP-006` 화면 행 텍스트만 비교하면 출력 끝의 여분 빈 줄을 놓친다
+- `docs/traps/TRP-007` 파일을 `git checkout`으로 되돌린 뒤 다시 변조하면 vite dev가 낡은 모듈을 계속 준다
+- `docs/traps/TRP-008` "로그가 없다" 확인을 뷰포트만 훑어 하면 화면 밖으로 밀려난 로그를 놓친다
+- `docs/traps/TRP-011` 출력 도착을 "화면 행에 마커 포함"으로 기다리면 입력한 코드 행이 마커를 포함해 즉시 통과한다
+- `docs/traps/TRP-022` 브라우저 지연을 Node 쪽 폴링으로 재면 문턱 근처에서 5~8ms 과대 측정된다
+- `docs/traps/TRP-024` 안내 줄 개수로 "다시 준비됐다"를 판정하면 여러 번 반복한 뒤 무한 대기한다
+
+`run.mjs`(서버 관리·결과 집계) 고유 함정은 `docs/traps/INDEX.md`에서 TRP-027 이후 번호를 확인한다
+(pnpm 자식 프로세스 kill이 조용히 실패하는 것, 의도된 pageerror 합산 오류 등).
+
+## 정적 검사
+
+eslint·tsc는 계속 `e2e/**`를 무시한다(`apps/demo/eslint.config.js`의 `ignores`, `tsconfig.json`의
+`include`가 `src`뿐). `pnpm --filter demo e2e:check`가 `node --check`로 구문만 확인한다.
 
 ## 도우미(RD-012)
 
@@ -39,3 +169,11 @@
 - `seedClipboard(page, text)`: 시험 전 클립보드에 사전 값을 넣는다.
 - `setCopyOnSelect(page, on)`: "선택 시 자동 복사" 체크박스를 `on`에 맞춘다(리셋이 없어 대기 없이 클릭만 한다).
 - `toastText(page)`: 복사 토스트(`data-testid=copy-toast`) 텍스트, 없으면 `null`.
+
+## 앞으로 새 RD를 추가할 때(RD-018부터)
+
+- 새 브라우저 확인 스크립트는 처음부터 `apps/demo/e2e/checks/`(또는 `measure/`)에 쓰고 작업 브랜치에
+  커밋한다 — 더 이상 `_works/<작업>/verify/`에 두지 않는다.
+- 완료 조건 "기준선과 같다"는 `BASELINE.md`·`baseline.json` 갱신을 포함한다.
+- 변이 검사 기록(`mutate-safe.mjs` 류)·`positive-controls.md`(수행 기록)·`results/`(실행 로그)는 여전히
+  `_works/<작업>/`에 둔다(일회성 근거 기록, 저장소 코드가 아니다).

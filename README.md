@@ -53,6 +53,16 @@ Cross-Origin-Embedder-Policy: require-corp
 
 dev·preview·정적 배포 모두 필요하다. `apps/demo/vite.config.ts`가 `server.headers`와 `preview.headers` 둘 다에 설정하고, `apps/demo/src/vite-config.test.ts`가 두 곳과 `worker.format: 'es'`를 시험한다. 정적 배포는 HTML과 worker 스크립트를 포함한 모든 응답에 헤더를 붙인다(preview에서 HTML·worker 에셋 둘 다 확인). 격리되지 않은 페이지에서는 `createRepl`이 worker를 만들지 않고 터미널에 경고 한 줄만 낸다(상태 `not-isolated`, ADR-0004). pyodide는 jsdelivr CDN에서 로드한다(CORP 헤더 제공).
 
+## 브라우저 회귀 확인
+
+```bash
+pnpm exec playwright install chromium   # 최초 1회
+pnpm --filter demo e2e:baseline         # 서버를 스스로 띄우고 판정 16종 + boot-press N=30을 돌려 기준선과 대조
+```
+
+자세한 실행법·개별 스크립트 목록·기준 인터프리터 버전 차이는 `apps/demo/e2e/README.md`(기준선 표는
+`apps/demo/e2e/BASELINE.md`).
+
 ## 이전 구현
 
 `/work/cp949/pyodide-samples/apps/repl`. coincident 동기 브리지 위에 만든 이전 구현이며 읽기 전용 참고다. 기능 규칙과 측정치는 `docs/design/`에 이관했다.

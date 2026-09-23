@@ -17,7 +17,8 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 - RD로 등록하려면 **재현 가능한 사용자 시나리오**와 **관찰 가능한 완료 기준**이 둘 다 있어야 한다. 하나라도 없으면 해당 설계 문서의 "알려진 한계·편차"(`docs/design/10-parity-deviations.md`)에 한 줄로 남긴다.
 - 완료 기준이 "착수 시 정한다"인 채로 등록하지 않는다.
 - `docs/design/10-parity-deviations.md` 2절 "범위 밖"의 차이는 등록하지 않는다.
-- 브라우저 회귀 기준선(아래 RD-018)은 모든 후속 항목의 완료 기준에 "기준선과 같다"로 포함한다.
+- 브라우저 회귀 기준선(아래 RD-018)은 모든 후속 항목의 완료 기준에 "기준선과 같다"로 포함한다(`pnpm --filter demo e2e:baseline` 통과 + `apps/demo/e2e/BASELINE.md` 갱신).
+- RD-018 확정 11: 새 RD의 브라우저 확인 스크립트는 처음부터 `apps/demo/e2e/checks/`(또는 `measure/`)에 쓰고 작업 브랜치에 커밋한다. 변이 검사 기록·`positive-controls.md`(수행 기록)·`results/`는 `_works/<작업>/`에 둔다.
 
 ## 공통 완료 조건
 
@@ -586,11 +587,24 @@ RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이
 
 ### RD-018 — 브라우저 회귀 하니스와 3.14 기준 데이터를 저장소 안에 보관
 
-상태: 대기 · 이전: 없음(이전에는 `_works/` 스크립트) · 설계: `09-testing.md` 9.5·9.6
+상태: 완료 · 이전: 없음(이전에는 `_works/` 스크립트) · 설계: `09-testing.md` 9.5·9.6
 
 각 RD의 확인 스크립트(`_works/_completed/*/verify/`)와 pty 기준 데이터(기대 행 파일)를 `apps/demo/e2e/`로 옮겨 수동 실행 가능하게 한다. 공용 하니스 `lib.mjs`와 Playwright devDependency는 RD-010 선행 DELTA가 먼저 둔다(RD-010 참고). CI 상시 실행은 범위 밖이다.
 
 완료 기준: `pnpm --filter demo e2e:<이름>`으로 기준선이 재현된다. 기준선은 이전 통과 건수가 아니라 **시나리오 ID별 현재 기대 결과**다 — (1) RD-005~017 각 인계의 이식 세트가 실패 0, (2) 각 RD의 `skipped-ids.md`가 담당 RD로 넘긴 건너뜀 항목이 그 RD 완료 뒤 복원되어 실패 0(담당 RD 미완료면 "미실행 + 담당 RD"로 표기하고 실패와 구분한다), (3) `boot-press` N=30 정상, (4) 모든 확인에서 총 `pageerror` 0(RD-009 기준선). 이전 구현 수치(RD-016 58/58, RD-016a 129/129, RD-012b 22/24, RD-012c 20/24, RD-006b 74/74)는 이력이며 합격 조건이 아니다 — RD-012b·012c는 RD-008이 낡은 기대값 8건을 현재 설계로 고쳐 이식 세트 실패 0이다(아래 인계(RD-008)). 기준 인터프리터(3.14.4)와 pyodide 번들(3.14.2) 차이를 README에 적는다.
+
+확인(DELTA-01~06, 2026-09-23, `pnpm --filter demo e2e:baseline` 서버 미기동 상태 전체 1회 7분44.7초,
+`apps/demo/e2e/results/summary.json`·`apps/demo/e2e/BASELINE.md` 근거): (1) 이식 세트(판정 16종, dev
+전부 + preview 부분) `failed: []` — 실패 0. (2) `skipped-ids.md` 3판(RD-006·007·008)을 재집계한
+결과 73개(RD-006b 원본 선언 기준 1절 23 + 2절 20 + 3절 30, 옛 "74"와 1건 차이 — 원인 미상,
+`BASELINE.md` 5절·`pending-issues/08.md`) 전부 복원 실행 확인, 미실행은 RD-016 담당 1건
+(`import os.pa` 지연 측정)뿐. (3) `boot-press` N=30 **30/30 OK**. (4) 총 `pageerror` **0**(`baseline.json`의
+`expectedPageErrors`로 의도된 forced 3건 — session-reset dev·preview `crash` 절, tla dev `sticky` 절 —
+을 제외, 초과분은 그대로 잡힌다). 허용 편차 1건(AD, 꼬리 든 프롬프트에서 Ctrl+L, 편차 44) + 양성 대조
+허용 예외 2건(rd-007.py #3은 `burst-matrix COMBOS=a`에서 검출력 없음을 실측 확인한 무해한 회귀,
+rd-008.py #2는 RM2 셀이 문서와 반대로 관찰돼 원인 미상 상태로 후속 이슈 등록
+— `.scratch/signal-interrupt-rm2-regression/issues/01-rm2-positive-control-fails-opposite-of-docs.md`).
+현재 위치는 `apps/demo/e2e/`, 표는 `apps/demo/e2e/BASELINE.md`.
 
 인계(RD-005): RD-005 검증 스크립트(`lib.mjs` 하니스, `repl-check.mjs`(normal·cdn-blocked·not-isolated), `prompt-join-check.mjs`(RD-006b 이식 20개), `trailing-newline-check.mjs`(RD-011a 이식 12개), `carryover-check.mjs`, `keys-after-enter-probe.mjs`, `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있다. 이 RD가 `apps/demo/e2e/`로 옮길 때 각 RD가 넘긴 "건너뛴 시나리오"를 되살려 기준선 5종을 채운다. `ONLY=<이름 접두어,…>` 환경변수로 확인을 분리해 돌릴 수 있다. 400토큰(25행, 스크롤백) 꼬리 관찰은 새 데모에 `window.__term`이 없어 옮기지 않았다. 함정: `docs/traps/TRP-005`·`TRP-007`·`TRP-008`.
 

@@ -30,3 +30,5 @@ rubber-workflow의 "함정 → 장기 문서화" 기준(재발 조건 특정 가
 | [TRP-024](./TRP-024-notice-row-count-check-hangs-after-repeated-resets.md) | 안내 줄 개수로 "다시 준비됐다"를 판정하면 여러 번 반복한 뒤 무한 대기한다 | ACTIVE | 세션 리셋처럼 같은 문구가 반복 찍히는 동작을 여러 번(N≥4) 거치며 "문구 개수 증가"로 완료를 판정하는 브라우저 하니스 |
 | [TRP-025](./TRP-025-async-return-without-await-escapes-try-catch.md) | `try` 안에서 async 함수를 `await` 없이 `return`하면 그 `catch`가 못 잡는다 | ACTIVE | `try { return asyncFn() } catch { ... }` 형태의 안전망 코드를 추가·수정할 때, 그 안에서 부르는 함수가 async일 때 |
 | [TRP-026](./TRP-026-recall-helper-cursor-accumulates-across-calls.md) | 한 시험 안에서 history 재호출 도우미를 연달아 부르면 cursor가 누적돼 변이를 가린다 | ACTIVE | `Readline.history.cursor`가 `read()` 시작 시 리셋되지 않는 성질에 기대 ↑ 재호출로 history를 관찰하는 시험에서, 재호출 도우미를 한 시험 안에 2회 이상 부를 때 |
+| [TRP-027](./TRP-027-pnpm-child-kill-silently-fails.md) | pnpm 자식 프로세스 kill이 조용히 실패한다(버전 관리자 재실행) | ACTIVE | pnpm 버전 관리자(pin 위임) 환경에서 `child_process.spawn("pnpm", …)`의 `child.kill()`로 서버를 내리려 할 때 |
+| [TRP-028](./TRP-028-intended-pageerror-sum-forces-ok-false.md) | 스크립트 자신의 "forced pageerror 1건만" 확인이 통과해도, 순진한 합산은 `ok`를 항상 거짓으로 만든다 | ACTIVE | 여러 확인 스크립트의 결과를 하나의 `summary.json`/`ok`로 합산하는 실행기에서, 일부 스크립트가 의도된 pageerror를 스스로 걸러내는 구조일 때 |
