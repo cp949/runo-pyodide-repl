@@ -142,7 +142,7 @@ export function createTabReader(
     }
     const buf = readline.getLine();
     const pos = readline.getCursor();
-    const plan = planTab(buf, pos);
+    const plan = planTab(buf, pos, pendingBlock || undefined);
     if (plan.kind === "indent") {
       readline.editInsert(plan.text);
       return;

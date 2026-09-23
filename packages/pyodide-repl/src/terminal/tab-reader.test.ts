@@ -220,6 +220,95 @@ describe("createTabReader: pending 전달", () => {
   });
 });
 
+describe("createTabReader: 모듈 경로(RD-016 게이트 참 + 빈 스템)", () => {
+  test('"import " 뒤 Tab은 빈 스템이어도 complete("import ", undefined)를 요청하고 응답을 삽입한다', async () => {
+    const { readline, complete, startRead, fake } = setup();
+    await startRead();
+    fake.type("from os import ");
+    complete.mockResolvedValueOnce({ completions: ["path"], start: 15 });
+
+    fake.type("\t");
+    expect(complete).toHaveBeenCalledWith("from os import ", undefined);
+    await tick();
+
+    expect(readline.getLine()).toBe("from os import path");
+  });
+
+  test('pending에만 import가 있고 현재 줄이 비어도 complete("", pending)을 요청한다', async () => {
+    const { readline, complete, startRead, fake } = setup();
+    // 열린 괄호 안이라 자동 들여쓰기 프리필이 없어 현재 줄이 비어 있다.
+    await startRead("from os import (");
+    expect(readline.getLine()).toBe("");
+    complete.mockResolvedValueOnce({ completions: ["path"], start: 0 });
+
+    fake.type("\t");
+    expect(complete).toHaveBeenCalledWith("", "from os import (");
+    await tick();
+
+    expect(readline.getLine()).toBe("path");
+  });
+
+  test("게이트가 거짓인 빈 스템(x = )은 왕복 없이 공백을 넣는다", async () => {
+    const { readline, complete, startRead, fake } = setup();
+    await startRead();
+    fake.type("x = ");
+    fake.type("\t");
+
+    expect(complete).not.toHaveBeenCalled();
+    expect(readline.getLine()).toBe("x =     ");
+  });
+
+  test("게이트 참·빈 스템(important = ) Tab 8연타는 큐로 이어져 공백 후보가 32칸 들어간다(RD-015 큐와 결합)", async () => {
+    const { readline, complete, startRead, fake } = setup();
+    await startRead();
+    fake.type("important = ");
+    // worker의 공백 후보 분기를 흉내 낸다: None + 빈 스템 → ' ' * (4 - 열 % 4), start = len(source).
+    complete.mockImplementation(async (source) => ({
+      completions: [" ".repeat(4 - (source.length % 4))],
+      start: source.length,
+    }));
+
+    fake.type("\t".repeat(8));
+    // 첫 Tab만 왕복을 시작하고 나머지 7회는 큐에 있다.
+    expect(complete).toHaveBeenCalledTimes(1);
+    await tick();
+    await tick();
+
+    expect(complete).toHaveBeenCalledTimes(8);
+    expect(readline.getLine()).toBe(`important = ${" ".repeat(32)}`);
+  });
+
+  test("Tab 직후 입력하면 모듈 후보 응답을 버린다(오래된 응답 버리기)", async () => {
+    const { readline, complete, startRead, fake } = setup();
+    await startRead();
+    fake.type("from os import ");
+    const p = deferredCompletion();
+    complete.mockReturnValueOnce(p.promise);
+    fake.type("\t");
+    fake.type("p"); // 왕복 중 입력 — 버퍼가 스냅샷과 달라진다.
+
+    p.resolve({ completions: ["path"], start: 15 });
+    await tick();
+
+    expect(readline.getLine()).toBe("from os import p");
+  });
+
+  test("Tab 직후 커서를 옮기면 모듈 후보 응답을 버린다", async () => {
+    const { readline, complete, startRead, fake } = setup();
+    await startRead();
+    fake.type("import ");
+    const p = deferredCompletion();
+    complete.mockReturnValueOnce(p.promise);
+    fake.type("\t");
+    fake.type("\x1b[D"); // 왼쪽 화살표
+
+    p.resolve({ completions: ["os"], start: 7 });
+    await tick();
+
+    expect(readline.getLine()).toBe("import ");
+  });
+});
+
 describe("createTabReader: 경합", () => {
   test("왕복 중 버퍼가 바뀌면 응답을 버린다", async () => {
     const { readline, complete, startRead, fake } = setup();

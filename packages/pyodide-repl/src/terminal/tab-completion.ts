@@ -23,14 +23,25 @@ export type TabPlan =
   | { kind: "indent"; text: string }
   | { kind: "complete"; source: string };
 
+// import·from 사전 게이트. 부분 문자열이고 단어 경계가 없다(TRAP-33): `\b`를 쓰면 `1import os` 류에서
+// 게이트가 거짓인데 3.14 파서는 후보를 내 결과가 어긋난다. 필요조건("키워드 글자열이 있어야 한다")만
+// 봐서 건전하다. 대가는 `important = ` 같은 식별자 안 키워드 줄의 빈 스템 왕복 1회다(worker가 None으로 판정).
+export function mentionsImportKeyword(text: string): boolean {
+  return /import|from/.test(text);
+}
+
 // Tab을 눌렀을 때 공백을 넣을지 완성을 요청할지 커서 앞 텍스트만으로 정한다. 스템은 커서가 있는
 // 논리 줄(마지막 `\n` 뒤)에서 마지막 구분자 뒤이고, 커서 뒤 텍스트는 보지 않는다. 스템이 비면
 // (줄이 비었거나 마지막 글자가 구분자) 다음 4칸 단위 위치까지 공백을 넣는다 — 열은 논리 줄 안
-// 위치로 세고 `\t`도 1칸으로 센다. 스템이 있으면 `source`(커서 앞 전체 텍스트)로 완성을 요청한다.
-export function planTab(buf: string, pos: number): TabPlan {
+// 위치로 세고 `\t`도 1칸으로 센다. 단, `pending`(이전 줄 블록)과 커서 앞 텍스트를 `\n`으로 이은
+// 문맥에 import·from 글자열이 있으면 스템이 비어도 완성을 요청한다(worker가 모듈 후보 또는 공백
+// 후보로 판정한다, 7.5). 스템이 있으면 항상 `source`(커서 앞 전체 텍스트)로 완성을 요청한다.
+export function planTab(buf: string, pos: number, pending?: string): TabPlan {
   const source = buf.slice(0, pos);
   const line = source.slice(source.lastIndexOf("\n") + 1);
   if (line === "" || STEM_DELIMITERS.includes(line.at(-1) ?? "")) {
+    const context = pending ? `${pending}\n${source}` : source;
+    if (mentionsImportKeyword(context)) return { kind: "complete", source };
     const column = [...line].length;
     return { kind: "indent", text: " ".repeat(TAB_STOP - (column % TAB_STOP)) };
   }

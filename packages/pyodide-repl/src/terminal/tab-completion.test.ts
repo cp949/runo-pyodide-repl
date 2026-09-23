@@ -66,6 +66,52 @@ describe("planTab: 스템이 있는 곳에서는 완성을 요청한다", () => 
   });
 });
 
+describe("planTab: import·from 게이트가 참이면 스템이 비어도 완성을 요청한다(RD-016)", () => {
+  it("빈 스템 + `import `는 complete다", () => {
+    expect(planTab("import ", 7)).toEqual({ kind: "complete", source: "import " });
+  });
+
+  it("빈 스템 + `from os import `는 complete다", () => {
+    expect(planTab("from os import ", 15)).toEqual({
+      kind: "complete",
+      source: "from os import ",
+    });
+  });
+
+  it("빈 스템 + `x = `는 게이트가 거짓이라 기존대로 indent다", () => {
+    expect(planTab("x = ", 4)).toEqual({ kind: "indent", text: "    " });
+  });
+
+  it("게이트는 부분 문자열이다: `important = `도 참이라 complete다(worker가 None으로 판정한다)", () => {
+    expect(planTab("important = ", 12)).toEqual({ kind: "complete", source: "important = " });
+  });
+
+  it("빈 버퍼는 pending이 없으면 indent다", () => {
+    expect(planTab("", 0)).toEqual({ kind: "indent", text: "    " });
+    expect(planTab("", 0, undefined)).toEqual({ kind: "indent", text: "    " });
+  });
+
+  it("pending에만 import가 있고 현재 줄이 비면 complete다(source는 커서 앞 텍스트 그대로)", () => {
+    expect(planTab("", 0, "from os import (")).toEqual({ kind: "complete", source: "" });
+  });
+
+  it("pending에만 import가 있고 현재 줄이 구분자로 끝나도 complete다", () => {
+    expect(planTab("    x = ", 8, "import os")).toEqual({ kind: "complete", source: "    x = " });
+  });
+
+  it("pending이 있어도 게이트가 거짓이면 indent다", () => {
+    expect(planTab("", 0, "x = 1")).toEqual({ kind: "indent", text: "    " });
+  });
+
+  it("커서 뒤 텍스트의 import는 게이트에 들어가지 않는다", () => {
+    expect(planTab("x = import", 4)).toEqual({ kind: "indent", text: "    " });
+  });
+
+  it("스템이 있는 곳은 게이트와 무관하게 complete다", () => {
+    expect(planTab("os.pa", 5, "x = 1")).toEqual({ kind: "complete", source: "os.pa" });
+  });
+});
+
 /** worker가 돌려준 후보를 붙여 resolveCompletion 인자를 만든다. 기본은 커서가 버퍼 끝, 첫 Tab이다. */
 function resume(
   buf: string,
