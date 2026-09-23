@@ -625,7 +625,13 @@ RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이
 - 문서: `10-parity-deviations.md` 32 해소 표시(번호 유지), `04-stdin-input.md` 71행·`03-ctrl-c.md` 162행의 "버린다" 서술 갱신, `DESIGN.md` 편차 건수.
 - 전체 `e2e:baseline`·`e2e:measure`는 사용자 지시 때만(`docs/agents/rubber-workflow.md` "검증 실행 예산").
 
-착수 시 DELTA "## 결정"으로 남길 설계 선택(완료 기준에는 영향 없음): 버퍼 위치(벤더 `Readline` 소스 vs 코어 래퍼 — `06-editing.md` 6.1은 벤더 소스 수정 방침), 버퍼 상한, read-guard(`terminal/read-guard.ts`)와 재생 순서.
+그릴링 확정(2026-09-24, 계획서 `_works/20260924-22-rd-019-type-ahead/checklist.md` 확정 1~12): 버퍼는 벤더 `Readline` 안(공개 API 추가 없음).
+`activeRead`가 없을 때 들어온 `onData` 덩어리 중 Ctrl+C·Ctrl+L을 뺀 전부를 원본 문자열째 쌓고(상한 4096 UTF-16 코드 유닛, 초과 덩어리는 통째로 버림),
+`read()` write 콜백 안 `new State`·`prefill` 직후 `readData`로 재생한다(Enter로 읽기가 끝나면 나머지는 버퍼에 남아 다음 읽기가 받는다 — read-guard와 무관).
+Ctrl+C는 활성 읽기가 없으면 게이트와 무관하게 버퍼를 비운 뒤 `ctrlCHandler`를 부른다. `cancelRead()`(리셋)·`dispose()`는 버퍼를 비우고, 부팅 중 친 키는
+쌓아 첫 프롬프트에서 재생한다. `apps/demo/e2e/lib.mjs`의 `typeWhenReading`·`cancelWhenReading` 재시도 루프는 버퍼링 뒤 글자를 중복시키므로 제거하고
+(영향: `stdin-input-check`·`input-cancel-check` 전체 L1), `docs/traps/TRP-005`는 Ctrl+C 손실 중심으로 좁혀 유지한다. pty 필수 4건은 완료 기준, 실행 중
+Backspace·←·Ctrl+U·Ctrl+D·Tab은 관찰 뒤 웹과 다르면 편차 등록(완료 기준 아님). 분할: DELTA-01 벤더 버퍼(L0), 02 하니스·`type-ahead-check`·L1 회귀, 03 pty, 04 문서.
 
 ## Phase 3 — 검증 자산
 
