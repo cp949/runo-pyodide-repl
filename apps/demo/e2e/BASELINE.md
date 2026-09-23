@@ -13,8 +13,8 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
   `apps/demo/e2e/results/summary.json`을 쓰고 이 실행기가 띄운 서버만 정리한다.
 - 판정 규칙: `summary.json`의 `failed`(`baseline.json`의 `deviations`·`unrun` 접두어에 해당하는
   이름은 제외) **0건** + 총 `pageerror`(`pageErrors` 필드, `expectedPageErrors`에 등록된 의도적
-  forced 오류는 뺀 값) **0** + `ok: true`. "미실행"(`unrun`)은 실패가 아니다 — 담당 RD(RD-016)가
-  아직 없어 그 확인 코드 자체가 스크립트에 없다는 뜻이다.
+  forced 오류는 뺀 값) **0** + `ok: true`. "미실행"(`unrun`)은 실패가 아니다 — 담당 RD가
+  아직 없어 그 확인 코드 자체가 스크립트에 없다는 뜻이다(2026-09-24 RD-016 완료로 현재 목록은 비어 있다).
 - `pnpm --filter demo e2e:<이름>` 단독 실행은 서버(주로 5173)가 이미 떠 있어야 한다
   (`e2e/README.md` "실행 전제", 25항목 목록은 같은 문서).
 - `pnpm --filter demo e2e:measure` — dev만 기동, 측정 5종(`boot-press` 제외, 참고값은 4절,
@@ -50,7 +50,7 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 | `tla-check.mjs` | scenario·smoke·arun·toggle-off·sticky 5절 16개 | `초기,scenario` 4/4 | 통과(단, `sticky` 절의 forced pageerror 1건은 의도됨 — 3절 참고) |
 | `auto-indent-check.mjs` | prefill·shift·unit·history 등 26개(`history E1`은 DELTA-03이 RD-014 동작에 맞게 갱신[^e1]) | `초기,prefill,shift,unit` 9/9 | 통과 |
 | `block-history-check.mjs` | A·B·C·X 절 29개 | `초기,A,B,C` 11/11 | 통과 |
-| `tab-check.mjs` | C1~C14(C12 왕복 지연 포함) 68개 | `C1·C3·C8·C11` 30/30 | 통과 + 미실행 1(`import os.pa` 지연, RD-016). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 관찰 단계가 단언으로 바뀌어 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2) |
+| `tab-check.mjs` | C1~C15(C12 왕복 지연 포함) 76개 = 기존 C1~C14 68개 + RD-016 C15 8개(a·b·c·d×2·e×2·f) | `C1·C3·C8·C11` 30/30 | 통과. RD-016(2026-09-24): C15 절 8개 추가, C9c를 `from os import pa` → `path` 채움으로 재정의, C5e 제목 정정(왕복 + 큐), C12에 `import os.pa` 지연 기록 추가(판정 없음, 웜 N=20 중앙값·최대는 결과 JSON `notes`). dev `ONLY=C5,C9,C12,C15` 20/20(C15 8개 포함, `pageErrors` 0)만 실측했고 76개 전체 재실행은 하지 않았다(L2). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2) |
 | `selection-copy-check.mjs` | S01~S12 등 14개 | `S01,S02,S05,S07` 4/4 | 통과 |
 | `measure/boot-press.mjs`(baseline 세트 소속, DELTA-05가 배선) | 부팅 중 Ctrl+C N=30 | 미실행(baseline dev 전용) | 통과 30/30 |
 
@@ -71,7 +71,7 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 ```json
 {
   "deviations": ["AD"],
-  "unrun": [{ "prefix": "C12 import os.pa", "rd": "RD-016" }],
+  "unrun": [],
   "absorbed": [{ "id": "I", "by": "EC" }],
   "expectedPageErrors": [
     { "file": "session-reset-check-dev.json", "count": 1 },
@@ -86,9 +86,9 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
   3.14는 꼬리까지 지워 `>>> foo`만 남긴다. `docs/design/10-parity-deviations.md` 44절에 등록,
   실측은 DELTA-03(`prompt-join-check.mjs`의 `AD` 절 1건이 이 값을 기대값으로 고정해 회귀를
   감시한다).
-- **`unrun: [{ prefix: "C12 import os.pa", rd: "RD-016" }]`** — `tab-check.mjs`에 세 번째 지연
-  측정(`import os.pa` 완성)이 아직 코드로 없다(RD-016의 `import`/`from` 완성이 아직 없어서). 실패로
-  잡히지 않는다 — 확인 자체가 존재하지 않는다.
+- **`unrun: []`** — 미실행 확인이 없다. 이전에는 `[{ prefix: "C12 import os.pa", rd: "RD-016" }]`(`tab-check.mjs`에
+  `import os.pa` 지연 측정이 코드로 없었다)이 있었으나 RD-016 DELTA-04가 그 측정을 `tab-check.mjs` C12에 더하고
+  항목을 지웠다. 새 미실행 확인이 생기면 `{ prefix, rd }`로 다시 등록한다(`run.mjs`가 접두어 일치 실패를 제외한다).
 - **`absorbed: [{ id: "I", by: "EC" }]`** — RD-006b 관찰 항목 `I`(`except`로 취소를 잡은 뒤 이어지는
   계산 중 Ctrl+C가 막히는 한계 관찰)는 `input-cancel-check.mjs`의 `EC` 절이 흡수했다(별도 확인으로
   남지 않는다).

@@ -6,12 +6,13 @@
 //
 // 실행 순서는 원문 C1..C12 순서가 아니라 세션 상태(A/a/os 픽스처, C11의 세션 리셋)를 따라 재배열했다:
 //   초기 → C1..C10 → C12(지연, a.·빈 스템 픽스처가 아직 살아 있어야 한다) → C13(큐, a. 필요) →
-//   C11(세션 리셋·exit()) → C14(완성 중 Ctrl+C, 리셋 뒤에도 무관하게 새 클래스로 독립 실행)
+//   C15(import/from 모듈 완성, RD-016 — os 픽스처 필요) → C11(세션 리셋·exit()) →
+//   C14(완성 중 Ctrl+C, 리셋 뒤에도 무관하게 새 클래스로 독립 실행)
 // 이는 rubber-workflow 관례(DELTA-05.md 계획 문구는 소급 수정하지 않는다)에 따라 "## 결정"에 근거를 남긴다.
 //
 // 사용: node tab-check.mjs <devURL> [previewSpec]
 //   previewSpec가 "preview"면 C1·C3·C8·C11만 preview URL(기본 http://localhost:4173)에서 재실행한다.
-// ONLY=<절 접두어,…>로 절 전체(설정·확인 전부)를 걸러 실행한다(양성 대조용): 초기,C1,C2,...,C13,C11,C14
+// ONLY=<절 접두어,…>로 절 전체(설정·확인 전부)를 걸러 실행한다(양성 대조용): 초기,C1,C2,...,C13,C15,C11,C14
 // 결과 파일 label은 url 포트 4173이면 preview, 그 밖은 dev(RD-018 DELTA-02 결정과 같은 규칙).
 // RD-018 DELTA-03 갱신: 자기 results 경로 상수 + `writeFileSync`를 없애고 `lib.mjs`의 `finish({ label })`로
 // 통일했다(옛 `results/dev.json`·`results/preview.json` 직접 쓰기 제거).
@@ -277,12 +278,29 @@ async function run(url) {
       if ((await lastLine()) !== `>>> print(${" ".repeat(2)}y`) throw new Error(show(await lastLine()));
     });
     await clearLine();
-    await step("C5e important = 뒤 Tab 8연타(지연 0) → 32칸(왕복 없음, 큐 불필요)", async () => {
+    await step("C5e important = 뒤 Tab 8연타(지연 0) → 32칸(게이트 참·빈 스템·왕복 + 큐)", async () => {
       await type("important = ");
       for (let i = 0; i < 8; i++) await press("Tab"); // 사이에 sleep 없음(지연 0)
+      // RD-016: 스템이 빈 곳도 게이트 참이면 worker 왕복이 있어 8번의 Tab이 큐로 순서대로 처리된다. 왕복이 끝나기 전에 `z`를 치면
+      // 남은 큐 Tab이 `z` 스템으로 재생돼 `zip(`이 붙는다(실측). 커서 열이 프롬프트 16 + 32칸에 닿기를 기다린 뒤 `z`를 친다.
+      await h.waitFor(
+        async () =>
+          (await page.evaluate(() => {
+            const row = [...document.querySelectorAll(".xterm-rows > div")].find((r) => r.querySelector(".xterm-cursor"));
+            if (!row) return -1;
+            let col = 0;
+            for (const child of row.childNodes) {
+              if (child.nodeType === 1 && child.classList?.contains("xterm-cursor")) break;
+              col += (child.textContent ?? "").length;
+            }
+            return col;
+          })) === ">>> important = ".length + 32,
+        "커서 열 = 프롬프트+`important = ` 16 + 32칸",
+        10000,
+        20,
+      );
       await type("z");
-      await sleep(200);
-      if ((await lastLine()) !== `>>> important = ${" ".repeat(32)}z`) throw new Error(show(await lastLine()));
+      await waitLast(`>>> important = ${" ".repeat(32)}z`);
     });
     await clearLine();
   }
@@ -452,7 +470,7 @@ async function run(url) {
     });
   }
 
-  // ═══════════════════════ C9 input() 안·import 줄의 Tab은 무동작 ═══════════════════════
+  // ═══════════════════════ C9 input() 안 Tab은 무동작, from os import pa Tab은 모듈 완성 ═══════════════════════
   if (enabled("C9")) {
     await clearScreen();
     await step("C9a input() 안 Tab 무동작(\\t 없음)", async () => {
@@ -478,12 +496,12 @@ async function run(url) {
       await submit("repr(v)");
       if (!(await tailRows(3)).some((l) => l === `"'a = b'"`)) throw new Error(show(await tailRows(3)));
     });
-    await step("C9c import 줄 Tab 무동작(\\t·후보 없음)", async () => {
+    // RD-016 재정의: 예전 C9c는 `from os import pa` Tab 직후 `!`를 쳐 무동작을 기대했으나(RD-015 시점, 후보 없음 전제),
+    // 3.14는 `from os import pa`에서 `path`를 채운다(pty 대조 A02). worker 왕복 뒤 삽입을 `waitLast`로 기다린다.
+    await step("C9c from os import pa Tab → from os import path(모듈 완성)", async () => {
       await type("from os import pa");
       await press("Tab");
-      await type("!");
-      await sleep(300);
-      if ((await lastLine()) !== ">>> from os import pa!") throw new Error(show(await lastLine()));
+      await waitLast(">>> from os import path");
     });
     await clearLine();
   }
@@ -614,6 +632,43 @@ async function run(url) {
       await clearLine();
       await page.evaluate(() => window.__mo?.disconnect());
     }
+    // RD-016: `import os.pa` Tab 한 번(게이트 → worker `ZipStdlibModuleCompleter` → `os.path` 삽입) 지연. 판정 없이 기록만 한다
+    // (9.7 6항, 결과 JSON `notes`·`c12.modulePa`). 삽입은 커서 앞 행 텍스트가 `import os.path`를 포함하는 순간으로 감지한다.
+    // 이 동작의 기능 판정은 C15a가 맡는다. 응답이 안 오면(null) 10초에서 포기하고 null로 세어 남긴다.
+    c12.modulePa = [];
+    for (let i = 0; i < 22; i++) {
+      await type("import os.pa");
+      await page.evaluate(() => {
+        window.__t0 = null;
+        window.__lat = null;
+        const target = document.querySelector(".xterm-rows");
+        const onKey = (e) => {
+          if (e.key === "Tab" && window.__t0 === null) {
+            window.__t0 = performance.now();
+            window.removeEventListener("keydown", onKey, true);
+          }
+        };
+        window.addEventListener("keydown", onKey, true);
+        const mo = new MutationObserver(() => {
+          if (window.__lat !== null || window.__t0 === null) return;
+          const txt = [...target.children].map((d) => d.textContent).join("\n");
+          if (txt.includes("import os.path")) {
+            window.__lat = performance.now() - window.__t0;
+            mo.disconnect();
+          }
+        });
+        mo.observe(target, { subtree: true, childList: true, characterData: true });
+        window.__mo = mo;
+      });
+      await press("Tab");
+      const lat = await h
+        .waitFor(async () => (await page.evaluate(() => window.__lat)) !== null, "import os.pa 삽입 지연 측정", 10000, 10)
+        .then(() => page.evaluate(() => window.__lat))
+        .catch(() => null);
+      c12.modulePa.push(lat);
+      await page.evaluate(() => window.__mo?.disconnect());
+      await clearLine();
+    }
     const warm = (arr) => arr.slice(2); // 세션 첫 Tab류 웜업 제외(22개 중 앞 2개를 버리고 20개를 남긴다)
     const attrWarm = warm(c12.attr).slice(0, 20);
     const blankWarm = warm(c12.blank).slice(0, 20);
@@ -626,6 +681,10 @@ async function run(url) {
     };
     const attrStats = stats(attrWarm);
     const blankStats = stats(blankWarm);
+    const modulePaStats = stats(warm(c12.modulePa).slice(0, 20));
+    console.log("  C12 import os.pa 지연(ms):", modulePaStats.sorted.map((v) => v.toFixed(1)).join(" "));
+    h.notes["C12 import os.pa 지연(기록, 웜 N=20, ms)"] =
+      `중앙값 ${modulePaStats.median?.toFixed(1)} 최대 ${modulePaStats.max?.toFixed(1)} 미도착 ${modulePaStats.nulls}`;
     console.log("  C12 a. 속성 후보 지연(ms):", attrStats.sorted.map((v) => v.toFixed(1)).join(" "));
     console.log("  C12 빈 스템 지연(ms):", blankStats.sorted.map((v) => v.toFixed(1)).join(" "));
     await step("C12 정지 0(표본 20/20 확보, a.·빈 스템 둘 다)", async () => {
@@ -641,6 +700,7 @@ async function run(url) {
     c12Result = {
       attr: { median: attrStats.median, max: attrStats.max, samples: attrStats.sorted },
       blank: { median: blankStats.median, max: blankStats.max, samples: blankStats.sorted },
+      modulePa: { median: modulePaStats.median, max: modulePaStats.max, nulls: modulePaStats.nulls, samples: modulePaStats.sorted },
     };
   }
 
@@ -656,6 +716,112 @@ async function run(url) {
       const occurrences = (await rows()).filter((l) => l === "a.attr_one  a.meth()    a.prop").length;
       if (occurrences !== 1) throw new Error(`목록 행 출현 ${occurrences}회 ${show(await tail(8))}`);
       await waitLast(">>> a.");
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C15 import/from 줄 모듈 완성(RD-016) ═══════════════════════
+  // 게이트(main `mentionsImportKeyword`/`planTab`) → worker `complete_source` 모듈 분기 → 삽입·목록·큐 배선을 확인한다.
+  // 정확성(3.14 pty 대조)은 L0 시험(`module-completion-parity.test.ts`)이 맡는다. 판정은 `waitLast`/`waitFor`만 쓴다(9.7).
+  if (enabled("C15")) {
+    await clearScreen();
+    await step("C15a import os.pa Tab → import os.path", async () => {
+      await type("import os.pa");
+      await press("Tab");
+      await waitLast(">>> import os.path");
+    });
+    await clearLine();
+    await step("C15b import collections.a Tab → import collections.abc(브라우저 번들 zip 보정)", async () => {
+      await type("import collections.a");
+      await press("Tab");
+      await waitLast(">>> import collections.abc");
+    });
+    await clearLine();
+    await step("C15c import xml.dom.m Tab → import xml.dom.mini(공통 접두까지)", async () => {
+      await type("import xml.dom.m");
+      await press("Tab");
+      await waitLast(">>> import xml.dom.mini");
+    });
+    await clearLine();
+    await clearScreen();
+    await step("C15d import Tab 두 번 → 모듈 목록 출력, 목록 뒤 프롬프트 >>> import ", async () => {
+      await type("import ");
+      await press("Tab");
+      await press("Tab");
+      // 목록이 다 그려진 신호: 열 행(공백 2칸 이상으로 갈린 여러 단어, 프롬프트 행 제외)이 있고 프롬프트 행이 목록 뒤에 다시 그려졌다.
+      await h.waitFor(
+        async () => {
+          const r = await rows();
+          const hasList = r.some((l) => !l.startsWith(">>>") && /\S {2,}\S/.test(l));
+          return hasList && (await lastLine()) === ">>> import";
+        },
+        "import 목록 행 + 목록 뒤 프롬프트 >>> import",
+        10000,
+        20,
+      );
+    });
+    await step("C15d 목록에 os·sys 포함(개수 단정 없음)", async () => {
+      // 모듈 178개 안팎이라 목록이 한 화면을 넘어 위쪽이 스크롤백으로 밀린다. 개수를 단정하지 않고(TRAP-27) Shift+PageUp으로
+      // 올라가며 본 단어 집합에 os·sys가 있는지만 본다. 화면이 안 바뀌면 맨 위에 닿은 것이다.
+      const seen = new Set();
+      const collect = async () => {
+        for (const l of await rows()) for (const w of l.split(/\s+/)) if (w) seen.add(w);
+      };
+      await collect();
+      for (let i = 0; i < 8 && !(seen.has("os") && seen.has("sys")); i++) {
+        const before = (await rows()).join("\n");
+        await press("Shift+PageUp");
+        const moved = await h
+          .waitFor(async () => (await rows()).join("\n") !== before, "Shift+PageUp 뒤 화면 갱신", 1500, 20)
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!moved) break;
+        await collect();
+      }
+      if (!seen.has("os") || !seen.has("sys")) {
+        throw new Error(`목록에 os·sys 없음(단어 ${seen.size}개, os=${seen.has("os")} sys=${seen.has("sys")})`);
+      }
+      // 입력이 들어가면 xterm이 맨 아래로 돌아온다.
+      await clearLine();
+      await waitLast(">>>");
+    });
+    await clearLine(); // C15d가 실패해 입력줄에 `import `가 남아도 다음 clearScreen이 막히지 않게 한다(통과 시에는 빈 줄에 Ctrl+U라 무해).
+    await clearScreen();
+    // pending 경로: 블록 안 줄(`if True:` 뒤 `...` 프롬프트)에서 `pending`이 worker로 가 `pending + "\n" + source`로 판정된다.
+    // 자동 들여쓰기(RD-013)가 `...` 뒤 4칸을 프리필하므로 본문만 입력한다(C14와 같다).
+    await step("C15e if True: 블록 안 import os.pa Tab → ...     import os.path(pending 경로)", async () => {
+      await type("if True:");
+      await enter();
+      await waitPrompt("...");
+      await type("import os.pa");
+      await press("Tab");
+      await waitLast("...     import os.path");
+    });
+    await step("C15e 블록을 빈 줄로 닫으면 >>> 복귀(import os.path 실행)", async () => {
+      await enter();
+      await waitPrompt("...");
+      await enter();
+      await waitPrompt(">>>");
+    });
+    await clearScreen();
+    // 픽스처 `import os, warnings`로 전역 os가 있어야 한다(줄 안의 `import os;`는 Tab 시점에 실행 전이다). 모듈 판정이 None이라
+    // 기존 RD-015 속성 완성(`os.pa*` 5개, 공통 접두 `os.pa`라 채움 없음)으로 폴백해 두 번째 Tab이 목록을 낸다.
+    await step("C15f import os; os.pa Tab 두 번 → 속성 후보 목록(os.path·os.pathsep 포함, None 폴백)", async () => {
+      await type("import os; os.pa");
+      await press("Tab");
+      await press("Tab");
+      await h.waitFor(
+        async () => {
+          const r = await rows();
+          return r.some((l) => /(^|\s)os\.path(\s|$)/.test(l)) && r.some((l) => /(^|\s)os\.pathsep(\s|$)/.test(l));
+        },
+        "속성 후보 목록 행(os.path·os.pathsep)",
+        10000,
+        20,
+      );
+      await waitLast(">>> import os; os.pa");
     });
     await clearLine();
   }

@@ -1,6 +1,6 @@
 {
   "deviations": ["AD"],
-  "unrun": [{ "prefix": "C12 import os.pa", "rd": "RD-016" }],
+  "unrun": [],
   "absorbed": [{ "id": "I", "by": "EC" }],
   "expectedPageErrors": [
     { "file": "session-reset-check-dev.json", "count": 1 },
