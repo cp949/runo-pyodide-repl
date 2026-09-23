@@ -177,6 +177,9 @@ export class Readline implements ITerminalAddon {
   public cancelRead(): void {
     // 리셋은 새 프로세스라 옛 맥락에서 쌓인 키를 다음 읽기에 넘기지 않는다.
     this.clearTypeAhead();
+    // 취소 이전에 queued에 쌓인 키는 옛 맥락이라 폐기하고, 이후 도착하는 키는 activeRead가 없으므로 type-ahead로 가게 한다.
+    this.redrawing = false;
+    this.queued = [];
     const pending = [...this.pendingReads];
     this.pendingReads.clear();
     pending.forEach((p) => {

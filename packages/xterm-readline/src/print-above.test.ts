@@ -35,6 +35,7 @@ class StubTerminal {
   public vt: VTerm;
   private onDataHandlers: ((data: string) => void)[] = [];
   private queue: (() => void)[] = [];
+  private keyEventHandler?: (event: KeyboardEvent) => boolean;
 
   constructor(cols: number, rows: number) {
     this.cols = cols;
@@ -52,8 +53,8 @@ class StubTerminal {
     return { dispose: () => {} };
   }
 
-  attachCustomKeyEventHandler(_fn: (event: KeyboardEvent) => boolean) {
-    return;
+  attachCustomKeyEventHandler(fn: (event: KeyboardEvent) => boolean) {
+    this.keyEventHandler = fn;
   }
 
   write(text: string, cb?: () => void) {
@@ -74,6 +75,15 @@ class StubTerminal {
   /** 키 입력 한 번을 흘린다. 여러 글자를 한 번에 넣으면 붙여넣기 경로로 가므로 한 글자씩 부른다. */
   feed(data: string) {
     for (const handler of this.onDataHandlers) handler(data);
+  }
+
+  /** Shift+Enter는 `onData`가 아니라 `attachCustomKeyEventHandler`로 온다(`type-ahead.test.ts`와 같은 패턴). */
+  pressShiftEnter() {
+    this.keyEventHandler?.({
+      key: "Enter",
+      shiftKey: true,
+      type: "keydown",
+    } as KeyboardEvent);
   }
 
   /** 문자열을 코드포인트 단위로 하나씩 타이핑한다. */
@@ -297,5 +307,71 @@ describe("printAbove", () => {
     expect(resetIndex).toBeGreaterThan(-1);
     expect(screen.slice(resetIndex)).not.toContain("abc");
     expect(screen).toBe(">>> abc\nL\n[reset]");
+  });
+
+  // 이슈 03: cancelRead() 뒤 재그리기 콜백 전 창. 취소 이전 키는 옛 맥락이라 폐기하고, 이후 키는
+  // 새 맥락의 키라 type-ahead가 받아 다음 읽기에서 재생해야 한다.
+  describe("cancelRead() 뒤 재그리기 콜백 전 창", () => {
+    test("취소 이전에 친 키는 폐기되어 다음 읽기에서 재생되지 않는다", () => {
+      const { term, readline } = setup();
+      void readline.read("> ").catch(() => {});
+      term.asyncWrite = true;
+      void readline.printAbove("L");
+      term.type("x");
+      readline.cancelRead();
+      term.flush();
+
+      term.asyncWrite = false;
+      void readline.read("> ");
+
+      expect(readline.getLine()).toBe("");
+    });
+
+    test("취소 뒤 콜백 전에 친 키는 type-ahead로 가서 다음 읽기에서 재생된다", () => {
+      const { term, readline } = setup();
+      void readline.read("> ").catch(() => {});
+      term.asyncWrite = true;
+      void readline.printAbove("L");
+      readline.cancelRead();
+      term.type("y");
+      term.flush();
+
+      term.asyncWrite = false;
+      void readline.read("> ");
+
+      expect(readline.getLine()).toBe("y");
+    });
+
+    test("취소 뒤 콜백 전에 친 키와 Shift+Enter는 순서대로 재생된다: y Shift+Enter z", () => {
+      const { term, readline } = setup();
+      void readline.read("> ").catch(() => {});
+      term.asyncWrite = true;
+      void readline.printAbove("L");
+      readline.cancelRead();
+      term.type("y");
+      term.pressShiftEnter();
+      term.type("z");
+      term.flush();
+
+      term.asyncWrite = false;
+      void readline.read("> ");
+
+      expect(readline.getLine()).toBe("y\nz");
+    });
+
+    test("콜백이 온 뒤 새 읽기에서는 키가 큐를 거치지 않고 바로 버퍼에 반영된다", () => {
+      const { term, readline } = setup();
+      void readline.read("> ").catch(() => {});
+      term.asyncWrite = true;
+      void readline.printAbove("L");
+      readline.cancelRead();
+      // 새 읽기의 write 콜백은 printAbove 콜백 뒤에 등록되므로 FIFO로 함께 flush된다.
+      void readline.read("> ");
+      term.flush();
+
+      term.type("a");
+
+      expect(readline.getLine()).toBe("a");
+    });
   });
 });
