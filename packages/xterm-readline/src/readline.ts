@@ -71,6 +71,12 @@ export interface ReadOptions {
   historyEntry?: (line: string) => string;
 }
 
+/**
+ * 활성 읽기가 없는 구간에 친 키를 쌓아 두는 버퍼의 상한(UTF-16 코드 유닛 합계). Linux tty
+ * `N_TTY_BUF_SIZE`와 같다. 넘치는 덩어리는 통째로 버린다.
+ */
+const TYPE_AHEAD_LIMIT = 4096;
+
 export class Readline implements ITerminalAddon {
   private term: Terminal | undefined;
   private highlighter: Highlighter = new IdentityHighlighter();
@@ -90,6 +96,14 @@ export class Readline implements ITerminalAddon {
   private redrawing = false;
   /** `redrawing`인 동안 `readData`로 들어온 원본 문자열(키 하나 또는 붙여넣기 덩어리)을 순서대로 쌓아 둔다. */
   private queued: string[] = [];
+  /**
+   * 활성 읽기가 없을 때(실행 중·`read()` write 콜백 대기 중·부팅 중) 들어온 `onData` 덩어리를 원본
+   * 문자열째 순서대로 쌓아 둔다(type-ahead). 다음 `read()`의 write 콜백이 재생하고, Ctrl+C·
+   * `cancelRead()`·`dispose()`가 비운다. Ctrl+C·Ctrl+L 단독 입력은 쌓지 않는다.
+   */
+  private typeAhead: string[] = [];
+  /** `typeAhead`에 쌓인 덩어리 길이(UTF-16 코드 유닛) 합계. `TYPE_AHEAD_LIMIT` 검사에 쓴다. */
+  private typeAheadLength = 0;
   private checkHandler: CheckHandler = () => true;
   private ctrlCHandler: CtrlCHandler = () => {
     return;
@@ -147,6 +161,7 @@ export class Readline implements ITerminalAddon {
     this.activeRead = undefined;
     this.redrawing = false;
     this.queued = [];
+    this.clearTypeAhead();
     const error = new Error("readline disposed");
     rejects.forEach((reject) => reject(error));
   }
@@ -157,6 +172,8 @@ export class Readline implements ITerminalAddon {
    * (개행·안내 줄 여부는 호출자가 결정한다). 열린 읽기가 없으면 아무것도 하지 않는다.
    */
   public cancelRead(): void {
+    // 리셋은 새 프로세스라 옛 맥락에서 쌓인 키를 다음 읽기에 넘기지 않는다.
+    this.clearTypeAhead();
     const pending = [...this.pendingReads];
     this.pendingReads.clear();
     pending.forEach((p) => {
@@ -466,6 +483,7 @@ export class Readline implements ITerminalAddon {
           onKey: options.onKey,
           historyEntry: options.historyEntry,
         };
+        this.replayTypeAhead();
       });
     });
   }
@@ -492,6 +510,11 @@ export class Readline implements ITerminalAddon {
       return;
     }
     const input = parseInput(data);
+    // 활성 읽기가 없으면 키를 버리지 않고 쌓는다. Ctrl+C·Ctrl+L 단독 입력만 즉시 처리한다(readKey).
+    if (this.activeRead === undefined && !this.isImmediateKey(input)) {
+      this.pushTypeAhead(data);
+      return;
+    }
     if (
       input.length > 1 ||
       (input[0].inputType === InputType.Text && input[0].data.length > 1)
@@ -500,6 +523,41 @@ export class Readline implements ITerminalAddon {
       return;
     }
     this.readKey(input[0]);
+  }
+
+  /** 활성 읽기가 없어도 쌓지 않고 바로 처리하는 입력(Ctrl+C·Ctrl+L 단독)인지 본다. */
+  private isImmediateKey(input: Input[]): boolean {
+    return (
+      input.length === 1 &&
+      (input[0].inputType === InputType.CtrlC ||
+        input[0].inputType === InputType.CtrlL)
+    );
+  }
+
+  /** 덩어리를 통째로 쌓는다. 합계가 상한을 넘으면 그 덩어리만 버린다(앞에 쌓인 것은 유지, 알림 없음). */
+  private pushTypeAhead(data: string) {
+    if (this.typeAheadLength + data.length > TYPE_AHEAD_LIMIT) return;
+    this.typeAhead.push(data);
+    this.typeAheadLength += data.length;
+  }
+
+  private clearTypeAhead() {
+    this.typeAhead = [];
+    this.typeAheadLength = 0;
+  }
+
+  /**
+   * 쌓인 덩어리를 `readData`로 하나씩 재생한다(`onKey` 훅·붙여넣기 경로 포함). 스냅샷을 먼저 꺼내
+   * 비우므로 Enter로 읽기가 끝난 뒤의 덩어리는 `activeRead` 없음 → 다시 `typeAhead`로 들어가 순서가
+   * 보존되고 다음 읽기가 받는다. 재생 키가 `printAbove`로 재그리기를 시작하면 남은 덩어리는 `queued`가
+   * 이어받는다.
+   */
+  private replayTypeAhead() {
+    const chunks = this.typeAhead;
+    this.clearTypeAhead();
+    for (const data of chunks) {
+      this.readData(data);
+    }
   }
 
   private readPaste(input: Input[]) {
@@ -530,6 +588,8 @@ export class Readline implements ITerminalAddon {
     if (this.activeRead === undefined) {
       switch (input.inputType) {
         case InputType.CtrlC:
+          // 게이트 결과와 무관하게 쌓인 키를 버린다(새 프로세스·인터럽트 뒤에 옛 키를 넘기지 않는다).
+          this.clearTypeAhead();
           this.ctrlCHandler();
           break;
         case InputType.CtrlL:
