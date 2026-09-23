@@ -15,6 +15,8 @@ export interface FakeTerminalOptions {
   asyncWrite?: boolean;
   cols?: number;
   rows?: number;
+  /** 참이면 jsdom `div`를 만들어 `term.element`에 채운다. 기본은 거짓(`element` 없음). */
+  withElement?: boolean;
 }
 
 /** 시험이 값을 지정하는 화면 모델. `buffer.active.{cursorX, cursorY, baseY, getLine(row)?.isWrapped}`가 이것을 읽는다. */
@@ -46,6 +48,10 @@ export interface FakeTerminal {
   flush(): void;
   /** `dispose()` 뒤에 `buffer`를 읽은 횟수. 실제 xterm은 이때 `DisposableStore` 경고를 낸다(이전 구현 TRP-001). */
   readonly disposedBufferReads: number;
+  /** 시험이 선택 상태를 설정한다. 빈 문자열이면 선택 없음(`hasSelection() === false`)이다. */
+  select(text: string): void;
+  /** `term.clearSelection()` 호출 횟수. */
+  readonly clearSelectionCalls: number;
 }
 
 /** `Readline`이 `Terminal`에서 읽는 멤버와 `loadAddon`·`dispose`. */
@@ -69,6 +75,10 @@ interface FakeXterm {
   write(text: string, callback?: () => void): void;
   loadAddon(addon: ITerminalAddon): void;
   dispose(): void;
+  hasSelection(): boolean;
+  getSelection(): string;
+  clearSelection(): void;
+  readonly element?: HTMLElement;
 }
 
 const ESC = "\x1b";
@@ -105,7 +115,7 @@ function splitKeys(text: string): string[] {
 export function createFakeTerminal(
   options: FakeTerminalOptions = {},
 ): FakeTerminal {
-  const { asyncWrite = false, cols = 80, rows = 24 } = options;
+  const { asyncWrite = false, cols = 80, rows = 24, withElement = false } = options;
   const written: string[] = [];
   const dataListeners = new Set<(data: string) => void>();
   const addons: ITerminalAddon[] = [];
@@ -113,6 +123,9 @@ export function createFakeTerminal(
   let keyHandler: ((event: KeyboardEvent) => boolean) | undefined;
   let disposed = false;
   let disposedBufferReads = 0;
+  let selectionText = "";
+  let clearSelectionCalls = 0;
+  const element = withElement ? document.createElement("div") : undefined;
   const screen: FakeScreen = {
     cursorX: 0,
     cursorY: 0,
@@ -173,6 +186,17 @@ export function createFakeTerminal(
       addons.push(addon);
       addon.activate(term);
     },
+    hasSelection() {
+      return selectionText !== "";
+    },
+    getSelection() {
+      return selectionText;
+    },
+    clearSelection() {
+      clearSelectionCalls += 1;
+      selectionText = "";
+    },
+    element,
     dispose() {
       disposed = true;
       dataListeners.clear();
@@ -212,6 +236,12 @@ export function createFakeTerminal(
     },
     get disposedBufferReads() {
       return disposedBufferReads;
+    },
+    select(text) {
+      selectionText = text;
+    },
+    get clearSelectionCalls() {
+      return clearSelectionCalls;
     },
   };
 }
