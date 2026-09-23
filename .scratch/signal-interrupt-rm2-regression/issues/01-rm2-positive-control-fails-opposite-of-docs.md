@@ -1,6 +1,6 @@
 # 01 rd-008 양성 대조 RM2 셀이 문서와 반대로 FAIL — `boot.ts` `signalInterrupt` 관련 기능 회귀 의심
 
-Status: open
+Status: done
 
 ## 현상
 
@@ -118,6 +118,16 @@ RD-018 DELTA-04(양성 대조 드라이버를 저장소 `apps/demo/e2e/positive-
    재실행 결과가 기대와 다르면 정정을 멈추고 보고한다(그 경우 이 판정이 틀린 것이다).
 9. 커밋: `dev` 브랜치, `docs:` 접두, 한글, 정정 1~7을 한 커밋 또는 (문서 정정 / TRP 신설) 두 커밋. 실행 코드
    변경 0건이어야 한다(`git diff --stat`에 `packages/` 없음).
+
+- 검증(2026-09-23, `python3 apps/demo/e2e/positive-controls/rd-008.py 2` 1회 재실행, 정정 1~7 반영 뒤):
+  ```
+  [변조] input-cancel-check.mjs ONLY=T35: PASS 1, FAIL 1 ['T35 실행 중 눌림을 처리한 뒤의 `input()` 취소도 무시되지 않는다'] exit=1
+  [변조] input-cancel-check.mjs ONLY=RM2: PASS 1, FAIL 1 ['RM2/A1 `input()` 대기 중 Ctrl+C는 입력 줄 아래 트레이스백을 내고 `>>> `로 돌아온다'] exit=1
+  [원복] input-cancel-check.mjs ONLY=T35: PASS 2, FAIL 0 [] exit=0
+  [원복] input-cancel-check.mjs ONLY=RM2: PASS 2, FAIL 0 [] exit=0
+  ```
+  둘 다 시간 초과(FAIL 상세: "시간 초과: 프롬프트로 끝나는 마지막 행")로 기대와 일치, 원복 후 `git checkout` 뒤
+  깨끗함 True. 판정대로 회귀 아님, docstring 오류로 확정.
 
 ### 완료 조건
 

@@ -98,18 +98,16 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
   "각 스크립트 자체가 의도된 forced crash를 걸러내는 것을 포함"하는 뜻이다.
 - **400토큰 스크롤백 꼬리 관찰**: 판정 밖(새 데모에 `window.__term`이 없어 RD-005도 옮기지 않았다).
 
-### 양성 대조(positive-controls) 허용 예외 2건
+### 양성 대조(positive-controls) 허용 예외 1건
 
 `baseline`·`measure` 세트가 아니라 `apps/demo/e2e/positive-controls/rd-0NN.py` 대조 드라이버 소속
-(DELTA-04). 완료 조건([^pc-exceptions], `checklist.md`)이 이 둘을 예외로 확정했다.
+(DELTA-04). 완료 조건([^pc-exceptions], `checklist.md`)이 이 1건을 예외로 확정했다.
 
 - **`rd-007.py` #3**(`sigint-handler.py` 프레임 필터 변조): `burst-matrix.mjs COMBOS=a`에서 검출력이
   없음을 실측 확인했다 — 무해한 회귀로 기록만 하고 재조사하지 않는다(사용자 확정,
   `_works/20260923-18-rd-018-e2e-baseline/DELTA-04.md` "## 결정", `pending-issues/07.md`).
-- **`rd-008.py` #2**(RM2 셀): 스크립트 주석은 "통과"라고 명시하지만 실측은 FAIL이다 — 원인은
-  조사하지 않았고 후속 이슈로 등록했다
-  (`.scratch/signal-interrupt-rm2-regression/issues/01-rm2-positive-control-fails-opposite-of-docs.md`,
-  사용자 확정).
+- `rd-008.py` #2는 docstring 오류였다(T35·RM2 동시 실패가 정상 검출, 이 이슈 파일 참조). 정정 뒤
+  재실행 로그는 아래 Comments.
 
 ## 4. `measure` 세트 표
 

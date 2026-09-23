@@ -7,8 +7,10 @@
   1: worker/stdin-callback.ts의 `deps.checkInterrupt();` 삭제
        → input-cancel-check ONLY=RM2 실패(`EOFError` 트레이스백), ONLY=E1(정상 input())은 통과
   2: worker/boot.ts의 `signalInterrupt` 주입이 요청 번호를 올리지 않음
-       → input-cancel-check ONLY=T35 실패(실행 중 눌림을 처리한 뒤의 취소가 무시된다),
-         ONLY=RM2는 통과(세션 첫 눌림은 핸들러 last_seq와 달라 처리된다 — T35를 따로 두는 이유)
+       → input-cancel-check ONLY=T35·ONLY=RM2 둘 다 실패(시간 초과 — 핸들러가 설치 시점 번호 0을
+         last_seq로 잡아 번호를 올리지 않는 전송은 세션 첫 취소부터 재전송으로 오인, CPython이 읽기를
+         재시도해 프롬프트로 안 돌아온다). 이 대조는 검출력 증명만 하고 국소성 증명은 #1·#3이 맡는다.
+         T35는 '번호가 0→1 이후에도 전진해야 한다'를 고정하려 남긴다.
   3: index.ts 게이트에서 `&& !cancelSettling` 삭제
        → prompt-cancel-check ONLY=I 실패(취소 직후 연타가 `^C`를 에코한다), ONLY=RM1은 통과
 dev 서버(5173)는 이 드라이버가 변조·원복 때마다 다시 띄운다(끝나면 dev 서버가 하나 남는다, TRP-007).

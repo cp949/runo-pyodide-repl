@@ -601,9 +601,9 @@ RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이
 (`import os.pa` 지연 측정)뿐. (3) `boot-press` N=30 **30/30 OK**. (4) 총 `pageerror` **0**(`baseline.json`의
 `expectedPageErrors`로 의도된 forced 3건 — session-reset dev·preview `crash` 절, tla dev `sticky` 절 —
 을 제외, 초과분은 그대로 잡힌다). 허용 편차 1건(AD, 꼬리 든 프롬프트에서 Ctrl+L, 편차 44) + 양성 대조
-허용 예외 2건(rd-007.py #3은 `burst-matrix COMBOS=a`에서 검출력 없음을 실측 확인한 무해한 회귀,
-rd-008.py #2는 RM2 셀이 문서와 반대로 관찰돼 원인 미상 상태로 후속 이슈 등록
-— `.scratch/signal-interrupt-rm2-regression/issues/01-rm2-positive-control-fails-opposite-of-docs.md`).
+허용 예외 1건(rd-007.py #3은 `burst-matrix COMBOS=a`에서 검출력 없음을 실측 확인한 무해한 회귀).
+rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
+(`.scratch/signal-interrupt-rm2-regression/issues/01-rm2-positive-control-fails-opposite-of-docs.md`).
 현재 위치는 `apps/demo/e2e/`, 표는 `apps/demo/e2e/BASELINE.md`.
 
 인계(RD-005): RD-005 검증 스크립트(`lib.mjs` 하니스, `repl-check.mjs`(normal·cdn-blocked·not-isolated), `prompt-join-check.mjs`(RD-006b 이식 20개), `trailing-newline-check.mjs`(RD-011a 이식 12개), `carryover-check.mjs`, `keys-after-enter-probe.mjs`, `positive-controls.py`)는 `_works/_completed/20260922-05-rd-005-repl-loop/verify/`에 있다. 이 RD가 `apps/demo/e2e/`로 옮길 때 각 RD가 넘긴 "건너뛴 시나리오"를 되살려 기준선 5종을 채운다. `ONLY=<이름 접두어,…>` 환경변수로 확인을 분리해 돌릴 수 있다. 400토큰(25행, 스크롤백) 꼬리 관찰은 새 데모에 `window.__term`이 없어 옮기지 않았다. 함정: `docs/traps/TRP-005`·`TRP-007`·`TRP-008`.
