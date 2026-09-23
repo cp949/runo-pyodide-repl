@@ -313,8 +313,13 @@ function loadBaselineConfig() {
  * 모으고 `baseline.json`의 접두어와 대조해 `results/summary.json`을 쓴다. `measure/boot-press.mjs`는
  * `finish()`를 쓰지 않고 자기 `{ summary, results }` 포맷을 직접 쓴다(DELTA-04 결정, "동작 불변") — DELTA-05가
  * 이 스크립트를 baseline 세트에 배선하면서 그 포맷도 여기서 같이 해석한다.
+ *
+ * `runs`(`cmdBaseline()`이 기록한 `SETS` 항목별 `{ file, args, server, only, exitCode, newFiles }`)에서
+ * exit ≠ 0인데 이 항목이 만든 새 결과 파일이 없는 실행(`finish()` 전 크래시 등)은 결과 파일 집계에
+ * 나타나지 않으므로 `failed`에 따로 넣는다. `file`은 결과 파일 이름 대신 스크립트 경로다. 결과 파일이
+ * 하나라도 있으면(정상적인 FAIL 보고) 그 파일로 집계하고 여기서 중복 항목을 만들지 않는다.
  */
-async function writeSummary() {
+async function writeSummary(runs = []) {
   const baseline = loadBaselineConfig();
   const files = (await readdir(resultsDir)).filter((f) => f.endsWith(".json") && f !== "summary.json");
   const scripts = [];
@@ -341,8 +346,18 @@ async function writeSummary() {
       if (!isDeviation && !isUnrun) failed.push({ file, name });
     }
   }
+  // 결과 파일 없이 비정상 종료한 실행: 위 파일 집계로는 보이지 않아 `ok=true`로 새던 경우다.
+  for (const r of runs) {
+    if (r.exitCode === 0 || r.newFiles.length > 0) continue;
+    const argv = [...r.args, r.only ? `ONLY=${r.only}` : ""].filter(Boolean).join(" ");
+    failed.push({
+      file: r.file,
+      name: `결과 파일 없음(exit ${r.exitCode}, ${r.server}${argv ? `, ${argv}` : ""})`,
+    });
+  }
   const summary = {
     scripts,
+    runs,
     failed,
     deviations: baseline.deviations,
     unrun: baseline.unrun,
@@ -357,6 +372,7 @@ async function writeSummary() {
     `[run.mjs] summary: 스크립트 ${scripts.length}개, 실패 ${failed.length}건, pageErrors ${pageErrors}, ok=${summary.ok}`,
   );
   for (const s of scripts) console.log(`  - ${s.file}: ${s.passed}/${s.total} (${s.ok ? "ok" : "fail"})`);
+  for (const f of failed) if (!f.file.endsWith(".json")) console.log(`  - ${f.file}: ${f.name}`);
   return summary;
 }
 
@@ -364,7 +380,8 @@ async function writeSummary() {
  * `SETS` 항목 하나를 node 자식 프로세스로 돌린다(브라우저 자체는 각 스크립트가 playwright로 연다).
  * exit code로 흐름을 끊지 않는다 — FAIL이 있어도 스크립트는 정상적으로 exit 1을 돌려주는 게 정상이고,
  * 판정은 `finish()`가 쓴 `results/*.json`을 `writeSummary`가 나중에 모아서 한다. `spawn` 자체가 실패하면
- * (파일 없음 등) 그건 던진다.
+ * (파일 없음 등) 그건 던진다. exit code(시그널로 끝나면 `null`)를 돌려주고, `cmdBaseline()`이 결과 파일
+ * 없이 죽은 실행을 가리는 데 쓴다.
  */
 function runOneScript({ file, args = [], trailingArgs = [], server, only }) {
   return new Promise((resolve, reject) => {
@@ -385,18 +402,35 @@ function runOneScript({ file, args = [], trailingArgs = [], server, only }) {
   });
 }
 
+/** `results/`의 결과 파일 이름 집합(`summary.json` 제외). 항목 실행 전후 차이로 "이 실행이 만든 새 파일"을 가린다. */
+async function listResultFiles() {
+  return new Set((await readdir(resultsDir)).filter((f) => f.endsWith(".json") && f !== "summary.json"));
+}
+
 async function cmdBaseline() {
   await rm(resultsDir, { recursive: true, force: true });
   await mkdir(resultsDir, { recursive: true });
   const servers = await ensureServers(["dev", "preview", "static"]);
+  // SETS 항목별 exit code와 새 결과 파일. 결과 파일을 쓰기 전에 죽은 실행을 `writeSummary()`가 잡는 데 쓴다.
+  const runs = [];
   try {
     for (const entry of SETS) {
-      await runOneScript(entry);
+      const before = await listResultFiles();
+      const exitCode = await runOneScript(entry);
+      const newFiles = [...(await listResultFiles())].filter((f) => !before.has(f));
+      runs.push({
+        file: entry.file,
+        args: entry.args ?? [],
+        server: entry.server,
+        only: entry.only ?? null,
+        exitCode,
+        newFiles,
+      });
     }
   } finally {
     await teardown(servers);
   }
-  const summary = await writeSummary();
+  const summary = await writeSummary(runs);
   process.exitCode = summary.ok ? 0 : 1;
 }
 

@@ -1,6 +1,6 @@
 # 01 repl-check.mjs 세 모드가 `run.mjs baseline`에서 같은 결과 파일을 덮어쓴다
 
-Status: open
+Status: done
 
 ## 현상
 
@@ -43,3 +43,26 @@ label에 포함해 `repl-check-normal-dev.json`처럼 만들기), `apps/demo/e2e
 
 - `_works/_completed/20260923-18-rd-018-e2e-baseline/DELTA-02.md`(pending-issues/04.md 원문, 최초 발견).
 - `apps/demo/e2e/run.mjs`(`SETS`), `apps/demo/e2e/lib.mjs`(`finish()`·`resultFileName()`).
+
+## Comments
+
+### 2026-09-24 해결
+
+- `apps/demo/e2e/checks/repl-check.mjs`: `finish()` label을 `<모드>-<dev|preview>`로 바꿔 결과 파일이
+  `repl-check-normal-dev.json`·`repl-check-cdn-blocked-dev.json`·`repl-check-not-isolated-dev.json`·
+  `repl-check-normal-preview.json`으로 나뉜다. `lib.mjs`의 `finish()`·`resultFileName()`과 다른 스크립트는 바꾸지 않았다.
+  위 "알려진 제약" 문단은 `apps/demo/e2e/README.md` "결과 파일 규칙"의 모드별 파일 설명으로 대체했다.
+- 검증(전체 `run.mjs baseline`): 수정 전 dev repl-check 결과 파일 1개(not-isolated 4/4). 수정 후 모드별 4개, normal 15/15·
+  cdn-blocked 5/5·not-isolated 4/4·normal-preview 15/15(단독 실행과 동일). 다른 스크립트의 결과 파일 이름 목록은 불변.
+  양성 대조(normal ① 기대값 임시 변조): 수정 전 `summary.json`이 실패를 못 봄 → 수정 후 `repl-check-normal-dev.json` 실패 보고.
+- 함께 고친 것: `run.mjs baseline`이 `finish()` 전에 죽은 실행(exit ≠ 0 + 새 결과 파일 없음)을 `summary.json` `failed`에
+  넣는다(`runs` 필드 추가). 수정 전 RED 실측: `repl-check normal`이 `page.evaluate: Execution context was destroyed`로
+  exit 1인데 `summary.json` `ok=true`. 검증은 `run.mjs` 사본에서 `SETS`만 가짜 스크립트로 바꾼 브라우저 없는 하니스:
+  수정 전 `ok=true` → 수정 후 `ok=false`(exit 1·SIGKILL 두 건 보고, 정상·결과 파일 있는 exit 1은 불변).
+
+### 남김
+
+- exit 0인데 결과 파일이 없는 실행, 앞 `SETS` 항목의 결과 파일을 덮어쓴 실행은 여전히 `ok`에 안 잡힌다
+  (README "결과 파일 규칙"에 기록, 현재 `SETS`에는 해당 없음).
+- 실제 브라우저 스크립트에서 `summary.json` `runs[].newFiles`는 아직 보지 않았다 — 다음 전체 baseline 때 확인.
+- 같은 작업 중 `multiline-check` dev `stop:` 간헐 실패 1회 → [e2e-baseline-drift/03](../../e2e-baseline-drift/issues/03-multiline-check-stop-intermittent.md).

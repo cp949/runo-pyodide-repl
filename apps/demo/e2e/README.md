@@ -114,6 +114,12 @@ DELTA-02 "## 결정")·`"preview"`(4173)다. 같은 프로세스에서 같은 �
 `repl-check-<mode>-<dev|preview>.json`(예: `repl-check-normal-dev.json`)을 쓴다. 같은 스크립트를 여러 모드로
 나눠 돌리는 새 스크립트도 label에 모드를 넣는다.
 
+`run.mjs baseline`은 `SETS` 항목마다 exit code와 그 실행이 새로 만든 결과 파일을 `summary.json`의 `runs`에
+기록한다. exit ≠ 0인데 새 결과 파일이 없으면(`finish()` 전 크래시 등) `failed`에
+`{ file: <스크립트 경로>, name: "결과 파일 없음(exit N, <server>...)" }`로 넣어 `ok=false`가 된다.
+잡지 못하는 경우 둘: exit 0인데 결과 파일이 없는 실행, 앞 `SETS` 항목과 같은 결과 파일 이름을 덮어쓴 실행(새 파일로
+안 보인다). 새 스크립트를 `SETS`에 넣을 때 결과 파일 이름이 다른 항목과 겹치지 않는지 확인한다.
+
 ## 기준 인터프리터 차이
 
 - pty 대조 기준: **CPython 3.14.4**(24×80, `TERM=xterm`).
