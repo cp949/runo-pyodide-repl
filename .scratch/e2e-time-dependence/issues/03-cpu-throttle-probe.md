@@ -1,6 +1,6 @@
 # 03 CPU 감속 실행으로 시간 의존 판정을 찾는 수단을 만든다
 
-Status: open
+Status: deferred
 Type: research
 
 ## 목적
@@ -32,3 +32,7 @@ await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
 1. worker 적용 여부 확인(위 가정).
 2. 이슈 02의 세 스크립트만 `rate: 4`로 `ONLY=` 실행해 결과를 이 파일 Comments에 기록한다. 전체 `e2e:baseline` 감속 실행은
    하지 않는다(검증 실행 예산, `docs/agents/rubber-workflow.md`).
+
+## Comments
+
+- 2026-09-24 재분류: `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준"). 이슈 01·02의 보조 수단이라 둘이 `open`이 될 때 함께 재개한다.

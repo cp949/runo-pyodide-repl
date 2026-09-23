@@ -1,6 +1,6 @@
 # 02 절대 ms 상한 판정 3곳이 장비 성능에 따라 거짓 실패한다
 
-Status: open
+Status: deferred
 
 ## 현상
 
@@ -43,3 +43,7 @@ Node 쪽 폴링은 추가로 과대 측정한다(`docs/traps/TRP-022`, 문턱 �
 
 - `.scratch/e2e-baseline-drift/issues/02-sleep-await-median-over-30ms-reference.md`: `sleep-await-check.mjs` 30ms 판정선
   문제(스크립트는 단언하지 않는데 `BASELINE.md` 4절은 판정선으로 적음). 같은 뿌리지만 그 이슈에서 추적한다.
+
+## Comments
+
+- 2026-09-24 재분류: `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준"). 세 곳 모두 거짓 실패를 아직 관찰하지 않았다. 새 판정은 `docs/design/09-testing.md` 9.7 2항으로 흡수. 재개 조건: 세 판정 중 하나가 결함 없는 코드에서 실패하면 `open`(그 스크립트를 고칠 때 9.7로 바꾼다).

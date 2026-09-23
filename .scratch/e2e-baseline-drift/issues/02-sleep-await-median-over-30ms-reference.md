@@ -1,6 +1,6 @@
 # 02 `measure/sleep-await-check.mjs` 일부 셀 중앙값이 `BASELINE.md` 30ms 판정선을 넘는다
 
-Status: open
+Status: done
 
 ## 현상
 
@@ -29,3 +29,7 @@ Status: open
   참고값으로 내릴지. 판정선 변경은 사용자 확인 대상이다.
 - 참고: 지연은 이미 페이지 안 `performance.now()`(`window.__ctrlCAt`·`__promptReadyAt`)로 잰다. Node 쪽 폴링 과대 측정
   (`docs/traps/TRP-022-node-side-polling-inflates-browser-latency.md`)은 원인 후보가 아니다.
+
+## Comments
+
+- 2026-09-24 종료: 이 이슈의 "정할 것"(30ms를 판정선으로 유지할지 참고값으로 내릴지)을 사용자가 **참고값**으로 확정했다. `BASELINE.md` 4절 문구 변경, 규칙은 `docs/design/09-testing.md` 9.7 6항.

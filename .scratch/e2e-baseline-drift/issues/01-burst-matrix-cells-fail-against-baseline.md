@@ -1,6 +1,6 @@
 # 01 `measure/burst-matrix.mjs`의 b5·b20·b50·c 셀이 `BASELINE.md` 4절 판정선과 다르게 실패한다
 
-Status: open
+Status: deferred
 
 ## 현상
 
@@ -39,3 +39,7 @@ Status: open
 2. 프롬프트 Ctrl+C 표시가 바뀐 RD를 `git log -- apps/demo packages/xterm-readline`로 찾아, 하니스 가정과 대조한다.
 3. 하니스 기대 불일치면 `burst-matrix.mjs` 판정을 고치고 `BASELINE.md` 4절을 재측정값으로 갱신한다(판정선 변경은 사용자
    확인 대상). 제품 결함이면 별도 이슈로 나눈다.
+
+## Comments
+
+- 2026-09-24 재분류: `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준"). `burst-matrix.mjs`는 `measure` 세트(L3, 사용자 지시 때만)이고 `BASELINE.md` 4절은 참고값으로 바뀌어 게이트가 아니다. 하니스 기대 불일치인지 제품 결함인지 미확인. 재개 조건: 사용자가 `measure` 실행을 지시하거나, 수동으로 `while True: pass` 실행 중 Ctrl+C 5회 연타 뒤 프롬프트가 입력을 받지 않으면 `open`.

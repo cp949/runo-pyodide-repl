@@ -1,6 +1,6 @@
 # 03 `sigint-handler-idle.test.ts`의 `/KeyboardInterrupt\n$/` 불일치 실패가 미재현·원인 미상이다
 
-Status: open
+Status: deferred
 
 ## 현상
 
@@ -42,3 +42,7 @@ Status: open
 
 이슈 01 `## 해결`에 기록된 `sigint-handler.test.ts:368`(`"20\n"` 기대, `"19\n"` 수신) 간헐 실패는 다른 파일의 현상이다.
 이슈 02 작업의 전체 스위트 12회(수정 전 6, 원인 A만 고친 뒤 1, 최종 코드 5)에서는 나오지 않았다. 재발하면 이 폴더에 별도 이슈로 등록한다.
+
+## Comments
+
+- 2026-09-24 재분류: `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준"). 1회 관찰, 106회 반복에서 재현 0, 원시 stderr 없음. 재개 조건: `pnpm test`에서 같은 단언 실패가 다시 관찰되면 원시 stderr를 보존하고 `open`.

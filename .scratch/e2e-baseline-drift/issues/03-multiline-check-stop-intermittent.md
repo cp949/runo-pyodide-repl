@@ -1,6 +1,6 @@
 # 03 `multiline-check.mjs` dev `stop:` 확인이 간헐적으로 실패한다(4회 중 1회)
 
-Status: open
+Status: deferred
 
 ## 현상
 
@@ -23,3 +23,7 @@ stop: exit() 뒤 나머지 문장은 실행하지 않고 terminated Alert가 뜬
 
 전체 baseline을 반복하지 말고 `pnpm --filter demo e2e:multiline`을 dev 서버에 단독으로 돌려 재현 빈도를 먼저 본다
 (`docs/agents/rubber-workflow.md` "검증 실행 예산"). 재현되면 `stop:` 셀 직전 출력 대기 조건을 확인한다.
+
+## Comments
+
+- 2026-09-24 재분류: `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준"). 4회 중 1회 관찰, 원인 미상(판정 대기 부족인지 제품 동작인지 미구분). 원시 결과: 본문 인용. 재개 조건: 이후 L1·L2 실행에서 `stop:` 실패가 다시 관찰되면 `open`. 그 전에는 조사하지 않는다.

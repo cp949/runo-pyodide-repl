@@ -20,3 +20,7 @@ worker가 `sys.ps1`/`sys.ps2`를 `pyodide.runPython("import sys\nsys.ps1 = ...")
 ## 등록 시점
 
 RD-016(Tab 완성) 착수 시 함께 처리한다. 기준선 비교 규칙("변경하려면 ROADMAP 항목으로 등록")에 따라 RD-004에서는 바꾸지 않았다.
+
+## Comments
+
+- 2026-09-24 재분류: `open` 유지(`docs/agents/issue-tracker.md` "등록·분류 기준"). 사용자에게 보이는 차이(새 세션 `s` Tab 후보에 `sys`)이고 관찰 가능한 완료 기준이 있다.
