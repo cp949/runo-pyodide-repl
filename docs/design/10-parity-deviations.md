@@ -43,7 +43,7 @@ Tab 완성:
 19. **번들 pyodide는 Python 3.14.2, 기준 pty는 3.14.4**. 95케이스 대조에서 zip 보정 뒤 파서 결과 차이는 없었으나 소스 차이 자체를 배제하지는 않았다.
 20. **미로드 배포 패키지는 후보에 없다**(numpy 등).
 21. **열 정렬은 문자열 길이 근사**(전각 문자 2칸 미반영).
-22. **새 세션에서 `sys`가 REPL 전역에 있어 `s` 후보에 섞인다.**
+22. **새 세션에서 `sys`가 REPL 전역에 있어 `s` 후보에 섞인다.**(해소, 2026-09-24, `03605ed`) `createConsole`이 `sys.ps1/ps2`를 `pyimport("sys")` proxy에 JS에서 대입하도록 바꿔 `__main__`에 `sys`가 남지 않는다. 새 세션·세션 리셋 뒤 `"sys" in globals()`는 `False`(`worker/console.test.ts`, `e2e/checks/tab-check.mjs` C11a). 번호는 다른 문서가 참조하므로 유지한다.
 23. (동등) 3.14의 삽입 quirk는 그대로 따른다: `import os.pa  # c` Tab → `import os.pa  # cs.path`.
 
 Tab 완성 배선(RD-015 완료, `07-tab-completion.md` 7.1·`06-editing.md` 6.5): **붙여넣기 토큰이 Tab 판정을

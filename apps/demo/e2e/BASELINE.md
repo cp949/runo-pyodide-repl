@@ -50,7 +50,7 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 | `tla-check.mjs` | scenario·smoke·arun·toggle-off·sticky 5절 16개 | `초기,scenario` 4/4 | 통과(단, `sticky` 절의 forced pageerror 1건은 의도됨 — 3절 참고) |
 | `auto-indent-check.mjs` | prefill·shift·unit·history 등 26개(`history E1`은 DELTA-03이 RD-014 동작에 맞게 갱신[^e1]) | `초기,prefill,shift,unit` 9/9 | 통과 |
 | `block-history-check.mjs` | A·B·C·X 절 29개 | `초기,A,B,C` 11/11 | 통과 |
-| `tab-check.mjs` | C1~C14(C12 왕복 지연 포함) 68개 | `C1·C3·C8·C11` 30/30 | 통과 + 미실행 1(`import os.pa` 지연, RD-016) |
+| `tab-check.mjs` | C1~C14(C12 왕복 지연 포함) 68개 | `C1·C3·C8·C11` 30/30 | 통과 + 미실행 1(`import os.pa` 지연, RD-016). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 관찰 단계가 단언으로 바뀌어 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2) |
 | `selection-copy-check.mjs` | S01~S12 등 14개 | `S01,S02,S05,S07` 4/4 | 통과 |
 | `measure/boot-press.mjs`(baseline 세트 소속, DELTA-05가 배선) | 부팅 중 Ctrl+C N=30 | 미실행(baseline dev 전용) | 통과 30/30 |
 
