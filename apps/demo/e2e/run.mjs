@@ -80,6 +80,8 @@ const SETS = [
   { file: "checks/block-history-check.mjs", args: [DEV_URL], server: "preview" },
   { file: "checks/tab-check.mjs", server: "dev", trailingArgs: ["preview"] },
   { file: "checks/selection-copy-check.mjs", server: "dev", trailingArgs: ["preview"] },
+  // RD-018 DELTA-05: 부팅 중 Ctrl+C 판정(N=30 기본값, boot-press.mjs는 measure/ 소속 파일이지만 baseline 세트다)
+  { file: "measure/boot-press.mjs", server: "dev" },
 ];
 
 /**
@@ -289,16 +291,27 @@ async function teardown(servers) {
   }
 }
 
-/** `apps/demo/e2e/baseline.json`(DELTA-05가 채움): 허용 편차·미실행 확인 이름의 접두어 목록. 없으면 빈 값. */
+/**
+ * `apps/demo/e2e/baseline.json`(DELTA-05가 채움, `BASELINE.md` 3절이 이 파일을 인용하는 원본): 허용 편차
+ * 이름 접두어(`deviations`, 문자열 배열), 미실행 확인의 `{ prefix, rd }`(`unrun`), 다른 확인에 흡수된
+ * 관찰 항목 `{ id, by }`(`absorbed`, 매칭에는 쓰지 않고 그대로 요약에 옮긴다 — 흡수된 항목은 애초에 독립된
+ * 확인 이름으로 나타나지 않는다), 각 스크립트 자신의 판정이 이미 "의도된 forced 1건만" 확인으로 걸러낸
+ * pageerror `{ file, count }`(`expectedPageErrors`, DELTA-03이 실측한 session-reset `crash` 절·tla `sticky`
+ * 절 3건 — `pending-issues/05.md`). 이 개수만큼은 총 `pageerror` 집계에서 뺀다(그 이상 나오면 초과분이
+ * 그대로 집계돼 회귀를 계속 잡아낸다). 파일이 없으면 전부 빈 값.
+ */
 function loadBaselineConfig() {
   const p = path.join(e2eDir, "baseline.json");
-  if (!existsSync(p)) return { deviations: [], unrun: [] };
-  return JSON.parse(readFileSync(p, "utf8"));
+  if (!existsSync(p)) return { deviations: [], unrun: [], absorbed: [], expectedPageErrors: [] };
+  const parsed = JSON.parse(readFileSync(p, "utf8"));
+  return { deviations: [], unrun: [], absorbed: [], expectedPageErrors: [], ...parsed };
 }
 
 /**
  * `results/*.json`(이 실행이 만든 것만 — `baseline` 시작 시 `results/`를 비운다)을 읽어 `failed`를
- * 모으고 `baseline.json`의 접두어와 대조해 `results/summary.json`을 쓴다.
+ * 모으고 `baseline.json`의 접두어와 대조해 `results/summary.json`을 쓴다. `measure/boot-press.mjs`는
+ * `finish()`를 쓰지 않고 자기 `{ summary, results }` 포맷을 직접 쓴다(DELTA-04 결정, "동작 불변") — DELTA-05가
+ * 이 스크립트를 baseline 세트에 배선하면서 그 포맷도 여기서 같이 해석한다.
  */
 async function writeSummary() {
   const baseline = loadBaselineConfig();
@@ -308,11 +321,22 @@ async function writeSummary() {
   let pageErrors = 0;
   for (const file of files) {
     const data = JSON.parse(readFileSync(path.join(resultsDir, file), "utf8"));
+    if (data.summary && Array.isArray(data.results)) {
+      // boot-press.mjs 전용 포맷: 표준 finish() 필드(passed/total/ok/failed/pageErrors 배열)가 없다.
+      const s = data.summary;
+      const okCount = s.outcomes?.OK ?? 0;
+      scripts.push({ file, url: s.url, passed: okCount, total: s.trials, ok: s.allOk });
+      pageErrors += Number(s.pageErrors ?? 0);
+      if (!s.allOk) failed.push({ file, name: `boot-press allOk(outcomes=${JSON.stringify(s.outcomes)})` });
+      continue;
+    }
     scripts.push({ file, url: data.url, passed: data.passed, total: data.total, ok: data.ok });
-    pageErrors += Array.isArray(data.pageErrors) ? data.pageErrors.length : 0;
+    const rawPageErrors = Array.isArray(data.pageErrors) ? data.pageErrors.length : 0;
+    const expected = baseline.expectedPageErrors.find((e) => e.file === file)?.count ?? 0;
+    pageErrors += Math.max(0, rawPageErrors - expected);
     for (const name of data.failed ?? []) {
       const isDeviation = baseline.deviations.some((prefix) => name.startsWith(prefix));
-      const isUnrun = baseline.unrun.some((prefix) => name.startsWith(prefix));
+      const isUnrun = baseline.unrun.some((u) => name.startsWith(u.prefix));
       if (!isDeviation && !isUnrun) failed.push({ file, name });
     }
   }
@@ -321,6 +345,8 @@ async function writeSummary() {
     failed,
     deviations: baseline.deviations,
     unrun: baseline.unrun,
+    absorbed: baseline.absorbed,
+    expectedPageErrors: baseline.expectedPageErrors,
     pageErrors,
     ok: failed.length === 0 && pageErrors === 0,
   };
