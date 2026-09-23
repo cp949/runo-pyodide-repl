@@ -190,6 +190,26 @@ await step("AB2 그 프롬프트에 130자를 입력해 행이 늘어나도 소�
   if (rep.missing.length > 0 || rep.dup.length > 0) throw new Error(`소실 ${rep.missing.length} 중복 ${rep.dup.length}`);
 });
 
+// AD(RD-018 확정 8·14, docs/design/10-parity-deviations.md 편차 44): 꼬리가 든 프롬프트에서 입력 중
+// Ctrl+L을 누르면 3.14(`skipped-ids.md` 기록: 화면 전체를 지워 `>>> foo`만 남김)와 달리 꼬리가 지워지지
+// 않고 그대로 남는다(실측, DELTA-03). 실측값을 기대값으로 고정한다.
+await step("AD 꼬리(t>>> foo)에서 Ctrl+L은 꼬리를 지우지 않고 t>>> foo 한 행만 남긴다(편차 44)", async () => {
+  // AB2가 미제출 입력(a×130, sync:false)을 남겨 두므로(그 절의 마지막이라 원래는 정리가 필요 없었다)
+  // 먼저 제출해 깨끗한 >>> 로 돌아온다(W1 등과 같은 정리 패턴).
+  await killLine();
+  await resetPrompt();
+  await runTail('print("t", end="")', "t>>>");
+  await type("foo");
+  await waitFor(async () => (await lastLine()) === "t>>> foo", "입력 foo가 꼬리 뒤에 반영", 3000);
+  await press("Control+l");
+  await waitFor(async () => (await rows())[0] === "t>>> foo", "Ctrl+L 뒤 첫 행이 t>>> foo", 5000);
+  const allRows = (await rows()).filter((r) => r !== "");
+  if (!same(allRows, ["t>>> foo"])) throw new Error(`행 목록 = ${show(allRows)}`);
+  if ((await cursorRow()) !== 0) throw new Error(`커서 행 = ${await cursorRow()}(0 기대)`);
+  await killLine();
+  await resetPrompt();
+});
+
 await step("콘솔 경고·오류·pageerror가 없다", async () => {
   if (h.problemLogs().length > 0 || h.pageErrors.length > 0) {
     throw new Error(JSON.stringify({ problemLogs: h.problemLogs(), pageErrors: h.pageErrors }));

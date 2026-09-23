@@ -31,8 +31,10 @@ const PREVIEW_URL = "http://localhost:4173";
 const STATIC_URL = "http://localhost:4174";
 
 /**
- * `baseline`이 순차로 돌릴 스크립트 목록. 항목 하나 = `{ file, args?, server, only? }`.
+ * `baseline`이 순차로 돌릴 스크립트 목록. 항목 하나 = `{ file, args?, trailingArgs?, server, only? }`.
  * `file`은 `e2eDir` 기준 경로, `args`는 url 앞에 붙는 위치 인자(`repl-check`의 모드 등, 기본 빈 배열),
+ * `trailingArgs`는 url **뒤에** 붙는 위치 인자(RD-018 DELTA-03: `tab-check`·`selection-copy-check`의
+ * 내장 preview 플래그 `"preview"`처럼 두 번째 인자가 URL이 아닌 스크립트에 쓴다, 기본 빈 배열),
  * `server`는 `SERVER_URLS`의 키(dev|preview|static, url을 결정한다), `only`가 있으면 `ONLY=` 환경변수로
  * 넘겨 그 접두어의 확인만 돌린다(부분 preview 재실행용).
  *
@@ -41,6 +43,14 @@ const STATIC_URL = "http://localhost:4174";
  * `not-isolated`는 4174(static, 헤더 없는 정적 서버)에 대해 돌지만 label은 dev로 잡힌다(4173이 아닌
  * 모든 URL은 dev, DELTA-02 "## 결정" 참고) — 이 SETS의 `server: "static"`과는 별개로, 결과 파일
  * label은 각 스크립트가 자기 url을 보고 스스로 정한다.
+ *
+ * RD-018 DELTA-03: RD-010~017 판정 스크립트 7종. 이 스크립트들은 (DELTA-02의 9종과 달리) dev·preview를
+ * **한 프로세스 안에서** 이어 돈다 — `session-reset-check`·`multiline-check`·`tla-check`·
+ * `auto-indent-check`·`block-history-check`는 `[devURL, previewURL]` 두 URL 인자로(각 스크립트 안에서
+ * preview 몫만 자기 `ONLY=`를 거는 경우도 있다), `tab-check`·`selection-copy-check`는 `[devURL,
+ * "preview"]`로(내장 preview 플래그, PREVIEW_URL 환경변수 기본값 4173) 돈다. 그래서 SETS 항목 하나가
+ * dev·preview 결과 파일을 모두 만든다(같은 프로세스, label만 다르다 — `lib.mjs`의 `-2`/`-3` 접미
+ * 카운터와 무관, DELTA-03 "## 결과"에서 파일 분리를 실측 확인했다).
  */
 const SETS = [
   // dev 전부
@@ -62,6 +72,14 @@ const SETS = [
   { file: "checks/ctrl-c-check.mjs", server: "preview" },
   { file: "checks/prompt-cancel-check.mjs", server: "preview", only: "RM1,B0" },
   { file: "checks/input-cancel-check.mjs", server: "preview", only: "RM2,EC" },
+  // RD-018 DELTA-03: RD-010~017 판정 스크립트 7종(한 프로세스에서 dev+preview를 모두 만든다)
+  { file: "checks/session-reset-check.mjs", args: [DEV_URL], server: "preview" },
+  { file: "checks/multiline-check.mjs", args: [DEV_URL], server: "preview" },
+  { file: "checks/tla-check.mjs", args: [DEV_URL], server: "preview" },
+  { file: "checks/auto-indent-check.mjs", args: [DEV_URL], server: "preview" },
+  { file: "checks/block-history-check.mjs", args: [DEV_URL], server: "preview" },
+  { file: "checks/tab-check.mjs", server: "dev", trailingArgs: ["preview"] },
+  { file: "checks/selection-copy-check.mjs", server: "dev", trailingArgs: ["preview"] },
 ];
 
 /** `measure`가 순차로 돌릴 스크립트 목록(DELTA-04부터 채움). SETS와 같은 이유로 이 DELTA는 빈 배열이다. */
@@ -310,7 +328,7 @@ async function writeSummary() {
  * 판정은 `finish()`가 쓴 `results/*.json`을 `writeSummary`가 나중에 모아서 한다. `spawn` 자체가 실패하면
  * (파일 없음 등) 그건 던진다.
  */
-function runOneScript({ file, args = [], server, only }) {
+function runOneScript({ file, args = [], trailingArgs = [], server, only }) {
   return new Promise((resolve, reject) => {
     const url = SERVER_URLS[server];
     const scriptPath = path.join(e2eDir, file);
@@ -318,8 +336,9 @@ function runOneScript({ file, args = [], server, only }) {
     if (only) env.ONLY = only;
     else delete env.ONLY;
     const label = only ? ` (ONLY=${only})` : "";
-    console.log(`[run.mjs] ▶ ${file} ${[...args, url].join(" ")}${label}`);
-    const child = spawn(process.execPath, [scriptPath, ...args, url], { cwd: e2eDir, stdio: "inherit", env });
+    const argv = [...args, url, ...trailingArgs];
+    console.log(`[run.mjs] ▶ ${file} ${argv.join(" ")}${label}`);
+    const child = spawn(process.execPath, [scriptPath, ...argv], { cwd: e2eDir, stdio: "inherit", env });
     child.on("error", reject);
     child.on("exit", (code, signal) => {
       console.log(`[run.mjs] ◀ ${file}(${server}) exit ${code}${signal ? ` signal ${signal}` : ""}`);

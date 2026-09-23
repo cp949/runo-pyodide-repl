@@ -1,0 +1,800 @@
+// RD-015 DELTA-05 브라우저 검증. 출처 RD-015, `_works/_completed/20260923-16-rd-015-tab-completion/verify/`
+// 에서 이관(RD-018). 이전 RD-016 C1~C12(/work/cp949/pyodide-samples/_works/_completed/
+// 20260920-04-rd-016-tab-completion/reference/browser-check.mjs, 558줄)를 이 저장소의 새 프로토콜/lib.mjs
+// 구조로 이식하고, C13(Tab 큐)·C14(완성 중 Ctrl+C, RD-021 getattr-loop-probe.mjs 이식)을 더한다. pty 기준
+// 리터럴(res_s10_0.json screen2 행)은 원문 그대로 옮긴다.
+//
+// 실행 순서는 원문 C1..C12 순서가 아니라 세션 상태(A/a/os 픽스처, C11의 세션 리셋)를 따라 재배열했다:
+//   초기 → C1..C10 → C12(지연, a.·빈 스템 픽스처가 아직 살아 있어야 한다) → C13(큐, a. 필요) →
+//   C11(세션 리셋·exit()) → C14(완성 중 Ctrl+C, 리셋 뒤에도 무관하게 새 클래스로 독립 실행)
+// 이는 rubber-workflow 관례(DELTA-05.md 계획 문구는 소급 수정하지 않는다)에 따라 "## 결정"에 근거를 남긴다.
+//
+// 사용: node tab-check.mjs <devURL> [previewSpec]
+//   previewSpec가 "preview"면 C1·C3·C8·C11만 preview URL(기본 http://localhost:4173)에서 재실행한다.
+// ONLY=<절 접두어,…>로 절 전체(설정·확인 전부)를 걸러 실행한다(양성 대조용): 초기,C1,C2,...,C13,C11,C14
+// 결과 파일 label은 url 포트 4173이면 preview, 그 밖은 dev(RD-018 DELTA-02 결정과 같은 규칙).
+// RD-018 DELTA-03 갱신: 자기 results 경로 상수 + `writeFileSync`를 없애고 `lib.mjs`의 `finish({ label })`로
+// 통일했다(옛 `results/dev.json`·`results/preview.json` 직접 쓰기 제거).
+import { open, hasFg, show } from "../lib.mjs";
+
+async function run(url) {
+  const h = await open(url);
+  const {
+    page, step, waitPrompt, waitStatus, statusText, type, press, enter, submit,
+    rows, tail, lastLine, spansOf, focus, killLine, clear,
+  } = h;
+
+  // ONLY=<절 이름,…>: 이름이 정확히 일치하는 절만 실행한다("초기"는 항상 실행). 정확 일치인 이유:
+  // "C1"을 접두어로 허용하면 "C11"·"C12"·"C13"·"C14"도 그 접두어에 걸려 함께 켜진다(실측으로 발견,
+  // TRP-034류 함정). 양성 대조는 절 단위(C8·C11·C13·C14)면 충분하다(개별 확인의 세밀한 필터는 lib.mjs
+  // step()의 자체 ONLY가 한 번 더 건다).
+  const only = (process.env.ONLY ?? "").split(",").filter(Boolean);
+  const enabled = (name) => only.length === 0 || only.includes(name);
+
+  // ── 원문 browser-check.mjs와 같은 의미의 지역 도우미(lib.mjs의 tail/trimmedRows는 중간 빈 줄을
+  //    보존하지만 원문 tailRows는 빈 줄을 전부 걸러낸다 — 판정 리터럴이 원문 기준이라 그대로 옮긴다). ──
+  const nonEmpty = async () => (await rows()).filter((l) => l !== "");
+  const tailRows = async (n) => (await nonEmpty()).slice(-n);
+  const screenText = async () => (await rows()).join("\n").replace(/\s+$/, "");
+  // rows()가 각 행의 끝 공백을 잘라 읽으므로(xterm DOM 렌더러 + lib.mjs 공통 규칙) 기대값의 끝
+  // 공백도 비교 전에 잘라야 한다(원문 browser-check.mjs의 waitLast와 같은 처리, 예: ">>> import ").
+  async function waitLast(expected, timeoutMs = 3000) {
+    const want = expected.replace(/\s+$/, "");
+    await h.waitFor(async () => (await lastLine()) === want, `마지막 줄 === ${show(want)}(원문 ${show(expected)})`, timeoutMs, 10);
+  }
+  async function waitRow(predicate, desc, timeoutMs = 3000) {
+    await h.waitFor(async () => (await rows()).some(predicate), desc, timeoutMs, 20);
+  }
+  /** Ctrl+L로 화면을 비우고 프롬프트만 남긴다(각 절 앞). */
+  async function clearScreen() {
+    await focus();
+    await clear();
+  }
+  /** Ctrl+U로 입력줄만 지운다(같은 절 안의 확인 사이). */
+  async function clearLine() {
+    await killLine();
+    await page.waitForTimeout(150);
+  }
+  const sleep = (ms) => page.waitForTimeout(ms);
+
+  await step("초기 프롬프트 표시", async () => {
+    await waitPrompt(">>>", 60000);
+    await focus();
+  });
+
+  // 픽스처: 3.14 pty 측정(cases.json)과 같은 이름 + 후처리 확인용 객체. C1~C10·C12·C13이 이 픽스처에
+  // 기대므로 ONLY 필터와 무관하게 항상 준비한다.
+  await step("초기 픽스처 준비", async () => {
+    await submit("import os, warnings");
+    await submit("x = [1, 2]");
+    await submit(
+      "A = type('A', (), {'attr_one': 1, '_priv': 2, 'meth': lambda self: 0, 'prop': property(lambda self: 1)})",
+    );
+    await submit("a = A()");
+    await submit("printer = 1");
+    await submit('warnings.simplefilter("always")');
+    await submit(
+      "exec(\"class W:\\n    def __dir__(self): return ['foo']\\n    def __getattr__(self, n):\\n        warnings.warn('careful'); return 1\")",
+    );
+    await submit("w = W()");
+    await submit(
+      "exec(\"class B:\\n    def __dir__(self): return ['foo']\\n    def __getattr__(self, n): raise ValueError('boom')\")",
+    );
+    await submit("b = B()");
+    if ((await lastLine()).trim() !== ">>>") throw new Error(show(await lastLine()));
+    await clearScreen();
+  });
+
+  // ═══════════════════════ C1 후보 1개는 즉시 삽입 ═══════════════════════
+  if (enabled("C1")) {
+    await step("C1a 후보 1개: impor Tab → import ", async () => {
+      await type("impor");
+      await press("Tab");
+      await waitLast(">>> import ");
+    });
+    await step("C1b 후보 1개: os.path.exist Tab → os.path.exists(", async () => {
+      await clearLine();
+      await type("os.path.exist");
+      await press("Tab");
+      await waitLast(">>> os.path.exists(");
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C2 접두사만 채움 ═══════════════════════
+  if (enabled("C2")) {
+    await clearScreen();
+    await step("C2a 접두사: os.getc Tab → os.getcwd", async () => {
+      await type("os.getc");
+      await press("Tab");
+      await waitLast(">>> os.getcwd");
+    });
+    await step("C2a 보조 메시지([ not unique ]) 없음", async () => {
+      if ((await screenText()).includes("not unique")) throw new Error(show(await tailRows(3)));
+    });
+    await clearLine();
+    await step("C2b 스템 자체가 후보: os.path 무변화", async () => {
+      await type("os.path");
+      await press("Tab");
+      await sleep(500);
+      if ((await lastLine()) !== ">>> os.path") throw new Error(show(await lastLine()));
+    });
+    await step("C2b 첫 Tab은 목록을 내지 않는다", async () => {
+      if ((await screenText()).includes("os.pathsep")) throw new Error(show(await tailRows(3)));
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C3 연속 두 번째 Tab: 열 우선 목록 + 입력줄 재그리기 ═══════════════════════
+  if (enabled("C3")) {
+    await clearScreen();
+    await step("C3a 첫 Tab은 목록 없음(a.)", async () => {
+      await type("a.");
+      await press("Tab");
+      await sleep(400);
+      if ((await screenText()).includes("a.attr_one")) throw new Error(show(await tailRows(3)));
+    });
+    await step("C3a 목록이 3.14 pty와 같은 행(a.)", async () => {
+      await press("Tab");
+      await waitRow((l) => l === "a.attr_one  a.meth()    a.prop", "a. 목록 행");
+    });
+    await step("C3a 목록 아래 새 행에 입력줄 재그리기", async () => {
+      // 목록 행이 보인 시점과 입력줄 재그리기가 끝나는 시점 사이에 짧은 창이 있다(printAbove의
+      // 재그리기 콜백이 별도 마이크로태스크) — 즉시 비교 대신 짧게 기다린다(C7c 실측으로 발견).
+      await waitLast(">>> a.");
+    });
+    await step("C3a 재그리기 뒤 커서 끝: 타이핑이 끝에 붙음", async () => {
+      await type("t");
+      await sleep(200);
+      if ((await lastLine()) !== ">>> a.t") throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await sleep(200);
+
+    await clearScreen();
+    await step("C3b 목록이 3.14 pty와 같은 행(A.)", async () => {
+      await type("A.");
+      await press("Tab");
+      await sleep(400);
+      await press("Tab");
+      await waitRow((l) => l === "A.attr_one  A.meth(     A.mro()     A.prop", "A. 목록 행");
+    });
+    await clearLine();
+
+    await clearScreen();
+    await step("C3c 첫 Tab이 공통 접두사 x.__class_ 까지 채움(pty와 같음)", async () => {
+      await type("x.__cl");
+      await press("Tab");
+      await waitLast(">>> x.__class_");
+    });
+    await step("C3c 두 번째 Tab 목록이 3.14 pty와 같은 행(x.__cl)", async () => {
+      await press("Tab");
+      await waitRow((l) => l === "x.__class__(          x.__class_getitem__(", "x.__cl 목록 행");
+    });
+    await clearLine();
+
+    // 커서가 줄 중간일 때 두 번째 Tab: 재그리기 뒤 커서가 원래 위치(a.|xyz)에 있어야 한다
+    await clearScreen();
+    await step("C3d 커서 중간 재그리기 입력줄", async () => {
+      await type("a.xyz");
+      for (let i = 0; i < 3; i++) await press("ArrowLeft");
+      await press("Tab");
+      await sleep(400);
+      await press("Tab");
+      await waitRow((l) => l === "a.attr_one  a.meth()    a.prop", "a. 목록 행(커서 중간)");
+      await waitLast(">>> a.xyz");
+    });
+    await step("C3d 재그리기 뒤 커서 위치 유지(a.txyz)", async () => {
+      // 커서가 줄 중간(a.|xyz)이라 타이핑한 글자로 줄이 끝나지 않는다 — h.type()의 자동 대기(끝
+      // 문자 일치)가 구조적으로 맞을 수 없어 sync:false로 끄고 최종 문자열을 직접 기다린다.
+      await type("t", { sync: false });
+      await waitLast(">>> a.txyz");
+    });
+    await clearLine();
+
+    // 후보 200개 초과
+    await clearScreen();
+    await step("C3e 200개 초과: ...N개 더", async () => {
+      await type("os.");
+      await press("Tab");
+      await sleep(500);
+      await press("Tab");
+      await waitRow((l) => /^\.\.\.\d+개 더$/.test(l), "...N개 더", 5000);
+    });
+    await step("C3e 목록 아래 입력줄 재그리기", async () => {
+      await waitLast(">>> os.");
+    });
+    await clearLine();
+
+    // 사이에 다른 키가 끼면 첫 Tab 규칙으로 돌아간다
+    await clearScreen();
+    await step("C3f 사이에 다른 키가 끼면 목록 없음(첫 Tab 규칙)", async () => {
+      await type("os.pa");
+      await press("Tab");
+      await sleep(400);
+      await type("t");
+      await press("Backspace");
+      await sleep(100);
+      await press("Tab");
+      await sleep(600);
+      if ((await screenText()).includes("os.pardir")) throw new Error(show(await tailRows(3)));
+    });
+    await step("C3f 이어서 연속 Tab이면 목록이 나온다", async () => {
+      await press("Tab");
+      await waitRow((l) => l.includes("os.pardir") && l.includes("os.path"), "os. 목록(재개)");
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C4 후보 없음은 무동작 ═══════════════════════
+  if (enabled("C4")) {
+    await clearScreen();
+    await step("C4 후보 없음: 무변화", async () => {
+      await type("os.zzzz");
+      await press("Tab");
+      await sleep(500);
+      if ((await lastLine()) !== ">>> os.zzzz") throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await step("C4 무동작 뒤 REPL 계속 동작", async () => {
+      await submit("1+1");
+      if (!(await tailRows(3)).some((l) => l === "2")) throw new Error(show(await tailRows(3)));
+    });
+  }
+
+  // ═══════════════════════ C5 스템이 빈 곳: 공백 4-(열%4)칸 ═══════════════════════
+  if (enabled("C5")) {
+    await clearScreen();
+    await step("C5a 빈 줄: 4칸", async () => {
+      await press("Tab");
+      await type("x");
+      await sleep(200);
+      if ((await lastLine()) !== `>>> ${" ".repeat(4)}x`) throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await step("C5b 2칸 뒤: 2칸 더(모두 4칸)", async () => {
+      await page.keyboard.type("  ");
+      await sleep(150);
+      await press("Tab");
+      await type("x");
+      await sleep(200);
+      if ((await lastLine()) !== `>>> ${" ".repeat(4)}x`) throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await step("C5c x = 뒤: 4칸", async () => {
+      await type("x = ");
+      await press("Tab");
+      await type("y");
+      await sleep(200);
+      if ((await lastLine()) !== `>>> x = ${" ".repeat(4)}y`) throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await step("C5d print( 뒤: 2칸", async () => {
+      await type("print(");
+      await press("Tab");
+      await type("y");
+      await sleep(200);
+      if ((await lastLine()) !== `>>> print(${" ".repeat(2)}y`) throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await step("C5e important = 뒤 Tab 8연타(지연 0) → 32칸(왕복 없음, 큐 불필요)", async () => {
+      await type("important = ");
+      for (let i = 0; i < 8; i++) await press("Tab"); // 사이에 sleep 없음(지연 0)
+      await type("z");
+      await sleep(200);
+      if ((await lastLine()) !== `>>> important = ${" ".repeat(32)}z`) throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C6 커서 중간(os.getc|xyz) ═══════════════════════
+  if (enabled("C6")) {
+    await clearScreen();
+    await step("C6 커서 중간: os.getc|xyz Tab → os.getcwd|xyz", async () => {
+      await type("os.getcxyz");
+      for (let i = 0; i < 3; i++) await press("ArrowLeft");
+      await press("Tab");
+      await waitLast(">>> os.getcwdxyz");
+    });
+    await step("C6 삽입 뒤 커서 위치: 타이핑 이어짐", async () => {
+      // 커서가 줄 중간(os.getcwd|xyz)이라 C3d와 같은 이유로 sync:false.
+      await type("!", { sync: false });
+      await waitLast(">>> os.getcwd!xyz");
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C7 여러 줄 버퍼와 `... ` 줄은 마지막 논리 줄만 스템 ═══════════════════════
+  if (enabled("C7")) {
+    await clearScreen();
+    await step("C7a 여러 줄 버퍼(Shift+Enter) 마지막 줄 완성", async () => {
+      await type("x = 1");
+      await press("Shift+Enter");
+      await type("os.getc");
+      await press("Tab");
+      await sleep(400);
+      if (!(await lastLine()).endsWith("os.getcwd")) throw new Error(show(await tailRows(3)));
+    });
+    await clearLine();
+    await press("Control+c");
+    await waitPrompt(">>>");
+    // 취소 직후 재그리기는 두 단계(즉시 프롬프트 → KeyboardInterrupt 삽입 뒤 프롬프트 재출력)라 그
+    // 사이의 짧은 창에 보낸 키가 새 읽기로 교체되며 버려질 수 있다(RD-014 reset()과 같은 이유, 실측).
+    await sleep(250);
+    await step("C7b `... ` 줄 접두사 완성", async () => {
+      await type("for i in range(2):");
+      await enter();
+      await waitPrompt("...");
+      await type("os.getc");
+      await press("Tab");
+      await sleep(400);
+      if ((await lastLine()) !== "...     os.getcwd") throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await step("C7c `... ` 줄 목록 뒤 프롬프트와 입력줄 재그리기", async () => {
+      await type("    a.");
+      await press("Tab");
+      await sleep(400);
+      await press("Tab");
+      await waitRow((l) => l === "a.attr_one  a.meth()    a.prop", "a. 목록 행(... 줄)");
+      await waitLast("...     a.");
+    });
+    await press("Control+c");
+    await waitPrompt(">>>");
+    await sleep(250);
+    await step("C7d 블록 취소 뒤 REPL 계속 동작", async () => {
+      await submit("1+1");
+      if (!(await tailRows(3)).some((l) => l === "2")) throw new Error(show(await tailRows(3)));
+    });
+  }
+
+  // ═══════════════════════ C8 왕복 중 경합 ═══════════════════════
+  if (enabled("C8")) {
+    await clearScreen();
+    await step("C8a Tab→Enter 20회: 매번 프롬프트 복귀(정지 없음)", async () => {
+      let plain = 0, completed = 0, hung = 0;
+      for (let i = 0; i < 20; i++) {
+        await type("os.getc");
+        await press("Tab");
+        await press("Enter");
+        const ok = await Promise.race([
+          waitPrompt(">>>", 15000).then(() => true),
+          sleep(15000).then(() => false),
+        ]);
+        if (!ok) {
+          hung++;
+          break;
+        }
+        const txt = (await tailRows(4)).join("|");
+        if (txt.includes("built-in function getcwd")) completed++;
+        else if (txt.includes("AttributeError")) plain++;
+      }
+      console.log(`  C8a 완성된 줄 제출 ${completed}, 원문 제출 ${plain}, 정지 ${hung}`);
+      if (hung !== 0 || completed + plain !== 20) throw new Error(`hung=${hung} completed=${completed} plain=${plain}`);
+    });
+    await step("C8a 경합 뒤 REPL 계속 동작", async () => {
+      await submit("1+2");
+      if (!(await tailRows(3)).some((l) => l === "3")) throw new Error(show(await tailRows(3)));
+    });
+
+    await step("C8b Tab 반영 뒤 Enter: 완성된 줄 제출", async () => {
+      await type("os.getc");
+      await press("Tab");
+      await sleep(300);
+      await press("Enter");
+      await waitPrompt(">>>");
+      if (!(await tailRows(3)).some((l) => l.includes("built-in function getcwd"))) {
+        throw new Error(show(await tailRows(3)));
+      }
+    });
+
+    await step("C8c Tab→Ctrl+C 20회: 프롬프트 복귀(정지 없음)", async () => {
+      let stuck = 0;
+      for (let i = 0; i < 20; i++) {
+        await type("os.getc");
+        await press("Tab");
+        await press("Control+c");
+        const ok = await Promise.race([
+          waitPrompt(">>>", 15000).then(() => true),
+          sleep(15000).then(() => false),
+        ]);
+        if (!ok) {
+          stuck++;
+          break;
+        }
+      }
+      if (stuck !== 0) throw new Error(`정지 ${stuck}`);
+    });
+    await step("C8c 경합 뒤 REPL 계속 동작", async () => {
+      await submit("2+2");
+      if (!(await tailRows(3)).some((l) => l === "4")) throw new Error(show(await tailRows(3)));
+    });
+
+    await step("C8d Tab→글자: 입력 유지", async () => {
+      await type("os.getc");
+      await press("Tab");
+      await type("x");
+      await sleep(500);
+      const l8 = await lastLine();
+      if (l8 !== ">>> os.getcx" && l8 !== ">>> os.getcwdx") throw new Error(show(l8));
+    });
+    await clearLine();
+
+    await step("C8e 두 번째 Tab 직후 x·Enter 10회: 제출됨(입력·Enter 소실/정지 없음)", async () => {
+      let lost = 0;
+      for (let i = 0; i < 10; i++) {
+        await type("a.");
+        await press("Tab");
+        await sleep(300);
+        await press("Tab");
+        await press("x");
+        await press("Enter");
+        const ok = await Promise.race([
+          waitPrompt(">>>", 15000).then(() => true),
+          sleep(15000).then(() => false),
+        ]);
+        if (!ok) {
+          lost++;
+          break;
+        }
+        const tailTxt = (await tailRows(4)).join("|");
+        if (!tailTxt.includes("AttributeError")) {
+          lost++;
+          console.log("  C8e 제출 결과 이상:", show(await tailRows(4)));
+          break;
+        }
+      }
+      if (lost !== 0) throw new Error(`이상 ${lost}`);
+    });
+    await step("C8e 뒤 REPL 계속 동작", async () => {
+      await submit("5+5");
+      if (!(await tailRows(3)).some((l) => l === "10")) throw new Error(show(await tailRows(3)));
+    });
+  }
+
+  // ═══════════════════════ C9 input() 안·import 줄의 Tab은 무동작 ═══════════════════════
+  if (enabled("C9")) {
+    await clearScreen();
+    await step("C9a input() 안 Tab 무동작(\\t 없음)", async () => {
+      await type('v = input("x: ")');
+      await press("Enter");
+      await sleep(500);
+      await press("Tab");
+      await type("abc");
+      await press("Enter");
+      await waitPrompt(">>>");
+      await submit("repr(v)");
+      if (!(await tailRows(3)).some((l) => l === `"'abc'"`)) throw new Error(show(await tailRows(3)));
+    });
+    await step("C9b input() 안 스템이 빈 곳의 Tab도 공백을 넣지 않음", async () => {
+      await type('v = input("y: ")');
+      await press("Enter");
+      await sleep(500);
+      await type("a = ");
+      await press("Tab");
+      await type("b");
+      await press("Enter");
+      await waitPrompt(">>>");
+      await submit("repr(v)");
+      if (!(await tailRows(3)).some((l) => l === `"'a = b'"`)) throw new Error(show(await tailRows(3)));
+    });
+    await step("C9c import 줄 Tab 무동작(\\t·후보 없음)", async () => {
+      await type("from os import pa");
+      await press("Tab");
+      await type("!");
+      await sleep(300);
+      if ((await lastLine()) !== ">>> from os import pa!") throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C10 후처리: 정렬, 예외, 경고, 내부 이름 ═══════════════════════
+  if (enabled("C10")) {
+    await clearScreen();
+    await step("C10a 이름 후보 전체 정렬(전역 printer보다 builtins print( 먼저)", async () => {
+      await type("print");
+      await press("Tab");
+      await sleep(400);
+      await press("Tab");
+      await waitRow((l) => l === "print(   printer", "print 목록 행");
+    });
+    await clearLine();
+
+    await clearScreen();
+    await step("C10b 예외를 던지는 객체(b.): 후보 없음·무변화", async () => {
+      await type("b.");
+      await press("Tab");
+      await sleep(600);
+      if ((await lastLine()) !== ">>> b.") throw new Error(show(await lastLine()));
+    });
+    await clearLine();
+    await step("C10b 뒤 REPL 계속 동작", async () => {
+      await submit("1+1");
+      if (!(await tailRows(3)).some((l) => l === "2")) throw new Error(show(await tailRows(3)));
+    });
+    await step("C10c 경고를 내는 객체(w.): 후보 삽입", async () => {
+      await type("w.");
+      await press("Tab");
+      await waitLast(">>> w.foo");
+    });
+    await step("C10c 경고가 화면에 나오지 않음", async () => {
+      if (/careful|UserWarning/.test(await screenText())) throw new Error(show(await tailRows(4)));
+    });
+    await clearLine();
+
+    await clearScreen();
+    await step("C10d 내부 이름(_pyodide*, ___*)이 목록에 없음", async () => {
+      await type("_");
+      await press("Tab");
+      await sleep(400);
+      await press("Tab");
+      await waitRow((l) => l.includes("__name__"), "_ 목록 행");
+      const listText = await screenText();
+      if (listText.includes("_pyodide") || listText.includes("___EvalCode")) {
+        throw new Error(show((await tailRows(8)).join(" / ")));
+      }
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C12 왕복 지연(페이지 내부 시계) ═══════════════════════
+  let c12Result = null;
+  if (enabled("C12")) {
+    const c12 = { attr: [], blank: [] };
+    await clearScreen();
+    // a. 속성 후보 다수: 첫 Tab(무동작, 왕복은 있음)을 먼저 정착시키고 두 번째 Tab(목록 반영)만 잰다.
+    for (let i = 0; i < 22; i++) {
+      await type("a.");
+      await press("Tab");
+      await sleep(300);
+      await page.evaluate(() => {
+        window.__t0 = null;
+        window.__lat = null;
+        const target = document.querySelector(".xterm-rows");
+        const onKey = (e) => {
+          if (e.key === "Tab" && window.__t0 === null) {
+            window.__t0 = performance.now();
+            window.removeEventListener("keydown", onKey, true);
+          }
+        };
+        window.addEventListener("keydown", onKey, true);
+        const mo = new MutationObserver(() => {
+          if (window.__lat !== null || window.__t0 === null) return;
+          const txt = [...target.children].map((d) => d.textContent).join("\n");
+          if (txt.includes("a.attr_one  a.meth()    a.prop")) {
+            window.__lat = performance.now() - window.__t0;
+            mo.disconnect();
+          }
+        });
+        mo.observe(target, { subtree: true, childList: true, characterData: true });
+        window.__mo = mo;
+      });
+      await press("Tab");
+      await sleep(400);
+      const lat = await page.evaluate(() => window.__lat);
+      c12.attr.push(lat);
+      await clearLine();
+      await page.evaluate(() => window.__mo?.disconnect());
+    }
+    // 빈 스템 공백: 첫 Tab이 곧바로 동기 삽입(왕복 없음)이므로 그 Tab 자체를 잰다. 커서 x좌표 이동으로
+    // 감지한다(스크린 텍스트는 끝 공백을 잘라 characterData만으로는 구분되지 않을 수 있다).
+    for (let i = 0; i < 22; i++) {
+      await page.evaluate(() => {
+        window.__t0 = null;
+        window.__lat = null;
+        const cr = [...document.querySelectorAll(".xterm-rows > div")].findIndex((el) => el.querySelector(".xterm-cursor"));
+        const row = document.querySelectorAll(".xterm-rows > div")[cr];
+        const cursor = row?.querySelector(".xterm-cursor");
+        const startX = cursor ? cursor.getBoundingClientRect().x : null;
+        const onKey = (e) => {
+          if (e.key === "Tab" && window.__t0 === null) {
+            window.__t0 = performance.now();
+            window.removeEventListener("keydown", onKey, true);
+          }
+        };
+        window.addEventListener("keydown", onKey, true);
+        const target = document.querySelector(".xterm-rows");
+        const mo = new MutationObserver(() => {
+          if (window.__lat !== null || window.__t0 === null) return;
+          const nowRow = [...document.querySelectorAll(".xterm-rows > div")][cr];
+          const nowCursor = nowRow?.querySelector(".xterm-cursor");
+          const nowX = nowCursor ? nowCursor.getBoundingClientRect().x : null;
+          if (nowX !== null && startX !== null && nowX !== startX) {
+            window.__lat = performance.now() - window.__t0;
+            mo.disconnect();
+          }
+        });
+        mo.observe(target, { subtree: true, childList: true, characterData: true, attributes: true });
+        window.__mo = mo;
+      });
+      await press("Tab");
+      await sleep(300);
+      const lat = await page.evaluate(() => window.__lat);
+      c12.blank.push(lat);
+      await clearLine();
+      await page.evaluate(() => window.__mo?.disconnect());
+    }
+    const warm = (arr) => arr.slice(2); // 세션 첫 Tab류 웜업 제외(22개 중 앞 2개를 버리고 20개를 남긴다)
+    const attrWarm = warm(c12.attr).slice(0, 20);
+    const blankWarm = warm(c12.blank).slice(0, 20);
+    const stats = (arr) => {
+      const nulls = arr.filter((v) => v === null).length;
+      const sorted = arr.filter((v) => v !== null).sort((a, b) => a - b);
+      const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+      const max = sorted.length ? sorted[sorted.length - 1] : null;
+      return { nulls, median, max, sorted };
+    };
+    const attrStats = stats(attrWarm);
+    const blankStats = stats(blankWarm);
+    console.log("  C12 a. 속성 후보 지연(ms):", attrStats.sorted.map((v) => v.toFixed(1)).join(" "));
+    console.log("  C12 빈 스템 지연(ms):", blankStats.sorted.map((v) => v.toFixed(1)).join(" "));
+    await step("C12 정지 0(표본 20/20 확보, a.·빈 스템 둘 다)", async () => {
+      if (attrStats.nulls !== 0 || blankStats.nulls !== 0) {
+        throw new Error(`정지 a.=${attrStats.nulls} 빈스템=${blankStats.nulls}`);
+      }
+    });
+    await step("C12 최대 200ms 이내(a.·빈 스템 둘 다)", async () => {
+      if (attrStats.max > 200 || blankStats.max > 200) {
+        throw new Error(`최대 a.=${attrStats.max}ms 빈스템=${blankStats.max}ms`);
+      }
+    });
+    c12Result = {
+      attr: { median: attrStats.median, max: attrStats.max, samples: attrStats.sorted },
+      blank: { median: blankStats.median, max: blankStats.max, samples: blankStats.sorted },
+    };
+  }
+
+  // ═══════════════════════ C13 큐: `a.` Tab 2연타(지연 0) → 왕복 1회 뒤 목록 1번 ═══════════════════════
+  if (enabled("C13")) {
+    await clearScreen();
+    await step("C13 a. Tab 2연타(0ms) → 왕복 1회 뒤 목록이 정확히 1번 출력", async () => {
+      await type("a.");
+      await press("Tab");
+      await press("Tab"); // 지연 없이 바로 두 번째 Tab(왕복 중 큐에 쌓인다)
+      await waitRow((l) => l === "a.attr_one  a.meth()    a.prop", "a. 목록 행(큐)", 5000);
+      await sleep(300); // 큐가 잘못 배선돼 두 번째 목록이 더 나온다면 이 사이에 나타난다
+      const occurrences = (await rows()).filter((l) => l === "a.attr_one  a.meth()    a.prop").length;
+      if (occurrences !== 1) throw new Error(`목록 행 출현 ${occurrences}회 ${show(await tail(8))}`);
+      await waitLast(">>> a.");
+    });
+    await clearLine();
+  }
+
+  // ═══════════════════════ C11 세션 리셋과 exit() 뒤의 Tab ═══════════════════════
+  async function resetSession() {
+    await page.click('[data-testid="reset"]');
+    await waitStatus(["loading"], "리셋: loading 상태");
+    await waitStatus(["ready", "load-failed"], "리셋: ready 상태", 60000);
+    if ((await statusText()) === "load-failed") throw new Error("리셋 뒤 load-failed");
+    await focus();
+    await waitPrompt(">>>", 60000);
+  }
+  if (enabled("C11")) {
+    await clearScreen();
+    await step("C11a 세션 리셋 뒤 프롬프트 복귀 + 리셋한 새 세션에서 Tab 동작", async () => {
+      await resetSession();
+      await type("impor");
+      await press("Tab");
+      await waitLast(">>> import ");
+    });
+    await clearLine();
+    await step("초기 관찰 새 세션 \"sys\" in globals()", async () => {
+      await submit('"sys" in globals()');
+      console.log("  관찰:", show((await tailRows(2))[0]));
+    });
+    await step("C11a 새 세션에서 삽입이 한 번만 적용", async () => {
+      await submit("import os");
+      await type("os.getc");
+      await press("Tab");
+      await waitLast(">>> os.getcwd");
+    });
+    await clearLine();
+    await step("C11b exit() 뒤 Tab 무동작·입력 무반응(세션 종료)", async () => {
+      await type("exit()");
+      await press("Enter");
+      await sleep(1500);
+      // 세션 종료 뒤에는 활성 읽기가 없어 키가 아예 에코되지 않는다(TRP-005) — h.type()은 에코를
+      // 전제로 기다리므로 여기서는 원문처럼 raw page.keyboard.type을 쓴다(대기 없음).
+      await page.keyboard.type("os.pa");
+      await press("Tab");
+      await sleep(600);
+      if ((await screenText()).includes("os.pardir")) throw new Error(show(await tailRows(3)));
+    });
+    await step("C11c exit() 뒤 리셋한 세션에서 Tab 동작", async () => {
+      await resetSession();
+      await type("impor");
+      await press("Tab");
+      await waitLast(">>> import ");
+    });
+    await clearLine();
+    await submit("import os");
+  }
+
+  // ═══════════════════════ C14 완성 중 Ctrl+C(RD-021 getattr-loop-probe 이식) ═══════════════════════
+  if (enabled("C14")) {
+    await clearScreen();
+    await step("C14 초기 __getattr__ 무한 루프 클래스 준비(REPL 직접 멀티라인 타이핑)", async () => {
+      // 정정(직전 세션 조사): exec()로 정의하면 컴파일 파일명이 "<string>"이 되어
+      // worker/sigint-handler.py의 co_filename === console.filename("<console>") 매칭에 걸리지
+      // 않는다(exec()/eval() 한정 경계 사례, DELTA-05.md 정정 참고). REPL 프롬프트에 직접
+      // 멀티라인으로 타이핑하면 "<console>" 프레임이 되어 규칙이 즉시 매치된다(실측 25.4ms 복귀).
+      // 자동 들여쓰기(RD-013)가 다음 줄 들여쓰기를 prefill하므로 각 줄은 본문 텍스트만 입력한다.
+      await type("class G:");
+      await enter();
+      await waitPrompt("...");
+      await type("def __getattr__(self, n):");
+      await enter();
+      await waitPrompt("...");
+      await type("while True: pass");
+      await enter();
+      await waitPrompt("...");
+      await enter(); // 빈 줄로 블록 닫기 → 클래스 정의 실행
+      await waitPrompt(">>>");
+      await submit("a = G()");
+      if ((await lastLine()).trim() !== ">>>") throw new Error(show(await lastLine()));
+    });
+    for (let i = 0; i < 5; i++) {
+      await step(`C14 반복 ${i + 1}/5: Tab 뒤 500ms Ctrl+C → 3초 안에 KeyboardInterrupt + >>> 복귀`, async () => {
+        // 이전 반복의 취소 재그리기(두 단계)가 끝난 직후일 수 있다 — C7b/C7d와 같은 이유로 정착을 기다린다.
+        await sleep(250);
+        await killLine();
+        // "a.x"(속성 이름 스템)가 아니라 "a.x."(끝에 점)여야 한다 — 후자만 완성기가 a.x를 평가해
+        // __getattr__를 부른다(RD-021 t.foo.와 같은 이유, 실측: 양성 대조 ②로 발견 — 원래 "a.x"였을
+        // 때는 dir(a)만으로 후보를 내 __getattr__를 아예 안 불러 무한 루프에 안 걸렸다).
+        await type("a.x.");
+        await press("Tab");
+        await sleep(500);
+        await press("Control+c");
+        await h.waitFor(
+          async () => {
+            const last = (await lastLine()).trim();
+            return last.endsWith(">>>") && (await screenText()).includes("KeyboardInterrupt");
+          },
+          "KeyboardInterrupt + >>> 복귀",
+          3000,
+          20,
+        );
+      });
+    }
+    await step("C14 KeyboardInterrupt 행이 빨간색이다", async () => {
+      const spans = await spansOf("KeyboardInterrupt");
+      if (!spans.some((s) => hasFg(s.cls, 1))) throw new Error(show(spans));
+    });
+    await step("C14 리셋 알림 없음(status가 ready 유지, terminated/crashed 없음)", async () => {
+      const st = await statusText();
+      if (st !== "ready") throw new Error(`status=${st}`);
+      if (await page.locator('[data-testid="terminated"]').isVisible().catch(() => false)) {
+        throw new Error("terminated 알림이 보인다");
+      }
+      if (await page.locator('[data-testid="crashed"]').isVisible().catch(() => false)) {
+        throw new Error("crashed 알림이 보인다");
+      }
+    });
+    await step("C14 뒤 세션 생존(1+1 → 2)", async () => {
+      await submit("1+1");
+      if (!(await tailRows(3)).some((l) => l === "2")) throw new Error(show(await tailRows(3)));
+    });
+  }
+
+  const label = url.includes(":4173") ? "preview" : "dev";
+  return h.finish({ label, c12: c12Result });
+}
+
+const devUrl = process.argv[2] ?? "http://localhost:5173";
+const previewFlag = process.argv[3];
+const originalOnly = process.env.ONLY;
+
+console.log(`=== dev: ${devUrl} ===`);
+const devOk = await run(devUrl);
+
+let previewOk = true;
+if (previewFlag === "preview") {
+  const previewUrl = process.env.PREVIEW_URL ?? "http://localhost:4173";
+  console.log(`\n=== preview: ${previewUrl} ===`);
+  process.env.ONLY = "초기,C1,C3,C8,C11";
+  previewOk = await run(previewUrl);
+  if (originalOnly === undefined) delete process.env.ONLY;
+  else process.env.ONLY = originalOnly;
+}
+
+process.exit(devOk && previewOk ? 0 : 1);

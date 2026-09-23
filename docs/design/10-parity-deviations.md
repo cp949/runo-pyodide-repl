@@ -115,6 +115,19 @@ stdin 읽기의 끝:
     3.14 pty에는 선택 개념이 없어 Ctrl+C는 항상 SIGINT다(RD-017, 사용자 결정 — Windows Terminal·VS Code
     통합 터미널의 "선택 있으면 Ctrl+C=복사, 없으면 SIGINT" 관례를 따른 의도적 선택).
 
+화면 지우기(Ctrl+L):
+
+44. **꼬리가 든 프롬프트(`t>>> `)에서 입력 중인 줄을 두고 Ctrl+L을 누르면 꼬리가 지워지지 않고 그대로
+    남는다**(3.14는 꼬리까지 지워 `>>> ` + 입력만 남긴다). 실측(DELTA-03, RD-018 e2e/checks/prompt-join-check.mjs
+    AD 절): `print("t", end="")` 뒤 `t>>> foo`(입력 `foo`, 아직 제출 전)에서 Ctrl+L을 누르면 우리 화면은
+    스크롤백 전체를 지우고 `t>>> foo` 한 행만 남기며(행 목록 `["t>>> foo"]`, 커서는 그 행 0) 3.14는
+    `skipped-ids.md`(RD-006·RD-007 인계 기록) 그대로 `>>> foo`만 남긴다(꼬리 `t`가 사라진다). Ctrl+L은
+    벤더 `Readline`의 화면 지우기 그대로이고(편차 40과 같은 코어 정책, RD-010 확정 15) 지우는 단위가
+    "입력줄만"이라 코어가 앞서 합성해 그린 꼬리(`t`)는 입력줄의 일부가 아니라 그 앞 프롬프트 꼬리라
+    같이 지워지지 않는다 — 코어에 꼬리를 인식해 걷어내는 로직이 없다. 범위: RD-018 확정 8·14의 관찰
+    항목(AD), 코드 변경 없이 관찰만 하고 이 편차로 등록한다(`prompt-join-check.mjs` AD 절이 이 실측값을
+    기대값으로 고정해 회귀를 감시한다).
+
 top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 한 줄로 끝나고 `except KeyboardInterrupt`로는 잡히지 않는 것(우리 구현은 콘솔 task를 취소하고 표지 예외 `IdleInterrupt`를 한 줄로 표시한다. `except asyncio.CancelledError`는 잡고 `finally`는 돈다)은 **편차로 등록하지 않는다**. 대기 중 Ctrl+C를 task 취소로 처리하고 한 줄만 내는 것은 3.14의 `python -m asyncio`와 같은 동작이고, 우리 TLA 옵션의 기준이 기본 REPL이 아니라 `python -m asyncio`이기 때문이다(편차 1과 같은 정렬). 2절 "범위 밖"에도 넣지 않는다 — 재현하지 않기로 한 차이가 아니라 차이가 아니다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약"), RD-008 pty 재측정 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/pty/results.md`
