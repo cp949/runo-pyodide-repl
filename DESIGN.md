@@ -8,7 +8,7 @@
 
 처음 오는 에이전트는 1→2→3 순서로 읽는다. 특정 RD를 맡았으면 3의 해당 절만 읽어도 된다.
 
-1. **무엇을, 왜**: `docs/design/00-architecture.md`(목표·채널·생명주기·패키지·공개 인터페이스), `docs/adr/`(결정 5건)
+1. **무엇을, 왜**: `docs/design/00-architecture.md`(목표·채널·생명주기·패키지·공개 인터페이스), `docs/adr/`(결정 6건)
 2. **통신 계약**: `docs/design/01-protocols.md`(RPC 메시지, stdin 메일박스, interrupt buffer, 초기화 프레임, 시퀀스)
 3. **기능 규칙**(이전 구현이 3.14 pty 실측으로 확정한 것을 계승):
    - `02-console-core.md` PyodideConsole·제출 실행·top-level await·종료

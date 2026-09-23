@@ -671,6 +671,76 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 
 인계(RD-008): RD-008 검증 스크립트는 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/`에 있다 — `lib.mjs`(RD-007 하니스 + `cancelWhenReading`·`ctrlCBurst`·`caretCount`·`interruptCount`), `prompt-cancel-check.mjs`(23개), `input-cancel-check.mjs`(26개), `input-burst-matrix.mjs`(8셀), `positive-controls.py`(3종), `pty/pty_cancel.py`·`pty/results.md`(3.14.4 취소 7건), `mutate-safe.mjs`(멈추는 변이를 끊는 변이 검사기), `skipped-ids.md`. **기준선 문구 갱신**: 이전 "RD-012b 22/24, RD-012c 20/24"는 더 이상 맞지 않다 — 낡은 기대값 8건을 현재 설계로 고쳐 **이식 세트 실패 0**이고, 남은 건너뜀은 5줄(RD-012b G1 → RD-013, RD-012b·012c J1·J2 → RD-010, RD-006b J3·AC1 → RD-010, X2·X3 → RD-014)이다. 확인 스크립트에서 출력 유무를 판정할 때 **부분일치를 쓰지 않는다**: 제출한 소스 줄이 화면에 에코되므로 `print('wrong')` 같은 줄이 `wrong`에 걸린다(행 정확일치 `hasRow` 또는 기준선 대비 증가분 `countOf`를 쓴다).
 
+## Phase 4 — 패키지 분리와 새 소비자
+
+[ADR-0006](./docs/adr/0006-pyodide-core-and-plugin-packages.md). 순서: RD-020 → RD-021 → RD-022 → RD-023 → RD-024. RD-025는 독립이다. 배포는 `pnpm pack` tarball(버전 동기)이고, 소비자는 `/work/cp949/runo/runo-pyodide-canvas`·`runo-lab`이다. 저장소는 향후 `runo-pyodide`로 개명한다(시점 미정).
+
+### RD-020 — `pyodide-core` 추출과 `pyodide-repl` 축소(동작 불변)
+
+상태: 대기 · 이전: 없음 · 설계: `00-architecture.md` 4절, ADR-0006, `01-protocols.md` 5절(초기화)
+
+`packages/pyodide-core`(`@cp949/runo-pyodide-core`)에 프로토콜·`output-tail`·worker 커널(`PyodideConsole(globals, filename)` 뼈대, stdout/stderr, webloop 재보고 억제, sleep 조각, SIGINT, stdin 배선)·main 세션(worker 생성, RPC, 메일박스 writer, interrupt sender)을 옮기고, `pyodide-repl`은 REPL driver(`sys.ps1/ps2`·헬퍼·TLA·배너·제출 러너·여러 줄 분할·완성)와 REPL 프런트만 남긴다. `pyodide-repl` 공개 API(`createRepl`, `./worker`의 `runReplWorker`)는 그대로다. 공용 시험 도우미는 비공개 `packages/pyodide-testkit`(`@repo/pyodide-testkit`)로 뺀다.
+
+시나리오: demo(`apps/demo`)가 import 경로 외 변경 없이 지금과 같은 REPL로 동작한다. 새 빈 프로젝트에 xterm-readline·core·repl tarball만 설치해도 import·타입이 해석되고 `node_modules`에 coincident가 없다.
+
+완료 기준:
+- 연결 지점: RPC 핸들러는 main·worker 모두 생성 시 core + driver 핸들러를 합성하고 이름 충돌은 생성 시 예외. "Python 실행 중" = `alive && inputReadsPending === 0 && !driver.isIdle()`(REPL `isIdle` = `readLinePending || cancelSettling`). core 출력은 stdout/stderr 원문 `{ stream, text }`, `writeOutput`·`writeError`는 REPL driver 핸들러. 초기화 프레임 `{ kind: "init", rpcPort, interruptBuffer, stdinCtrl, stdinData, pyodide: { indexURL }, driver }`(`topLevelAwait`는 `driver` 안). `runWorker({ driver })`만 구현(`plugins`는 RD-023).
+- worker init 수신은 모듈 본문 동기 등록 + `!Array.isArray(data) && data.kind === "init"`만 받고 제거(첫 메시지 무조건 소비 금지). 단위 시험: 배열 메시지가 먼저 와도 init을 받는다, 늦은 등록 변이는 실패한다.
+- 시험 제목 목록이 이동 전후 같다(diff 0). 모듈 시험은 모듈과 함께 이동.
+- coincident 비의존: core·repl 의존 트리에 `coincident`·`reflected-ffi` 없음(단위 시험), 두 패키지 `dist/`에 `coincident` 문자열 없음, tarball 스모크(xterm-readline·core·repl pack → 임시 폴더 `file:` + `pnpm.overrides` 설치 → import·타입 해석 → `node_modules`에 coincident 없음).
+- L1(마지막 DELTA 1회씩): `e2e:repl`(normal)·`e2e:ctrl-c`·`e2e:stdin-input`·`e2e:prompt-cancel`. L2 전체 `e2e:baseline` 병합 직전 1회(2026-09-24 사용자 사전 승인) — 결과가 RD-018·019 기준선과 같다. 시간 측정 관련 deferred 셀은 판정에서 제외한다.
+- 문서: `00-architecture.md` 4절 재작성, `CONTEXT-MAP.md`에 core 컨텍스트, 02~08은 경로만 갱신.
+
+### RD-021 — pyodide 버전 원천 통합과 호환 탐지
+
+상태: 대기 · 이전: 없음 · 설계: `13-version-upgrade.md`(신설), ADR-0007(신설, 버전 정책)
+
+pyodide 버전 원천을 devDependency `"pyodide"` 하나로 두고 코드는 `pyodide/package.json`에서 읽는다(`DEFAULT_PYODIDE_INDEX_URL`·시험 기대값 유도). worker 부팅 시 비공개 API 7지점을 한 번 탐지해 `ready` 페이로드 `{ pyodideVersion, versionMismatch, degraded }`로 알리고 main은 비어 있지 않으면 `console.warn`한다(공개 API 불변). 등급: `setInterruptBuffer`·`checkInterrupt` 부재는 시작 거부, `_compile.compiler.flags`·WebLoop 핸들러·`run_sync` 교체·sleep 조각·`pyodide/webloop.py` 파일명·`_IncompleteInputError` 문구는 저하(해당 기능만 끄고 `degraded` 기록).
+
+시나리오: 소비자가 `indexURL`로 다른 pyodide 버전을 로드하면 콘솔에 버전 불일치 경고가 한 번 나오고 REPL은 계속 동작한다.
+
+완료 기준: 버전 리터럴 `314.0.7`이 `package.json` 밖 코드·시험에 0건. `dist`가 `pyodide`를 런타임 import하지 않는다. 저하 지점별 속성 제거(문구 변조) 단위 시험이 `degraded` 항목과 해당 기능 꺼짐을 확인하고, interrupt 공개 API 부재 시 시작 거부 시험, `versionMismatch` 참/거짓 시험, 탐지 분기 제거 변이 시 실패. 업그레이드 절차(patch·minor, 판단 자료를 만들고 멈춘다, 재측정은 사용자 결정)를 `13-version-upgrade.md`에 적는다. L0만.
+
+### RD-022 — 실행 driver와 `pyodide-terminal` 실행창
+
+상태: 대기 · 이전: 없음 · 설계: ADR-0006, `00-architecture.md` 4절
+
+core에 실행 driver(`runDriver`)를, `packages/pyodide-terminal`에 xterm 실행창을 둔다. xterm 결합 공통 부품(`sinks`·`rewind-tail`·`stdin-reader`·`notice`·`selection-copy`)을 repl에서 terminal로 옮긴다. `run(code)`는 run마다 새 globals(`__name__ == "__main__"`, 파일명 옵션 기본 `"main.py"`), `sys.modules` 유지(편차 등록), 실행 중 `run()`은 거부. `stop()`은 interrupt → 1000ms 안에 복귀하지 않으면 terminate → worker 자동 재생성(`stopped`와 `restarted` 구분). 상태 `loading`·`ready`·`running`·`waiting-input`·`restarting`·`load-failed`·`crashed`·`not-isolated`, `run()` 결과 `ok` / `error{ errorType, traceback }` / `interrupted` / `exit{ code }` / `restarted`, 트레이스백은 stderr와 결과 양쪽. 실행창은 `input()` 대기 중에만 한 줄 편집(history 없음), 그 외 키 무시. Ctrl+C는 선택이 있으면 복사, 실행 중이면 `^C` + interrupt, `ready`면 무동작. 화면 지우기는 기본 안 함(`clear()`·`clearOnRun`). REPL에는 `runSource(code)`를 추가한다(REPL globals, 입력 줄 에코 없이 출력, 치던 한 줄 보존·재그리기, 블록 입력 중·실행 중이면 거부).
+
+시나리오: `name = input("이름: "); print(name)`을 `run()`하면 `이름: `에서 한 줄을 받아 출력한다. `while True: pass` 실행 중 Ctrl+C 또는 `stop()`이면 `KeyboardInterrupt` 트레이스백과 결과 `interrupted`. `input()` 대기가 아닐 때 친 글자는 화면에 나타나지 않는다. 연속 두 번 `run()`은 두 번째가 거부된다.
+
+완료 기준: 첫 DELTA에서 `PyodideConsole(filename="main.py")` + `compile(..., "exec")` → `console.runcode` 재사용 가설을 확인한다(실패 시 SIGINT 계층을 "실행 호스트"(`filename`·실행 래퍼·트레이스백 포맷터) 인터페이스로 일반화하고 같은 RD에서 처리). 위 시나리오의 단위·jsdom 시험(RED + 변이 검사). 실행창용 새 e2e 판정 스크립트(demo에 실행창 화면 추가) L1. REPL 회귀는 영향 스크립트 `ONLY=` L1. coincident 비의존 검사를 terminal에 확장.
+
+### RD-023 — `pyodide-dom-bridge`(coincident DOM 프록시)
+
+상태: 대기 · 이전: 없음 · 설계: ADR-0006, canvas 저장소 `docs/design/01-bridge.md`·`08-facts-and-traps.md`
+
+`packages/pyodide-dom-bridge`에 coincident upstream 4.1.1 + reflected-ffi 0.7.2(포크 없음)로 `registerJsModule("runo", { browser: { window, document } })`를 설치하는 worker 플러그인과 main 쪽 Worker 생성 도우미를 둔다. core에 `runWorker({ driver, plugins })`의 `plugins`를 추가한다. canvas 결정 계승: `import js` 비사용, 얕은 `guardedWindow`와 보안 한계, 비격리 시 `unsupported`, CSP 금지 목록(`ffi.evaluate`, blob `sync.js`). `input()`·출력·중단은 core 채널. REPL + dom-bridge는 비지원(문서화).
+
+시나리오: 실행창에서 `from runo.browser import document`로 canvas에 그리고, 같은 코드의 `input()`과 Ctrl+C가 실행창과 똑같이 동작한다.
+
+완료 기준: worker 첫 import 규칙 위반(부트스트랩 전 core 메시지 수신) 시 명시 오류. 공존 스파이크 S1~S7을 저장소 시험으로 재현(Chromium). 착수 조건: Firefox·`native: false` 환경 공존 실측, terminate 후 재생성 누수 확인, `reflected_ffi_timeout`로 동기 호출 중 중단(S5) 완화 가능성 판단 — 결과가 공존 불가면 설계를 다시 한다. 출력(비동기)·DOM(동기) 순서 역전은 허용하고 문서화한다(스파이크 500쌍 역전 0).
+
+### RD-024 — `pyodide-react`와 demo 이전
+
+상태: 대기 · 이전: 없음 · 설계: ADR-0006, `08-session.md`(이중 마운트)
+
+`packages/pyodide-react`에 `<PythonRunner ref>`(handle `run`·`stop`·`reset`, props `createWorker`·`indexURL?`·`inputProvider?`·`onStatus`·`onOutput?`·`terminalOptions?`)와 `<PythonRepl ref>`(handle `runSource`·`reset`), 저수준 `usePythonRunner`를 둔다. 컴포넌트가 xterm 생성·FitAddon 리사이즈·dispose·StrictMode 이중 마운트를 처리하고, `inputProvider`를 생략하면 xterm 줄 입력이다. React 19 ref-as-prop. iframecall 어댑터는 넣지 않는다(앱 계층). demo는 이 패키지로 옮긴다.
+
+시나리오: React 19 StrictMode 앱에서 `<PythonRepl>`을 마운트하면 worker가 하나만 살아 있고, 창 크기를 바꾸면 터미널이 맞춰진다. `ref.current.run(code)`가 실행창에서 실행된다.
+
+완료 기준: StrictMode 이중 마운트에서 worker 1개(시험), 언마운트 시 worker·Terminal 정리. demo 이전 뒤 RD-020 L1 스크립트와 RD-022 실행창 스크립트가 같은 결과. L2는 사용자 지시 때만.
+
+### RD-025 — 저장소에 없는 pty 캡처 도구 복원
+
+상태: 대기 · 이전: 없음 · 설계: `09-testing.md`, `13-version-upgrade.md`
+
+RD-018·019가 `apps/demo/e2e/pty/`에 rd-008·015·016·019 기준 데이터와 `pty_cancel.py`·`pty_type_ahead.py`를 두었다. 아직 이전 구현 `_works/`에만 있는 캡처 도구(rd-015·016의 `ptyrepl.py`·`compare_native_pyodide.py`·`build_gate_corpus.py` 등)를 옮기고 기준 인터프리터를 인자로 받게 한다(3.15 재측정 대비).
+
+시나리오: CPython 3.14.4로 도구를 실행하면 저장소의 rd-015·016 기준 데이터와 같은 파일이 다시 만들어진다.
+
+완료 기준: 재생성 결과가 저장소 데이터와 같다(다르면 항목별 원인 기록). 실행 전제(인터프리터 경로, `pyte` 등, pty 24×80 `TERM=xterm`)를 `apps/demo/e2e/pty/README` 또는 `09-testing.md`에 적는다. 재측정 여부는 사용자가 정한다(ADR-0007).
+
 ---
 
 ## 보류
