@@ -40,6 +40,12 @@ export interface ReadlineOptions {
    * 기본값은 false(원본 동작 — 공백뿐인 제출도 그대로 기록).
    */
   skipBlankHistory?: boolean;
+  /**
+   * 모든 `keydown`/`keypress`/`keyup`에서 벤더 `handleKeyEvent` 처리 앞에서 부른다. `true`를
+   * 돌려주면 벤더 처리를 생략하고 `handleKeyEvent` 자체도 xterm에 `false`를 돌려준다(xterm의
+   * 기본 처리도 생략됨). 활성 읽기 유무와 무관하게 항상 불린다.
+   */
+  onKeyEvent?: (event: KeyboardEvent) => boolean;
 }
 
 export interface ReadOptions {
@@ -79,6 +85,7 @@ export class Readline implements ITerminalAddon {
   private highWater = false;
   private state: State;
   private skipBlankHistory: boolean;
+  private onKeyEvent?: (event: KeyboardEvent) => boolean;
   /** `printAbove`가 재그리기 콜백을 기다리는 동안 true. 이 사이 들어온 키는 벤더가 바로 처리하지 않고 `queued`에 쌓는다. */
   private redrawing = false;
   /** `redrawing`인 동안 `readData`로 들어온 원본 문자열(키 하나 또는 붙여넣기 덩어리)을 순서대로 쌓아 둔다. */
@@ -98,6 +105,7 @@ export class Readline implements ITerminalAddon {
     this.state = new State(">", this.tty(), this.highlighter, this.history);
     this.history.restoreFromLocalStorage();
     this.skipBlankHistory = options.skipBlankHistory ?? false;
+    this.onKeyEvent = options.onKeyEvent;
   }
 
   /**
@@ -463,6 +471,7 @@ export class Readline implements ITerminalAddon {
   }
 
   private handleKeyEvent(event: KeyboardEvent): boolean {
+    if (this.onKeyEvent?.(event)) return false;
     if (event.key === "Enter" && event.shiftKey) {
       if (event.type === "keydown") {
         this.readKey({
