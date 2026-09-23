@@ -44,6 +44,16 @@ describe("createConsole", () => {
     prompts.destroy();
   });
 
+  test("새 콘솔을 만들어도 `sys`가 사용자 전역에 남지 않는다", () => {
+    // pyodide 인스턴스를 시험끼리 공유하므로 앞 시험이 남긴 `sys`를 먼저 지운다.
+    pyodide.runPython("globals().pop('sys', None)");
+    setup();
+
+    const leaked = pyodide.runPython("'sys' in globals()");
+
+    expect(leaked).toBe(false);
+  });
+
   test("기본 옵션(false)에서 top-level await가 꺼져 있다", async () => {
     const { repl } = setup();
 

@@ -678,9 +678,12 @@ async function run(url) {
       await waitLast(">>> import ");
     });
     await clearLine();
-    await step("초기 관찰 새 세션 \"sys\" in globals()", async () => {
+    // 편차 22 해소(.scratch/repl-globals-sys-leak): 새 세션 globals()에 sys가 없어야 한다. submit()이 새 프롬프트를
+    // 기다린 뒤 읽으므로 출력 행은 이미 그려져 있다(고정 대기·ms 상한 없음, 9.7).
+    await step("C11a 새 세션 \"sys\" in globals()가 False(편차 22 해소)", async () => {
       await submit('"sys" in globals()');
-      console.log("  관찰:", show((await tailRows(2))[0]));
+      const observed = (await tailRows(2))[0];
+      if (observed !== "False") throw new Error(`"sys" in globals() 출력 ${show(observed)}(기대 "False")`);
     });
     await step("C11a 새 세션에서 삽입이 한 번만 적용", async () => {
       await submit("import os");

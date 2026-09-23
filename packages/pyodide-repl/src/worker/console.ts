@@ -72,8 +72,26 @@ export const INCOMPLETE_INPUT_MARKER =
 /** codeop이 최종 컴파일에서 끄는 두 비트: ALLOW_INCOMPLETE_INPUT(0x4000) | DONT_IMPLY_DEDENT(0x200). */
 export const INCOMPLETE_INPUT_FLAGS = 0x4200;
 
-/** pyodide.globals에서 실행한다. `sys`가 사용자 전역에 남는 편차 22는 유지한다(10-parity-deviations.md). */
-const PROMPT_SETUP = 'import sys\nsys.ps1 = ">>> "\nsys.ps2 = "... "\n';
+/** 프롬프트 문자열. `sys.ps1/ps2`로 설정한다(CPython REPL과 같은 값). */
+const PS1 = ">>> ";
+const PS2 = "... ";
+
+/**
+ * `sys.ps1/ps2`를 `pyimport("sys")` proxy에 JS에서 대입해 설정한다. `runPython("import sys")`는 `pyodide.globals`
+ * (= `__main__`)에 `sys`를 남겨 새 REPL의 `globals()`에 없어야 할 이름이 생긴다(편차 22 해소).
+ */
+function setPrompts(pyodide: PyodideInterface): void {
+  const sysModule = pyodide.pyimport("sys") as PyProxy & {
+    ps1: string;
+    ps2: string;
+  };
+  try {
+    sysModule.ps1 = PS1;
+    sysModule.ps2 = PS2;
+  } finally {
+    sysModule.destroy();
+  }
+}
 
 // await_fut·format_syntax_error·retrieve_exception 본체와 설명은 console-helpers.py에 있다(DELTA-00에서 이전).
 
@@ -95,7 +113,7 @@ export function createConsole(
 ): ReplConsole {
   pyodide.setStdout(createSinkWriter((text) => sinks.write(text)));
   pyodide.setStderr(createSinkWriter((text) => sinks.writeErrorRaw(text)));
-  pyodide.runPython(PROMPT_SETUP);
+  setPrompts(pyodide);
   const consoleModule = pyodide.pyimport("pyodide.console") as PyProxy & {
     BANNER: string;
     PyodideConsole: (globals: PyProxy) => PyodideConsoleProxy;
