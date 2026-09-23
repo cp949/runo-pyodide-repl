@@ -69,7 +69,12 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
    `signal.default_int_handler`로 `KeyboardInterrupt`를 올린다. 정상 반환 후 다른 경로로 올리면 안 된다:
    `input()` 취소의 EINTR 경로에서 예외를 못 보면 CPython이 읽기를 다시 시도한다(PEP 475).
 3. 사용자 프레임이 없고 **사용자 실행 중**(= `runcode` 안, 시간 조건 없음)이면 `interrupt_idle()`로
-   정지한 실행을 깨운다.
+   정지한 실행을 깨운다. 깨우기는 핸들러 자리에서 하지 않고 `loop.call_soon`으로 한 틱 미룬다(미룬 콜백은 그 사이
+   실행이 끝났거나 바뀌었으면 버리고, 깨울 것이 없으면 `pending`을 세운다). 핸들러는 asyncio 콜백의 bytecode 사이에서
+   돌기 때문에 그 자리에서 Task를 취소하면 `_set_result_unless_cancelled`의 `cancelled()` 검사와 `set_result()` 사이에
+   끼어 `InvalidStateError: invalid state`가 stderr에 찍힌다. 이미 깨운 대기(`woken`)가 있으면 미루지 않고 `pending`만
+   세운다 — 그 대기가 올릴 `KeyboardInterrupt`에 합치며, 미루면 미룬 콜백이 그 전달 뒤에 돌아 한 번 더 올린다.
+   감시 타이머 경로(`interrupt_idle()` 직접 호출)는 신호 처리 문맥이 아니라 JS 콜백이라 그대로 동기 취소한다.
 4. 그 밖(트레이스백 생성 중, 다음 문장 컴파일 중)에는 **버린다**. 허용 목록 방식이고 arm/disarm 상태가
    없어 `KeyboardInterrupt`를 잡고 계속 도는 프로그램은 다음 SIGINT에 다시 중단된다.
 
@@ -119,9 +124,9 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 - 이벤트 루프가 비는 구간(정지한 `run_sync`·`asyncio.run` 대기, top-level await 대기)에만 실제로 돈다.
 - 엿보기는 `hasPending()`, 소비는 **깨웠을 때만** `consume()`. 깨울 수 없으면 SIGINT를 남겨 재개한 사용자 스택의
   폴링이 받게 한다. 소비 성공 시에만 ack.
-- `interruptIdle()`의 **반환값에는 경합이 있다**: SIGINT를 쓴 직후의 호출은 Python으로 들어가는 그 호출에서 폴링이
-  먼저 일어나 핸들러 규칙 ③이 깨우고, 바깥 호출은 깨울 것이 없어 거짓을 돌려줄 수 있다. 거짓이 "깨우지 못했다"를
-  뜻하지 않는다. 결과는 어느 경로든 같다(깨어나고 ack는 정확히 한 번) — `consume()`의 비교 교환이 중복 ack를
+- `interruptIdle()`의 **반환값에는 경합이 있다**: 핸들러 규칙 ③이 앞서 미뤄 둔 깨우기가 먼저 돌았으면 이 호출은
+  깨울 것이 없어 거짓을 돌려줄 수 있다(SIGINT를 쓴 직후의 호출 안에서 폴링이 일어나면 핸들러는 깨우기를 예약만 하고
+  이 호출의 본문이 깨운다). 거짓이 "깨우지 못했다"를 뜻하지 않는다. 결과는 어느 경로든 같다(깨어나고 ack는 정확히 한 번) — `consume()`의 비교 교환이 중복 ack를
   막는다. 깨어남은 경과 시간·화면으로, ack는 슬롯으로 본다.
 - **프롬프트 유휴 폐기**: `atPrompt`가 참인데 깨울 것 없이 남은 SIGINT는 대상 코드가 없는 낡은 눌림이라
   그 틱에서 버린다(2를 지웠을 때만 ack). 실행 중(`atPrompt` 거짓) 규칙은 위와 같다.

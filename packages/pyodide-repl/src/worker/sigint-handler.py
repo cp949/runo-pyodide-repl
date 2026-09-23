@@ -5,7 +5,10 @@
 #   `signal.default_int_handler`는 반드시 예외를 던져야 한다(`input()` 취소가 기대는 EINTR 경로, PEP 475).
 # - 사용자 프레임이 없어도 `runcode` 안이면(= `active`가 있으면) 사용자 코드가 정지한 채 실행 중이다: `interrupt_idle()`로
 #   깨운다. `asyncio.run`·`run_until_complete`·`run_sync` 대기는 JSPI로 사용자 스택이 정지하고, top-level await 대기는
-#   콘솔 task가 멈춰 있어 폴링이 사용자 프레임 없는 콜백에서 일어난다(TRP-020).
+#   콘솔 task가 멈춰 있어 폴링이 사용자 프레임 없는 콜백에서 일어난다(TRP-020). 깨우기는 핸들러 자리에서 하지 않고
+#   `call_soon`으로 한 틱 미룬다: 핸들러는 asyncio 콜백의 bytecode 사이에서 돌아, 그 자리의 Task 취소가 콜백의
+#   검사-설정(`_set_result_unless_cancelled`)을 깨뜨린다. 이미 깨운 대기가 있으면 미루지 않고 `pending`만 세운다
+#   (그 대기가 올릴 KeyboardInterrupt에 합친다).
 # - 그 밖(트레이스백 생성 중, 다음 문장 컴파일 중, 시작 코드)에는 버린다.
 # - `formattraceback`은 가장 안쪽 프레임이 우리 코드일 때만(핸들러·래퍼·조각에서 시작한 예외, 핸들러 실행 중에 또
 #   눌림이 도착하면 핸들러 프레임이 겹치므로 안쪽 하나만 자르면 샌다) 첫 우리 프레임부터 안쪽 전부를 자르고, 자른
@@ -127,9 +130,27 @@ def install(console, ack, seq, warn, extra_own_codes=()):
             if f.f_code.co_filename == user_filename:
                 signal.default_int_handler(signum, frame)
             f = f.f_back
-        # 사용자 프레임이 없다. 사용자 코드가 실행 중이면(정지한 대기, await 중) 그 실행을 깨운다. 깨울 수 없는 순간이면
-        # 재개하는 run_sync 래퍼가 올리도록 표시한다. 실행 중이 아니면 다음 문장 컴파일·트레이스백 생성·시작 코드 중이므로 버린다.
-        if not interrupt_idle() and active is not None:
+        # 사용자 프레임이 없다. 실행 중이 아니면 다음 문장 컴파일·트레이스백 생성·시작 코드 중이므로 버린다.
+        if active is None:
+            return
+        if woken:
+            # 이미 깨운 대기가 곧 사용자 스택에서 KeyboardInterrupt를 올린다. 이 눌림은 그것에 합친다(같은 raise가
+            # pending을 지운다). 미루면 미룬 콜백이 그 전달 뒤에 돌아 KeyboardInterrupt를 한 번 더 만든다.
+            pending = True
+            return
+        # 사용자 코드가 실행 중이면(정지한 대기, await 중) 그 실행을 깨우되 이 자리에서 취소하지 않고 한 틱 미룬다.
+        # 핸들러는 asyncio 콜백의 bytecode 사이에서 돈다: 예를 들어 `_set_result_unless_cancelled`의 `cancelled()` 검사와
+        # `set_result()` 사이에서 대기 Task를 취소하면 그 sleep future가 취소된 뒤 `set_result`가 InvalidStateError를
+        # 내고 WebLoop가 그것을 stderr에 찍는다. WebLoop의 call_soon은 공유 큐 없이 JS에 예약만 해 여기서 불러도 안전하다.
+        active.get_loop().call_soon(interrupt_deferred, active)
+
+    def interrupt_deferred(task):
+        """핸들러가 미룬 규칙 ③. 그 사이 실행이 끝났거나 바뀌었으면 버린다. 깨울 수 없는 순간이면 재개하는 run_sync
+        래퍼가 올리도록 표시한다."""
+        nonlocal pending
+        if active is not task:
+            return
+        if not interrupt_idle():
             pending = True
 
     own_codes = {sigint_handler.__code__, *extra_own_codes}

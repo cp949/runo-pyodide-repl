@@ -69,9 +69,9 @@ type Runner = Awaited<ReturnType<typeof setup>>;
 
 interface Outcome {
   /**
-   * `interruptIdle()`이 깨울 것을 찾았는지. **경합이 있어 참을 단언하지 않는다**: SIGINT를 쓴 뒤 Python으로 들어가는
-   * 그 호출에서 pyodide 폴링이 먼저 일어나면 핸들러 규칙 ③이 대기를 깨우고, 그 뒤에 도는 `interrupt_idle` 본문은
-   * 깨울 것이 남지 않아 거짓을 돌려준다. 어느 쪽이든 깨어나고 ack는 정확히 한 번 오른다(슬롯으로 단언한다).
+   * `interruptIdle()`이 깨울 것을 찾았는지. **경합이 있어 참을 단언하지 않는다**: 핸들러 규칙 ③이 한 틱 미뤄 둔
+   * 깨우기가 먼저 돌았으면 `interrupt_idle` 본문은 깨울 것이 남지 않아 거짓을 돌려준다. 어느 쪽이든 깨어나고 ack는
+   * 정확히 한 번 오른다(슬롯으로 단언한다).
    */
   woke: boolean;
   /** 제출을 시작한 시각부터 끝날 때까지의 ms. 깨우기는 그중 `wakeAt`에 일어난다. */
@@ -466,6 +466,93 @@ describe("SIGINT 핸들러 보완(타이머 없음)", () => {
       /sigint_handler|<sigint-handler>|run_sync|guard|WOKEN/,
     );
     await presser.done();
+  }, 20_000);
+});
+
+// 폴링이 SIGINT를 처리하는 bytecode 위치는 폴링 위상에 달려 자연 재현율이 0%~67%로 흔들린다. 그래서 경합 지점에
+// `press(); signal.raise_signal(SIGINT)`를 끼워 그 인터리빙을 결정적으로 만든다. 주입 코드는 `<test>` 파일명이라
+// 사용자 프레임이 아니다(핸들러가 규칙 ③으로 간다).
+describe("asyncio 콜백 경합 지점에서 처리된 SIGINT(주입)", () => {
+  // `asyncio.sleep`의 타이머 콜백 `_set_result_unless_cancelled`는 `fut.cancelled()` 검사와 `fut.set_result()` 사이가
+  // 원자적이라고 가정한다. 그 사이에서 처리된 SIGINT가 대기 Task를 그 자리에서 취소하면 sleep future가 취소된 뒤
+  // `set_result`가 `InvalidStateError`를 내고 WebLoop가 그것을 stderr에 찍는다.
+  it("sleep 타이머 콜백의 검사 통과 직후 처리된 SIGINT도 표준 트레이스백만 남긴다", async () => {
+    const runner = await setup();
+    pyodide.runPython(
+      `import asyncio.futures, signal
+_sruc_original = asyncio.futures._set_result_unless_cancelled
+_sruc_hits = []
+
+def _sruc_pressing(fut, result):
+    # 원본과 같은 본문에 "검사 통과 뒤 눌림 처리" 한 지점만 끼운다(첫 호출에서 한 번).
+    if fut.cancelled():
+        return
+    if not _sruc_hits:
+        _sruc_hits.append(1)
+        press()
+        signal.raise_signal(signal.SIGINT)
+    fut.set_result(result)
+
+asyncio.futures._set_result_unless_cancelled = _sruc_pressing
+`,
+      { globals: pyodide.globals, filename: "<test>" },
+    );
+
+    try {
+      expect(await runner.run("run_sync(asyncio.sleep(0.01))")).toEqual(READY);
+    } finally {
+      pyodide.runPython(
+        "import asyncio.futures\nasyncio.futures._set_result_unless_cancelled = _sruc_original",
+        { globals: pyodide.globals, filename: "<test>" },
+      );
+    }
+
+    // 주입 지점을 실제로 지났는지(지나지 않았으면 이 시험은 아무것도 보지 않은 것이다).
+    expect(pyodide.runPython("len(_sruc_hits)", { globals: pyodide.globals })).toBe(1);
+    expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
+  }, 20_000);
+
+  // 감시 타이머가 이미 깨운 대기가 취소 처리(finally)를 도는 동안 새 SIGINT가 콜백에서 처리되면, 그 눌림은 곧 올라갈
+  // KeyboardInterrupt에 합쳐져야 한다. 핸들러가 이것까지 한 틱 미루면 미룬 콜백이 KeyboardInterrupt 전달 뒤에 돌아
+  // 다음 run_sync에서 KeyboardInterrupt를 한 번 더 올린다(이중 반영).
+  it("감시 타이머가 깨운 대기의 취소 처리 중 소비된 SIGINT는 KeyboardInterrupt를 한 번 더 만들지 않는다", async () => {
+    const runner = await setup();
+    pyodide.runPython(
+      `import asyncio, signal
+
+def _late_press():
+    press()
+    signal.raise_signal(signal.SIGINT)
+
+async def woken_waiter():
+    try:
+        await asyncio.sleep(5)
+    finally:
+        # 깨운 대기의 취소 처리 중에 다음 콜백으로 눌림을 예약한다: guard가 WOKEN으로 끝나 래퍼가 재개하기 전에 처리된다.
+        asyncio.get_event_loop().call_soon(_late_press)
+`,
+      { globals: pyodide.globals, filename: "<test>" },
+    );
+    const program = [
+      "n = 0",
+      "try:",
+      "    run_sync(woken_waiter())",
+      "except KeyboardInterrupt:",
+      "    n += 1",
+      "deadline = time.monotonic() + 1",
+      "while time.monotonic() < deadline:",
+      "    try:",
+      "        run_sync(asyncio.sleep(0.05))",
+      "    except KeyboardInterrupt:",
+      "        n += 1",
+    ].join("\n");
+    const wake = runner.wakeAfter(WAKE_AT_MS);
+
+    expect(await runner.run(execSource(program))).toEqual(READY);
+
+    await wake;
+    expect(pyodide.globals.get("n")).toBe(1);
+    expect(runner.screen.stderr).toBe("");
   }, 20_000);
 });
 
