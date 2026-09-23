@@ -250,6 +250,27 @@ export class State {
     this.refresh();
   }
 
+  /**
+   * 커서 위치(line.pos)만 되돌린다. `printAbove`가 원시 텍스트를 쓰기 전 물리적 커서를 버퍼 끝으로
+   * 옮기려고 부른 `moveCursorToEnd()`는 논리 위치도 함께 옮기므로, 재그리기 직전 이 메서드로 원래
+   * 위치를 되돌린 뒤 `refresh()`를 한 번 더 부르면 그 위치로 다시 그려진다. escape 쓰기는 하지
+   * 않는다(뒤이은 refresh() 한 번이면 충분해 State를 다시 만들 필요가 없다, TRP-030 회피).
+   */
+  public restoreCursor(pos: number) {
+    this.line.pos = pos;
+  }
+
+  /**
+   * printAbove가 원시 텍스트를 쓴 뒤 새 앵커를 기준으로 한 새 레이아웃에서 다시 그리도록,
+   * `moveCursorToEnd()`가 남긴 옛 레이아웃(옛 커서 행)을 0으로 되돌린다. `tty.clearScreen()`은
+   * 부르지 않는다(화면을 지우지 않음, 리뷰 repro D 검증).
+   */
+  public resetLayout(): void {
+    this.layout.cursor = new Position();
+    this.layout.end = new Position();
+    this.layout.scrollOffset = 0;
+  }
+
   public previousHistory() {
     if (this.history.cursor === -1 && this.line.length() > 0) {
       return;

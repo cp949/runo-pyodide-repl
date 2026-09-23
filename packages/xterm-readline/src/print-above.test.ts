@@ -1,0 +1,248 @@
+/**
+ * 벤더 `Readline.printAbove(text)` 시험(DELTA-01). 계약(`_works/20260923-16-rd-015-tab-completion/
+ * DELTA-01.md`, 그릴링 확정 2·7): 활성 읽기 중에는 커서를 버퍼 끝으로 옮겨 원시 텍스트를 쓰고,
+ * `term.write("", cb)` 콜백에서 앵커를 갱신한 뒤 원래 커서로 되돌려 같은 State를 다시 그린다.
+ * 재그리기 중 들어온 키는 큐에 쌓았다가 콜백 뒤 순서대로 재생한다. 활성 읽기가 없으면 `println`과
+ * 같고, dispose 뒤 늦게 도착한 콜백은 아무것도 하지 않는다.
+ * DELTA-01a: 다중 행(감김·`\n` 포함 블록) 재그리기가 옛 레이아웃 기준으로 화면을 지우는 버그와,
+ * `cancelRead()`가 재그리기 콜백보다 먼저 끝났을 때 죽은 입력줄을 다시 그리는 경합을 막는 시험을
+ * 더한다(`resetLayout()`·`activeRead` 가드).
+ */
+import { describe, expect, test } from "vitest";
+import { Readline } from "./readline";
+import { VTerm } from "./vterm";
+
+/**
+ * write 콜백을 기본은 동기로 돌리는 스텁. `asyncWrite`를 true로 켜면 그 뒤 write 콜백이 `flush()`
+ * 때까지 미뤄져 실제 xterm의 비동기 파싱(재그리기 중 키 큐)을 흉내낸다. `cursorYReads`로 해제된
+ * 터미널의 buffer에 접근했는지 본다(TRP-004와 같은 방어).
+ */
+class StubTerminal {
+  public cols: number;
+  public rows: number;
+  public options = { tabStopWidth: 8 } as { tabStopWidth?: number };
+  public asyncWrite = false;
+  public cursorYReads = 0;
+  public buffer = {
+    active: {
+      get cursorY() {
+        this.parent.cursorYReads += 1;
+        return this.parent.vt.cursor()[0];
+      },
+      parent: null as unknown as StubTerminal,
+    },
+  };
+  public vt: VTerm;
+  private onDataHandlers: ((data: string) => void)[] = [];
+  private queue: (() => void)[] = [];
+
+  constructor(cols: number, rows: number) {
+    this.cols = cols;
+    this.rows = rows;
+    this.vt = new VTerm(cols, rows);
+    this.buffer.active.parent = this;
+  }
+
+  onData(handler: (data: string) => void) {
+    this.onDataHandlers.push(handler);
+    return { dispose: () => {} };
+  }
+
+  onResize(_handler: (size: { cols: number; rows: number }) => void) {
+    return { dispose: () => {} };
+  }
+
+  attachCustomKeyEventHandler(_fn: (event: KeyboardEvent) => boolean) {
+    return;
+  }
+
+  write(text: string, cb?: () => void) {
+    this.vt.write(text);
+    if (!cb) return;
+    if (this.asyncWrite) {
+      this.queue.push(cb);
+    } else {
+      cb();
+    }
+  }
+
+  /** 미뤄 둔 write 콜백을 순서대로 실행한다. */
+  flush() {
+    for (const cb of this.queue.splice(0)) cb();
+  }
+
+  /** 키 입력 한 번을 흘린다. 여러 글자를 한 번에 넣으면 붙여넣기 경로로 가므로 한 글자씩 부른다. */
+  feed(data: string) {
+    for (const handler of this.onDataHandlers) handler(data);
+  }
+
+  /** 문자열을 코드포인트 단위로 하나씩 타이핑한다. */
+  type(text: string) {
+    for (const ch of text) this.feed(ch);
+  }
+}
+
+function setup(cols = 20, rows = 8) {
+  const term = new StubTerminal(cols, rows);
+  const readline = new Readline({ persist: false });
+  readline.activate(term as unknown as Parameters<Readline["activate"]>[0]);
+  return { term, readline };
+}
+
+const ARROW_LEFT = "\x1b[D";
+
+describe("printAbove", () => {
+  test("활성 읽기 중 printAbove는 텍스트를 입력줄 위에 쓰고 버퍼·커서를 유지한다", () => {
+    const { term, readline } = setup();
+    void readline.read("> ");
+    term.type("abc");
+    term.feed(ARROW_LEFT);
+
+    readline.printAbove("x  y");
+
+    expect(term.vt.screen()).toBe("> abc\nx  y\n> abc");
+    expect(readline.getLine()).toBe("abc");
+    expect(readline.getCursor()).toBe(2);
+
+    term.type("Z");
+    expect(readline.getLine()).toBe("abZc");
+  });
+
+  test("재그리기 중 들어온 키는 순서대로 재생된다", () => {
+    const { term, readline } = setup();
+    void readline.read("> ");
+    term.type("abc");
+    term.feed(ARROW_LEFT);
+
+    // 이 시점부터 write 콜백을 미뤄 printAbove의 재그리기가 끝나기 전 상태를 관찰한다.
+    term.asyncWrite = true;
+    readline.printAbove("x");
+    const bufferBeforeFlush = readline.getLine();
+    term.type("12");
+    const bufferWhileQueued = readline.getLine();
+
+    term.flush();
+
+    expect(bufferBeforeFlush).toBe("abc");
+    expect(bufferWhileQueued).toBe("abc");
+    // 커서 2 기준으로 "12"가 순서대로 끼어든다: "ab" + "12" + "c".
+    expect(readline.getLine()).toBe("ab12c");
+  });
+
+  test("커서 끝·이모지 버퍼에서도 커서가 유지된다", () => {
+    {
+      // 커서가 이미 버퍼 끝: moveCursorToEnd()가 조기 반환하는 경로.
+      const { term, readline } = setup();
+      void readline.read("> ");
+      term.type("a😀b");
+
+      readline.printAbove("x");
+
+      expect(readline.getCursor()).toBe(4); // UTF-16 인덱스: a(1) + 😀(2) + b(1)
+      term.type("!");
+      expect(readline.getLine()).toBe("a😀b!");
+    }
+    {
+      // 커서를 이모지 앞으로 옮긴 경우: moveCursorToEnd()가 실제로 옮겼다가 되돌리는 경로.
+      const { term, readline } = setup();
+      void readline.read("> ");
+      term.type("a😀b");
+      term.feed(ARROW_LEFT);
+      term.feed(ARROW_LEFT);
+
+      readline.printAbove("x");
+
+      expect(readline.getCursor()).toBe(1);
+      term.type("!");
+      expect(readline.getLine()).toBe("a!😀b");
+    }
+  });
+
+  test("활성 읽기가 없으면 println과 같다", () => {
+    const { term, readline } = setup();
+
+    expect(() => readline.printAbove("x")).not.toThrow();
+
+    expect(term.vt.screen()).toBe("x");
+  });
+
+  test("dispose 뒤 도착한 콜백은 아무것도 하지 않는다", () => {
+    const { term, readline } = setup();
+    void readline.read("> ").catch(() => {});
+    term.type("abc");
+
+    term.asyncWrite = true;
+    readline.printAbove("x");
+    const cursorYReadsBeforeDispose = term.cursorYReads;
+    readline.dispose();
+
+    expect(() => term.flush()).not.toThrow();
+    // 해제된 터미널의 buffer(cursorY)를 다시 읽지 않는다(TRP-004).
+    expect(term.cursorYReads).toBe(cursorYReadsBeforeDispose);
+  });
+
+  // DELTA-01a: 재그리기가 moveCursorToEnd()가 남긴 옛 레이아웃(옛 커서 행) 기준으로 위로 올라가
+  // 방금 찍은 텍스트나 입력줄 일부를 \x1b[J로 지우는 버그(리뷰 repro A~D 이식).
+  test("블록 입력(여러 논리 줄)에서 재그리기 뒤에도 입력줄이 남는다", () => {
+    const { term, readline } = setup(40, 10);
+    void readline.read(">>> ");
+    readline.editInsert("for x in y:\n    x.");
+
+    readline.printAbove("x.a  x.b");
+
+    // 재그리기 뒤에도 버퍼가 소실되지 않는다.
+    expect(readline.getLine()).toBe("for x in y:\n    x.");
+    expect(term.vt.screen()).toBe(
+      ">>> for x in y:\n    x.\nx.a  x.b\n>>> for x in y:\n    x."
+    );
+
+    term.type("a");
+    expect(readline.getLine()).toBe("for x in y:\n    x.a");
+  });
+
+  test("3행 블록에서도 옛 줄이 지워지지 않는다", () => {
+    const { term, readline } = setup(40, 10);
+    void readline.read(">>> ");
+    readline.editInsert("if a:\n  if b:\n    x.");
+
+    readline.printAbove("x.a  x.b");
+
+    // 목록뿐 아니라 옛 입력의 마지막 행까지 지워지는 회귀를 막는다.
+    expect(readline.getLine()).toBe("if a:\n  if b:\n    x.");
+    expect(term.vt.screen()).toBe(
+      ">>> if a:\n  if b:\n    x.\nx.a  x.b\n>>> if a:\n  if b:\n    x."
+    );
+  });
+
+  test("감긴 단일 행(cols 작음)에서도 입력줄이 남는다", () => {
+    const { term, readline } = setup(8, 8);
+    void readline.read("> ");
+    term.type("abcdefgh");
+
+    readline.printAbove("LIST");
+
+    expect(readline.getLine()).toBe("abcdefgh");
+    expect(term.vt.screen()).toBe("> abcdef\ngh\nLIST\n> abcdef\ngh");
+  });
+
+  test("cancelRead()가 재그리기 콜백보다 먼저 오면 입력줄을 다시 그리지 않는다", () => {
+    const { term, readline } = setup(40, 10);
+    void readline.read(">>> ").catch(() => {});
+    term.type("abc");
+
+    // write 콜백을 flush()까지 미뤄, printAbove의 재그리기 콜백이 도착하기 전에
+    // cancelRead()가 먼저 끝나는 경합을 흉내낸다.
+    term.asyncWrite = true;
+    readline.printAbove("L");
+    readline.cancelRead();
+    readline.println("[reset]");
+    term.flush();
+
+    // 죽은 입력줄("abc")이 [reset] 아래에 다시 그려지지 않는다.
+    const screen = term.vt.screen();
+    const resetIndex = screen.indexOf("[reset]");
+    expect(resetIndex).toBeGreaterThan(-1);
+    expect(screen.slice(resetIndex)).not.toContain("abc");
+    expect(screen).toBe(">>> abc\nL\n[reset]");
+  });
+});
