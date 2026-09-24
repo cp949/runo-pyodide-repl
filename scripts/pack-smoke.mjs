@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// tarball 스모크: xterm-readline·core·terminal·repl을 `pnpm pack`으로 묶어 저장소 밖 임시 소비자 프로젝트에 설치하고 실제로 쓸 수 있는지 본다.
-//   1. 네 패키지 `pnpm pack`, tarball 안 package.json에 `workspace:`·`catalog:`가 남지 않았는지, core에 optional peer `pyodide`가
+// tarball 스모크: xterm-readline·core·terminal·repl·react를 `pnpm pack`으로 묶어 저장소 밖 임시 소비자 프로젝트에 설치하고 실제로 쓸 수 있는지 본다.
+//   1. 다섯 패키지 `pnpm pack`, tarball 안 package.json에 `workspace:`·`catalog:`가 남지 않았는지, core에 optional peer `pyodide`가
 //      있는지 확인
-//   2. 임시 소비자(`file:` 4개 + 작업공간 파일 `overrides`로 내부 패키지 고정 + `@xterm/xterm`·`pyodide`) `pnpm install`
-//   3. node ESM `import`(네 패키지의 공개 진입점 `.`·`./worker`·`./internal`)
+//   2. 임시 소비자(`file:` 5개 + 작업공간 파일 `overrides`로 내부 패키지 고정 + `@xterm/xterm`·`react`·`react-dom`·`pyodide`) `pnpm install`
+//   3. node ESM `import`(다섯 패키지의 공개 진입점 `.`·`./worker`·`./internal`)
 //   4. `tsc --noEmit`(`skipLibCheck: false`로 배포된 `.d.mts`의 타입 해석까지 검사)
 //   5. 설치된 트리에 `coincident`·`reflected-ffi` 없음(lockfile·`.pnpm` 디렉터리·설치된 dist 문자열)
 // 사용: pnpm smoke:pack (= pnpm build && node scripts/pack-smoke.mjs). 약 1분, L0 수동 실행이며 `pnpm test`·turbo 기본
-// 파이프라인에는 넣지 않는다. 네트워크가 필요하다(`@xterm/xterm`·`string-width`·`typescript`·`pyodide`를 레지스트리에서 받는다,
+// 파이프라인에는 넣지 않는다. 네트워크가 필요하다(`@xterm/xterm`·`@xterm/addon-fit`·`react`·`react-dom`·`string-width`·`typescript`·`pyodide`를 레지스트리에서 받는다,
 // `--prefer-offline`이라 pnpm 저장소에 있으면 다시 받지 않는다).
 // 환경 변수: SMOKE_TMPDIR(임시 폴더를 만들 상위 경로, 기본 os.tmpdir()), KEEP=1(성공해도 임시 폴더를 지우지 않음).
 // 임시 폴더는 성공하면 지운다. 실패하면 원인 조사용으로 남기고 경로를 출력한다.
@@ -27,6 +27,7 @@ const PACKAGES = [
   { name: "@cp949/runo-pyodide-core", dir: "packages/pyodide-core" },
   { name: "@cp949/runo-pyodide-terminal", dir: "packages/pyodide-terminal" },
   { name: "@cp949/runo-pyodide-repl", dir: "packages/pyodide-repl" },
+  { name: "@cp949/runo-pyodide-react", dir: "packages/pyodide-react" },
 ];
 
 /** 소비자가 import해서 존재를 확인할 공개 진입점과 기대 export(이름 → typeof). */
@@ -82,6 +83,8 @@ const ENTRY_POINTS = [
     { createRepl: "function", DEFAULT_PYODIDE_INDEX_URL: "string" },
   ],
   ["@cp949/runo-pyodide-repl/worker", { runReplWorker: "function" }],
+  // react 패키지는 골격 단계라 export가 없다(import만 확인). 컴포넌트·hook이 생기면 이름을 채운다.
+  ["@cp949/runo-pyodide-react", {}],
 ];
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -126,10 +129,17 @@ const tarballName = (name, version) =>
 async function main(tmp) {
   // 소비자 설치에 쓰는 외부 버전은 저장소 매니페스트가 원천이다(스모크가 따로 정하지 않는다).
   const rootManifest = readJson(join(ROOT, "package.json"));
+  const reactManifest = readJson(
+    join(ROOT, "packages/pyodide-react/package.json"),
+  );
   const versions = {
     pyodide: readCatalogVersion("pyodide"),
     xterm: readJson(join(ROOT, "packages/pyodide-repl/package.json"))
       .devDependencies["@xterm/xterm"],
+    // react 패키지는 react·react-dom을 peer로만 선언하므로 소비자가 직접 설치한다(버전은 react 패키지 devDependencies가 원천).
+    react: reactManifest.devDependencies.react,
+    reactDom: reactManifest.devDependencies["react-dom"],
+    typesReact: reactManifest.devDependencies["@types/react"],
     typescript: rootManifest.devDependencies.typescript,
     packageManager: rootManifest.packageManager,
   };
@@ -140,7 +150,7 @@ async function main(tmp) {
       throw new Error(`${dir}/dist가 없다. 먼저 pnpm build를 실행한다`);
   }
 
-  step("pnpm pack 4개");
+  step("pnpm pack 5개");
   const tarballDir = join(tmp, "tarballs");
   await mkdir(tarballDir);
   const tarballs = {};
@@ -225,6 +235,8 @@ async function main(tmp) {
             internalNames.map((name) => [name, fileDep(name)]),
           ),
           "@xterm/xterm": versions.xterm,
+          react: versions.react,
+          "react-dom": versions.reactDom,
           // core `worker.d.mts`가 `pyodide`·`pyodide/ffi` 타입을 import한다(core는 pyodide를 배포 의존으로 선언하지 않는다).
           pyodide: versions.pyodide,
         },
@@ -233,6 +245,7 @@ async function main(tmp) {
         devDependencies: {
           typescript: versions.typescript,
           "@types/node": "24",
+          "@types/react": versions.typesReact,
           "@types/emscripten": "^1.41.4",
         },
       },
@@ -277,12 +290,13 @@ async function main(tmp) {
       `import { createTerminalRunner, type TerminalRunnerHandle, type TerminalRunnerOptions } from "@cp949/runo-pyodide-terminal";`,
       `import { createRepl, type ReplHandle, type ReplOptions } from "@cp949/runo-pyodide-repl";`,
       `import { runReplWorker } from "@cp949/runo-pyodide-repl/worker";`,
+      `import * as reactPackage from "@cp949/runo-pyodide-react";`,
       `import type { PyodideInterface } from "pyodide";`,
       ``,
       `// core worker 타입이 소비자의 pyodide 타입으로 해석되는지(any로 무너지지 않는지) 본다.`,
       `const makeConsole: (pyodide: PyodideInterface) => PyodideConsoleProxy = (pyodide) =>`,
       `  createCoreConsole(pyodide, { write() {}, writeError() {} } as never);`,
-      `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createTerminalSinks, createTerminalRunner, createRepl, runReplWorker];`,
+      `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createTerminalSinks, createTerminalRunner, createRepl, runReplWorker, reactPackage];`,
       `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, TerminalRunnerHandle, TerminalRunnerOptions, ReplHandle, ReplOptions];`,
       ``,
     ].join("\n"),
@@ -311,7 +325,7 @@ async function main(tmp) {
   step("pnpm install (소비자)");
   run("pnpm", ["install", "--prefer-offline"], consumer);
 
-  step("node ESM import (공개 진입점 7개)");
+  step("node ESM import (공개 진입점 8개)");
   run("node", ["check.mjs"], consumer);
 
   step("tsc --noEmit (skipLibCheck: false)");
