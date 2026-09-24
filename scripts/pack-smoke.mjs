@@ -83,8 +83,11 @@ const ENTRY_POINTS = [
     { createRepl: "function", DEFAULT_PYODIDE_INDEX_URL: "string" },
   ],
   ["@cp949/runo-pyodide-repl/worker", { runReplWorker: "function" }],
-  // react 패키지는 골격 단계라 export가 없다(import만 확인). 컴포넌트·hook이 생기면 이름을 채운다.
-  ["@cp949/runo-pyodide-react", {}],
+  // 컴포넌트(`PythonRunner`·`PythonRepl`)는 DELTA-03·04에서 추가하며 이름을 채운다.
+  [
+    "@cp949/runo-pyodide-react",
+    { usePythonRunner: "function", RunRejectedError: "function" },
+  ],
 ];
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -291,13 +294,14 @@ async function main(tmp) {
       `import { createRepl, type ReplHandle, type ReplOptions } from "@cp949/runo-pyodide-repl";`,
       `import { runReplWorker } from "@cp949/runo-pyodide-repl/worker";`,
       `import * as reactPackage from "@cp949/runo-pyodide-react";`,
+      `import type { UsePythonRunnerOptions, UsePythonRunnerResult } from "@cp949/runo-pyodide-react";`,
       `import type { PyodideInterface } from "pyodide";`,
       ``,
       `// core worker 타입이 소비자의 pyodide 타입으로 해석되는지(any로 무너지지 않는지) 본다.`,
       `const makeConsole: (pyodide: PyodideInterface) => PyodideConsoleProxy = (pyodide) =>`,
       `  createCoreConsole(pyodide, { write() {}, writeError() {} } as never);`,
       `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createTerminalSinks, createTerminalRunner, createRepl, runReplWorker, reactPackage];`,
-      `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, TerminalRunnerHandle, TerminalRunnerOptions, ReplHandle, ReplOptions];`,
+      `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, TerminalRunnerHandle, TerminalRunnerOptions, ReplHandle, ReplOptions, UsePythonRunnerOptions, UsePythonRunnerResult];`,
       ``,
     ].join("\n"),
   );
