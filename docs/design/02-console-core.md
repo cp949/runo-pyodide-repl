@@ -206,7 +206,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 
 ### 5.6.4 정착 시점
 
-`runSource` Promise는 worker 결말이 도착하고 보존한 줄로 다음 `>>> ` 읽기가 화면에 그려진 뒤에 resolve한다. main은 REPL reader가 `readline.read()`를 연 직후 `terminal.write("", callback)`를 하나 더 쓴다. xterm은 쓰기 콜백을 쓰기 순서로 부르고 벤더는 `read()` 안에서 이미 자기 그리기 콜백을 큐에 넣었으므로, 이 콜백은 프롬프트·복원한 줄이 그려지고 쌓인 type-ahead가 재생된 뒤에 온다(동기·비동기 write 두 모드를 시험이 확인). 그 콜백 안에서 type-ahead의 Enter로 읽기가 끝나도 읽기 상태는 마이크로태스크 뒤에 내려가 정착이 유실되지 않는다. 단 xterm DOM 행은 다음 프레임에 그려지므로 결과를 받은 직후 `.xterm-rows`를 읽으면 마지막 행이 없을 수 있다(`docs/traps/TRP-050`).
+`runSource` Promise는 worker 결말이 도착하고 보존한 줄로 다음 `>>> ` 읽기가 화면에 그려진 뒤에 resolve한다. main은 REPL reader가 `readline.read()`를 연 직후 `terminal.write("", callback)`를 하나 더 쓴다. xterm은 쓰기 콜백을 쓰기 순서로 부르고 벤더는 `read()` 안에서 이미 자기 그리기 콜백을 큐에 넣었으므로, 이 콜백은 벤더 그리기 콜백(프롬프트·복원한 줄을 그리는 write를 내고 쌓인 type-ahead를 재생) 뒤에 온다. 그리기 write는 벤더 콜백 안에서 나와 이 콜백보다 뒤에 큐에 서므로, 이 콜백은 `write("", settle)`를 한 번 더 써서 그것들이 처리된 뒤에 정착한다. 정착은 읽기 상태와 무관하다: xterm이 write 처리를 시간 예산(12ms)에서 끊어 콜백 사이에 마이크로태스크가 돌면 type-ahead의 Enter로 복원한 읽기가 이미 끝나 있을 수 있는데, 그 읽기도 그려졌으므로 그 자리에서 정착한다(다음 읽기로 미루면 제출된 명령이 끝날 때까지 resolve하지 않는다). 동기·비동기 write 두 모드와 write를 하나씩 macrotask로 처리하는 모델을 시험이 확인한다(repl `run-source.test.ts` "runSource 정착·정리 경계(사후 리뷰)"). 단 xterm DOM 행은 다음 프레임에 그려지므로 결과를 받은 직후 `.xterm-rows`를 읽으면 마지막 행이 없을 수 있다(`docs/traps/TRP-050`).
 
 ### 5.6.5 실행 중 키
 
@@ -224,6 +224,8 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 - **interrupt buffer 재사용**: `reset()`은 옛 worker와 같은 interrupt buffer를 새 세션에 싣는다(`08-session.md` 8.1 2번). 실행 중(`runSource` 포함) `reset()` 직후 첫 Ctrl+C가 아직 종료되지 않은 옛 worker에 가로채일 수 있다(`14-runner.md` 14.3.5, `docs/traps/TRP-049`). REPL에서 재현은 확인하지 않았고 RD-022a는 고치지 않았다(`.scratch/run-driver-terminal-followups/issues/01-*.md`). 브라우저 확인 S08은 `restarted` 뒤 REPL 명령만 돌리고 Ctrl+C 셀이 없어 이 경로에 닿지 않았다.
 - `printAbove` 재그리기 중의 `takeRead()`는 옛 입력줄을 지우지 못한다(`06-editing.md` 6.1). Tab `complete` 왕복 중은 `busy`로 거부하므로 실경로에서 닿지 않는다.
 - 꼬리 다시 쓰기는 꼬리가 `\r`로 덮어쓴 텍스트를 가진 경우 화면과 꼬리 추적기(마지막 `\r` 뒤만 보관)가 어긋날 수 있다. 관찰한 적은 없다.
+- **열린 읽기 위의 배경 출력**: 프롬프트가 열린 채 배경 task의 출력(`>>> pri` 뒤 `tick\n`)이 오면 벤더 레이아웃이 모르는 커서 이동이라 `takeRead()`가 프롬프트 행을 찾지 못하고 `>>> pritick` 행이 남는다. 뿌리는 열린 읽기 위 출력의 조율 부재(기존 결함)이고 평소 편집 재그리기도 같은 식으로 어긋난다(`.scratch/repl-run-source-followups/issues/07-*.md`).
+- **`reset()` 중 worker 생성 실패**: 새 `createWorker()`가 던지면 `reset()`은 기존대로 그 예외를 던지고, 실행 중이던 `runSource`는 `restarted`로 끝난다(`dispose()` 정리 중 예외도 `disposed`로 끝난다). 그 뒤 상태는 옛 값으로 남고 옛 세션을 가리켜 `runSource`는 `busy`로 거부된다. runner처럼 `crashed`로 넘길지는 미정이다(`.scratch/repl-run-source-followups/issues/08-*.md`).
 - 브라우저 셀이 없는 경로: 뷰포트 초과 입력, `loading` 중 호출, Tab 왕복 중 호출, 크래시 중 호출, 리셋 뒤 Ctrl+C. 앞의 넷은 jsdom·node 시험이 고정한다.
 
 ### 5.6.8 시험과 확인
