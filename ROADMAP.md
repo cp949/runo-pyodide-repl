@@ -801,11 +801,19 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 
 상태: 대기 · 이전: 없음 · 설계: ADR-0006, `08-session.md`(이중 마운트)
 
-`packages/pyodide-react`에 `<PythonRunner ref>`(handle `run`·`stop`·`reset`, props `createWorker`·`indexURL?`·`inputProvider?`·`onStatus`·`onOutput?`·`terminalOptions?`)와 `<PythonRepl ref>`(handle `runSource`(RD-022a)·`reset`), 저수준 `usePythonRunner`를 둔다. 컴포넌트가 xterm 생성·FitAddon 리사이즈·dispose·StrictMode 이중 마운트를 처리하고, `inputProvider`를 생략하면 xterm 줄 입력이다. React 19 ref-as-prop. iframecall 어댑터는 넣지 않는다(앱 계층). demo는 이 패키지로 옮긴다.
+`packages/pyodide-react`(`@cp949/runo-pyodide-react`, 진입점 `.` 하나)에 `<PythonRunner ref>`(handle `run`·`stop`·`reset`, props `createWorker`·`indexURL?`·`inputProvider?`·`onStatus`·`onOutput?`·`terminalOptions?`)와 `<PythonRepl ref>`(handle `runSource`(RD-022a)·`reset`), 저수준 `usePythonRunner`를 둔다. 컴포넌트가 xterm 생성·FitAddon 리사이즈·dispose·StrictMode 이중 마운트를 처리하고, `inputProvider`를 생략하면 xterm 줄 입력이다. React 19 ref-as-prop. iframecall 어댑터는 넣지 않는다(앱 계층). demo는 이 패키지로 옮긴다.
 
-시나리오: React 19 StrictMode 앱에서 `<PythonRepl>`을 마운트하면 worker가 하나만 살아 있고, 창 크기를 바꾸면 터미널이 맞춰진다. `ref.current.run(code)`가 실행창에서 실행된다.
+그릴링 확정(2026-09-25): 위 props·handle에 더해 하위 API(`createTerminalRunner`·`createRepl`)의 옵션·핸들을 전부 통과시키고(`filename`·`topLevelAwait`·`clearOnRun`·`copyOnSelect`·`onCopy`·`onCrash`, handle `clear`·`setCopyOnSelect`·`busy`·`status`) handle에 `focus()`를 더한다(`Terminal`은 노출하지 않는다). 콜백은 latest-ref, 생성 옵션은 마운트 때만 읽고 `copyOnSelect`만 반응형이다. `fit?: boolean`(기본 `true`)은 `ResizeObserver`로 맞추고 demo 기본 화면은 `fit={false}`(80×24)다. `usePythonRunner`는 xterm 없이 core `createRunner`를 감싼다: `{ status, run, stop, reset, interrupt, busy }`.
 
-완료 기준: StrictMode 이중 마운트에서 worker 1개(시험), 언마운트 시 worker·Terminal 정리. demo 이전 뒤 RD-020 L1 스크립트와 RD-022 실행창 스크립트가 같은 결과. L2는 사용자 지시 때만.
+시나리오: React 19 StrictMode 앱에서 `<PythonRepl>`을 마운트하면 worker가 하나만 살아 있고, 창 크기를 바꾸면 터미널이 맞춰진다. `<PythonRunner>`의 `ref.current.run(code)`가 실행창에서 실행된다.
+
+완료 기준:
+- StrictMode 이중 마운트에서 살아 있는 worker 1개(시험, worker는 2개 생성되고 1개 terminate), 언마운트 시 worker·Terminal 정리, 인라인 콜백 재렌더에서 worker 수 불변.
+- `fit`: 브라우저 창 크기를 바꾸면 xterm `cols`가 바뀌고 유휴·`input()` 대기 두 상태에서 이후 입력이 정상이다(새 L1 `react-fit-check`). demo 기본 화면은 `fit={false}`라 기존 L1 결과가 바뀌지 않는다.
+- demo 이전 뒤 RD-020 L1 4종(`repl-check`·`ctrl-c`·`stdin-input`·`prompt-cancel`)과 RD-022 `runner-check`(normal·not-isolated)가 같은 결과. handle 통과 확인으로 `run-source`·`session-reset`·`selection-copy`·`tla` 각 1회.
+- 패키지 경계: react 의존 트리에 `coincident`·`reflected-ffi` 없음(시험), `check-dist`·`pnpm smoke:pack`(react tarball 추가) 통과.
+- `usePythonRunner`는 `{ status, run, stop, reset, interrupt, busy }`만 반환한다.
+- L2는 사용자 지시 때만.
 
 ### RD-025 — 저장소에 없는 pty 캡처 도구 복원
 
