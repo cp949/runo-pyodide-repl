@@ -37,6 +37,7 @@ import {
   createStdinCallback,
   installSigintHandler,
   suppressWebLoopReraise,
+  warnDegraded,
 } from "../test/core-internals";
 import { createSubmissionRunner } from "./submission-runner";
 
@@ -290,13 +291,13 @@ function setupConsole() {
   );
   // input() 취소·exit() 시험이 WebLoop 재보고로 처리되지 않은 Promise 거부를 남기지 않도록 worker와 같은 순서로
   // 설치한다(03-ctrl-c.md 2.8).
-  suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
+  suppressWebLoopReraise(pyodide, { report: warnDegraded });
   const buffer = createInterruptBuffer();
   saveRunSync(pyodide);
   installSigintHandler(pyodide, repl.pyconsole, {
     ack: () => acknowledgeInterrupt(buffer),
     seq: () => readRequestSeq(buffer),
-    warn: (message) => console.warn(message),
+    report: warnDegraded,
   });
   pyodide.setInterruptBuffer(buffer);
   connected = buffer;

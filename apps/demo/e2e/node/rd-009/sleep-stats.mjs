@@ -101,7 +101,9 @@ let screen = { stdout: "", stderr: "" };
 let firstStderrAt;
 
 const warnings = [];
-const warn = (message) => {
+// 저하 보고(RD-021 `report(id, detail)`)를 경고 목록에 모은다.
+const report = (id, detail) => {
+  const message = `${id}: ${detail}`;
   warnings.push(message);
   console.warn(message);
 };
@@ -120,13 +122,13 @@ const repl = createConsole(
   { topLevelAwait: false },
 );
 // worker의 부팅 순서와 같게 배선한다(createConsole → suppressWebLoopReraise → connectInterrupts).
-suppressWebLoopReraise(pyodide, { warn });
+suppressWebLoopReraise(pyodide, { report });
 const buffer = createInterruptBuffer();
 connectInterrupts(pyodide, repl.pyconsole, buffer, {
   ack: () => acknowledgeInterrupt(buffer),
   seq: () => readRequestSeq(buffer),
   discard: () => discardPendingInterrupt(buffer),
-  warn,
+  report,
 });
 const runner = createSubmissionRunner(pyodide, repl, {
   writeOutput: (text) => {

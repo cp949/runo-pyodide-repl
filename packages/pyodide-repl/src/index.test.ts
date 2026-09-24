@@ -568,6 +568,14 @@ test("dispose는 호출자가 소유한 Terminal을 dispose하지 않는다", ()
   expect(terminalDispose).not.toHaveBeenCalled();
 });
 
+/** worker가 보내는 `ready` 페이로드(문제 없는 부팅). 필요한 필드만 덮어쓴다. */
+const readyPayload = (overrides: Record<string, unknown> = {}) => ({
+  pyodideVersion: PYODIDE_VERSION,
+  versionMismatch: false,
+  degraded: [],
+  ...overrides,
+});
+
 describe("history 저장", () => {
   test("저장된 history를 복원하지도 덮어쓰지도 않고 메모리에서만 이전 줄을 불러온다", async () => {
     localStorage.setItem("history", JSON.stringify(["old"]));
@@ -835,10 +843,23 @@ describe("격리 페이지의 세션 시작", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const { onStatus, workerRpc } = startSession();
 
-    workerRpc.notify("ready", { pyodideVersion: PYODIDE_VERSION });
+    workerRpc.notify("ready", readyPayload());
     await waitFor(() => onStatus.mock.calls.length === 2);
 
     expect(onStatus.mock.calls.at(-1)).toEqual(["ready"]);
+    expect(info).toHaveBeenCalledWith("[repl] pyodide 준비", PYODIDE_VERSION);
+  });
+
+  test("degraded가 있는 ready 알림은 console.warn 1회와 console.info를 함께 내고 onStatus('ready')로 답한다", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { onStatus, workerRpc } = startSession();
+
+    workerRpc.notify("ready", readyPayload({ degraded: ["compiler-flags"] }));
+    await waitFor(() => onStatus.mock.calls.length === 2);
+
+    expect(onStatus.mock.calls.at(-1)).toEqual(["ready"]);
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(info).toHaveBeenCalledWith("[repl] pyodide 준비", PYODIDE_VERSION);
   });
 
@@ -878,7 +899,7 @@ describe("격리 페이지의 세션 시작", () => {
     const statusCallsAtDispose = onStatus.mock.calls.length;
 
     workerRpc.notify("write", "late");
-    workerRpc.notify("ready", { pyodideVersion: PYODIDE_VERSION });
+    workerRpc.notify("ready", readyPayload());
     await settle();
 
     expect(fakeWorker.terminate).toHaveBeenCalledTimes(1);
@@ -1657,7 +1678,7 @@ describe("reset()(RD-010)", () => {
 
     expect(session.onStatus.mock.calls.at(-1)).toEqual(["loading"]);
 
-    session.workerRpc.notify("ready", { pyodideVersion: "0.28.3" });
+    session.workerRpc.notify("ready", readyPayload());
     await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "ready");
 
     expect(session.onStatus.mock.calls.at(-1)).toEqual(["ready"]);
@@ -1748,7 +1769,7 @@ describe("reset()(RD-010)", () => {
       (s: ReturnType<typeof startResettableSession>) => void
     > = [
       () => {}, // loading(기본 상태, ready 알림 전)
-      (s) => s.workerRpc.notify("ready", { pyodideVersion: "0.28.3" }),
+      (s) => s.workerRpc.notify("ready", readyPayload()),
       (s) => s.workerRpc.notify("sessionTerminated"),
       (s) => s.workerRpc.notify("loadFailed", "실패"),
     ];

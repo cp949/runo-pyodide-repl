@@ -25,6 +25,8 @@ import {
   installSigintHandler,
   installSleepSlice,
   suppressWebLoopReraise,
+  warnDegraded,
+  type ReportDegraded,
 } from "./core-internals";
 import {
   createSubmissionRunner,
@@ -73,8 +75,8 @@ export interface SetupOptions {
   prepare?: (buffer: Int32Array) => void;
   /** 기본 `true`. 거짓이면 `time.sleep` 조각 교체를 하지 않는다(대조·가드 시험용). */
   sleepSlice?: boolean;
-  /** 조각 교체·정지한 실행 깨우기가 건너뛴 이유를 받는다. 기본은 `console.warn`이다. */
-  warn?: (message: string) => void;
+  /** 조각 교체·정지한 실행 깨우기·트레이스백 파일명 가드가 알리는 저하 지점을 받는다. 기본은 `console.warn`이다. */
+  report?: ReportDegraded;
 }
 
 /** `wakeAfter`의 결과. `woke`는 `interruptIdle()`이 깨울 것을 찾았는지다. */
@@ -174,7 +176,7 @@ export function setupConsoleRunner(
     topLevelAwait = false,
     prepare,
     sleepSlice = true,
-    warn = (message: string) => console.warn(message),
+    report = warnDegraded,
   }: SetupOptions = {},
 ): ConsoleRunner {
   const screen = { stdout: "", stderr: "" };
@@ -192,19 +194,19 @@ export function setupConsoleRunner(
   );
   // KeyboardInterrupt를 잡고 계속 도는 프로그램·`except` 밖으로 새는 눌림 시험이 WebLoop 재보고로 처리되지 않은
   // Promise 거부를 남기지 않도록 worker와 같은 순서로 설치한다(03-ctrl-c.md 2.8).
-  suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
+  suppressWebLoopReraise(pyodide, { report: warnDegraded });
   const buffer = createInterruptBuffer();
   prepare?.(buffer);
   saveRunSync(pyodide);
   // 조각 래퍼의 코드 객체를 핸들러의 절단 목록에 넘겨야 하므로 조각 교체가 핸들러보다 먼저다(`connectInterrupts`와 같다).
-  const codes = sleepSlice ? installSleepSlice(pyodide, { warn }) : undefined;
+  const codes = sleepSlice ? installSleepSlice(pyodide, { report }) : undefined;
   const interruptIdle = installSigintHandler(
     pyodide,
     repl.pyconsole,
     {
       ack: () => acknowledgeInterrupt(buffer),
       seq: () => readRequestSeq(buffer),
-      warn,
+      report,
     },
     codes,
   );

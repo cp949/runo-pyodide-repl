@@ -13,7 +13,11 @@ import {
   type ConsoleSinks,
   type PyodideConsoleProxy,
 } from "@cp949/runo-pyodide-core/worker";
-import { setTopLevelAwait } from "./top-level-await";
+import {
+  hasCompilerFlags,
+  setTopLevelAwait,
+  TOP_LEVEL_AWAIT_FLAG,
+} from "./top-level-await";
 import HELPERS_SOURCE from "./console-helpers.py?raw";
 
 // 콘솔 뼈대 타입은 core가 소유한다(`ConsoleSinks`·`PyodideConsoleProxy`·`ConsoleFutureProxy`·`SyntaxCheck`). 이 모듈을 import하던
@@ -52,13 +56,27 @@ export interface ReplConsole {
   pending(): string | undefined;
   /** 미완성 블록을 버린다(`buffer.clear()`). 블록이 없어도 안전하다. */
   clearPending(): void;
-  /** `pyconsole._compile.compiler.flags`에서 `INCOMPLETE_INPUT_FLAGS`를 뺀 값. `split_paste`의 2차 `compile`에 넘긴다. */
+  /**
+   * `pyconsole._compile.compiler.flags`에서 `INCOMPLETE_INPUT_FLAGS`를 뺀 값. `split_paste`의 2차 `compile`에 넘긴다.
+   * 그 경로가 없으면(`compiler-flags` 저하) `TOP_LEVEL_AWAIT_FLAG`(0x2000)로 대체한다.
+   */
   compilerFlags(): number;
+  /**
+   * pyodide 비공개 지점 두 곳의 저하 식별자(RD-021, driver `probe`가 부른다). `compiler-flags`는 생성 때 판정한 값이고
+   * `incomplete-input-message`는 부를 때 독립 콘솔로 `1 +`를 컴파일해 확인한다(실제 콘솔 상태를 바꾸지 않는다). 문제가 없으면 빈 배열.
+   */
+  probe(): string[];
 }
 
 /** `formatted_error`의 마지막 줄이 이것이면 재컴파일로 정규화한다. */
 export const INCOMPLETE_INPUT_MARKER =
   "_IncompleteInputError: incomplete input";
+/** `formatted_error`의 마지막 줄이 `INCOMPLETE_INPUT_MARKER`인가. 정규화와 `probe`의 문구 탐지가 같은 판정을 쓴다. */
+function endsWithIncompleteMarker(formattedError: string): boolean {
+  const lines = formattedError.replace(/\n$/, "").split("\n");
+  return lines[lines.length - 1] === INCOMPLETE_INPUT_MARKER;
+}
+
 /** codeop이 최종 컴파일에서 끄는 두 비트: ALLOW_INCOMPLETE_INPUT(0x4000) | DONT_IMPLY_DEDENT(0x200). */
 export const INCOMPLETE_INPUT_FLAGS = 0x4200;
 
@@ -107,7 +125,10 @@ export function createConsole(
   const consoleModule = pyodide.pyimport("pyodide.console") as PyProxy & {
     BANNER: string;
   };
-  setTopLevelAwait(pyconsole, options.topLevelAwait);
+  // `_compile.compiler.flags`가 없으면 TLA 토글을 건너뛴다: pyodide 기본이 TLA 켬이라 `topLevelAwait: false`는 무시된다(확정 7).
+  // 판정은 `setTopLevelAwait`보다 앞이어야 한다(뒤에서 하면 없는 경로에 쓰거나 던진다).
+  const flagsAvailable = hasCompilerFlags(pyconsole);
+  if (flagsAvailable) setTopLevelAwait(pyconsole, options.topLevelAwait);
   // 별도 namespace(빈 dict)에서 정의해 사용자 globals를 오염시키지 않는다. 함수는 세션 동안 쓰므로 proxy를 유지한다.
   const namespace = pyodide.toPy({}) as PyProxy & {
     get(name: string): unknown;
@@ -127,6 +148,9 @@ export function createConsole(
   const retrieveException = namespace.get("retrieve_exception") as (
     fut: ConsoleFutureProxy,
   ) => void;
+  const incompleteInputMessage = namespace.get("incomplete_input_message") as () =>
+    | string
+    | undefined;
 
   function pending(): string | undefined {
     const buffer = pyconsole.buffer;
@@ -147,8 +171,9 @@ export function createConsole(
     pendingBefore: string | undefined,
     source: string,
   ): string {
-    const lines = raw.replace(/\n$/, "").split("\n");
-    if (lines[lines.length - 1] !== INCOMPLETE_INPUT_MARKER) return raw;
+    // `_compile.compiler.flags`가 없으면 재컴파일 플래그를 만들 수 없어 원문을 돌려준다(`compiler-flags` 저하).
+    if (!flagsAvailable) return raw;
+    if (!endsWithIncompleteMarker(raw)) return raw;
     const whole =
       pendingBefore === undefined ? source : `${pendingBefore}\n${source}`;
     try {
@@ -176,7 +201,23 @@ export function createConsole(
       }
     },
     compilerFlags() {
+      if (!flagsAvailable) return TOP_LEVEL_AWAIT_FLAG;
       return pyconsole._compile.compiler.flags & ~INCOMPLETE_INPUT_FLAGS;
+    },
+    probe() {
+      const degraded: string[] = [];
+      if (!flagsAvailable) degraded.push("compiler-flags");
+      // 문구를 확인할 수 없는 경우(독립 콘솔 push가 던지거나 문법 오류로 끝나지 않음)도 기대와 다른 것으로 본다.
+      let message: string | undefined;
+      try {
+        message = incompleteInputMessage() ?? undefined;
+      } catch {
+        message = undefined;
+      }
+      if (message === undefined || !endsWithIncompleteMarker(message)) {
+        degraded.push("incomplete-input-message");
+      }
+      return degraded;
     },
     async runLine(source, options) {
       const shouldEcho = options?.echo ?? true;

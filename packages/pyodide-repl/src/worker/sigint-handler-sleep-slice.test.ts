@@ -22,7 +22,10 @@ import {
   setupConsoleRunner,
   teardownConsoleRunner,
 } from "../test/sigint-setup";
-import { SLEEP_SLICE_FILENAME } from "../test/core-internals";
+import {
+  SLEEP_SLICE_FILENAME,
+  type ReportDegraded,
+} from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 
@@ -37,14 +40,14 @@ beforeAll(async () => {
 /** 이 시험이 연결한 버퍼. `afterEach`가 떼고 비운다. */
 let connected: Int32Array | undefined;
 
-/** 조각 교체가 건너뛴 이유를 받는 가짜. 가드 시험만 넘겨 쓴다. */
-const warn = vi.fn<(message: string) => void>();
+/** 조각 교체가 알리는 저하 지점을 받는 가짜. 가드 시험만 넘겨 쓴다. */
+const report = vi.fn<ReportDegraded>();
 
 afterEach(() => {
   teardownConsoleRunner(pyodide, connected);
   connected = undefined;
   vi.restoreAllMocks();
-  warn.mockReset();
+  report.mockReset();
   // 조각 래퍼와 가드 시험의 `del time.sleep.__wrapped__`를 한 번에 되돌린다.
   pyodide.runPython(
     "import time\ntime.sleep = _default_sleep\ntime.sleep.__wrapped__ = _default_wrapped",
@@ -399,14 +402,14 @@ def sleep_catch_loop(limit):
 });
 
 describe("설치 가드", () => {
-  it("time.sleep.__wrapped__가 없으면 조각 교체를 건너뛰고 경고한다", async () => {
+  it("time.sleep.__wrapped__가 없으면 조각 교체를 건너뛰고 sleep-slice로 report한다", async () => {
     pyodide.runPython("import time\ndel time.sleep.__wrapped__");
 
-    const { run, screen } = setup({ warn });
+    const { run, screen } = setup({ report });
 
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]![0]).toContain("[sleep-slice]");
-    expect(warn.mock.calls[0]![0]).toContain("time.sleep.__wrapped__");
+    expect(report.mock.calls).toEqual([
+      ["sleep-slice", "time.sleep.__wrapped__"],
+    ]);
     expect(pyodide.runPython("import time\ntime.sleep is _default_sleep")).toBe(
       true,
     );
@@ -415,19 +418,19 @@ describe("설치 가드", () => {
     expect(screen.stderr).toMatch(/KeyboardInterrupt\n$/);
   });
 
-  it("pyodide_js.checkInterrupt가 없으면 조각 교체를 건너뛰고 경고한다", async () => {
+  it("pyodide_js.checkInterrupt가 없으면 조각 교체를 건너뛰고 sleep-slice로 report한다", async () => {
     const original = pyodide.checkInterrupt;
     let runner: ReturnType<typeof setup>;
     Reflect.set(pyodide, "checkInterrupt", undefined);
     try {
-      runner = setup({ warn });
+      runner = setup({ report });
     } finally {
       Reflect.set(pyodide, "checkInterrupt", original);
     }
 
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]![0]).toContain("[sleep-slice]");
-    expect(warn.mock.calls[0]![0]).toContain("pyodide_js.checkInterrupt");
+    expect(report.mock.calls).toEqual([
+      ["sleep-slice", "pyodide_js.checkInterrupt"],
+    ]);
     expect(pyodide.runPython("import time\ntime.sleep is _default_sleep")).toBe(
       true,
     );

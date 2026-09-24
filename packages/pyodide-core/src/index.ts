@@ -2,6 +2,7 @@
 export { postInitFrame } from "./protocol/init-frame";
 export type { InitFrame } from "./protocol/init-frame";
 export { DEFAULT_PYODIDE_INDEX_URL, PYODIDE_VERSION } from "./pyodide-version";
+export type { ReadyPayload } from "./protocol/ready-payload";
 export {
   ACK,
   SEQ,

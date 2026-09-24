@@ -181,8 +181,9 @@ export function createReplMainDriver(
     inputResumed: () => {
       cancelSettling = false;
     },
-    onReady: (pyodideVersion) => {
-      console.info("[repl] pyodide 준비", pyodideVersion);
+    // 호환 경고는 core 세션이 이미 냈다(문제가 있을 때만). 여기서는 버전 정보 로그만 남긴다.
+    onReady: (payload) => {
+      console.info("[repl] pyodide 준비", payload.pyodideVersion);
     },
     // worker는 죽지 않는다. 접두사는 main이 붙이고 빨강 한 줄로 낸다(01-protocols.md 1.2).
     onLoadFailed: (message) => {

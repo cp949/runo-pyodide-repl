@@ -3,6 +3,7 @@
  * 처리·"Python 실행 중" 게이트·종료 수명 주기를 소유하고, driver는 화면 상호작용(REPL의 줄 읽기·입력 읽기·출력 그리기)을 낸다.
  * 이 모양은 REPL이 쓰는 것만 담는다(RD-020, 실행 driver는 RD-022). 공개 API로 문서화하기 전의 내부 계약이다.
  */
+import type { ReadyPayload } from "../protocol/ready-payload";
 import type { RpcHandlers } from "../protocol/rpc";
 
 /** Python이 쓴 stdout·stderr 원문 한 조각. 줄 끝 처리·색은 소비자가 정한다(core는 원문을 그대로 넘긴다). */
@@ -45,8 +46,11 @@ export interface MainDriver {
   inputRequested?(): void;
   /** `readInput` 응답(`deliver`·`cancel`·`fail`)이 끝나 worker가 재개하는 순간. */
   inputResumed?(): void;
-  /** `ready` 알림 도착(상태 알림 앞). */
-  onReady?(pyodideVersion: string): void;
+  /**
+   * `ready` 알림 도착(상태 알림 앞). 호환 경고(`console.warn`)는 core 세션이 이 호출 앞에서 이미 냈다(문제가 있을 때만, 1회).
+   * 페이로드는 내부 계약이라 공개 API로 내보내지 않는다.
+   */
+  onReady?(payload: ReadyPayload): void;
   /** `loadFailed` 알림 도착(게이트를 닫은 뒤, 상태 알림 앞). REPL은 여기서 빨강 한 줄을 쓴다. */
   onLoadFailed?(message: string): void;
   /**

@@ -1,5 +1,5 @@
 /**
- * worker 커널(`runWorker`)과 driver의 경계. 커널은 RPC 생성 → pyodide 로드 → (driver 콘솔) → webloop 억제 → Ctrl+C 연결 →
+ * worker 커널(`runWorker`)과 driver의 경계. 커널은 RPC 생성 → pyodide 로드(interrupt 공개 API 확인) → (driver 콘솔) → (driver probe) → webloop 억제 → Ctrl+C 연결 →
  * stdin 배선 → `ready` → (driver 실행) → 감시 타이머 순서를 소유하고, driver는 콘솔 확장과 세션 제어 흐름만 낸다.
  * 이 모양은 REPL이 쓰는 것만 담는다(RD-020, 실행 driver는 RD-022). 공개 API로 문서화하기 전의 내부 계약이다.
  */
@@ -26,6 +26,13 @@ export interface RunContext {
   frame: InitFrame;
 }
 
+/** `probe` 단계에서 driver가 받는 것. 콘솔이 막 만들어진 상태이고 webloop 억제·Ctrl+C 연결·stdin 배선은 아직이다. */
+export interface ProbeContext {
+  pyodide: PyodideInterface;
+  /** `createConsole`이 돌려준 콘솔. */
+  pyconsole: PyodideConsoleProxy;
+}
+
 /** worker(= 세션) 한 개의 driver 상태. 세션 상태는 클로저에 둔다. */
 export interface WorkerDriverSession {
   /**
@@ -38,6 +45,12 @@ export interface WorkerDriverSession {
    * 던지면 `loadFailed`다.
    */
   createConsole(context: ConsoleContext): PyodideConsoleProxy;
+  /**
+   * driver가 기대하는 pyodide 비공개 API 지점을 콘솔 생성 직후 한 번 탐지한다(RD-021). 기대와 다른 지점의 식별자를 돌려주면
+   * core가 자기 지점 결과와 합쳐 `ready` 페이로드의 `degraded`로 알린다(빈 배열 = 문제 없음). 선택 메서드다: 탐지할 지점이
+   * 없는 driver는 구현하지 않는다. 던지면 `loadFailed`다. 콘솔·전역 상태를 바꾸지 않아야 한다.
+   */
+  probe?(context: ProbeContext): string[];
   /**
    * `ready` 알림 뒤의 세션 제어 흐름. 끝나면 세션이 끝난 것이고(감시 타이머 정지), 던지면 `crashed`다.
    * REPL은 여기서 배너·러너를 만들고 `readLine` 루프를 돈다.

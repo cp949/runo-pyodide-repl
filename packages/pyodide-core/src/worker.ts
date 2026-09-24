@@ -13,6 +13,7 @@ export { createRpc } from "./protocol/rpc";
 export type { RpcHandlers } from "./protocol/rpc";
 export { createMailboxReader } from "./protocol/stdin-mailbox";
 export { composeRpcHandlers } from "./protocol/rpc-handlers";
+export type { ReadyPayload } from "./protocol/ready-payload";
 export { bootWorker } from "./worker/boot";
 export type { BootDeps, BootOptions } from "./worker/boot";
 export {
@@ -29,6 +30,7 @@ export type {
 } from "./worker/core-console";
 export type {
   ConsoleContext,
+  ProbeContext,
   RunContext,
   WorkerDriver,
   WorkerDriverSession,

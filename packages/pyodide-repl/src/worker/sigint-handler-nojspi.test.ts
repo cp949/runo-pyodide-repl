@@ -20,6 +20,7 @@ import {
   slots,
   teardownConsoleRunner,
 } from "../test/sigint-setup";
+import type { ReportDegraded } from "../test/core-internals";
 import { PS1, PS2 } from "./submission-runner";
 
 // pyodide는 `"Suspending" in WebAssembly`로 JSPI 지원을 판정한다(pyodide.asm.mjs). loadPyodide 전에 지워 JSPI 없는
@@ -48,20 +49,20 @@ afterAll(() => {
 /** 이 시험이 연결한 버퍼. `afterEach`가 떼고 비운다. */
 let connected: Int32Array | undefined;
 
-/** 설치 가드가 건너뛴 이유를 받는 가짜. `warn`이 불리지 않는지 보는 시험만 쓴다. */
-const warn = vi.fn<(message: string) => void>();
+/** 설치 가드가 알리는 저하 지점을 받는 가짜. `report`가 불리지 않는지 보는 시험만 쓴다. */
+const report = vi.fn<ReportDegraded>();
 
 afterEach(() => {
   teardownConsoleRunner(pyodide, connected);
   connected = undefined;
-  warn.mockReset();
+  report.mockReset();
 });
 
 const READY = { prompt: PS1, exit: false };
 
 /** 조립 뒤 버퍼를 `afterEach`가 치우도록 기록하고, `time.sleep`을 쓸 수 있게 import해 둔다. */
 async function setup() {
-  const runner = setupConsoleRunner(pyodide, { warn });
+  const runner = setupConsoleRunner(pyodide, { report });
   connected = runner.buffer;
   expect(await runner.run("import time")).toEqual(READY);
   return runner;
@@ -82,11 +83,11 @@ describe("JSPI 없는 경로", () => {
 
   // 조각 래퍼는 설치 시점에 pyodide_js.checkInterrupt를 붙잡으므로 스파이를 setup 전에 건다(09-testing.md 9.1).
   // 가드 5종(sleep-slice 2 + sigint-handler 3)은 JSPI 유무와 무관해 이 경로에서도 전부 통과해야 한다.
-  it("설치는 경고 없이 끝나고 time.sleep(0.05)는 조각 래퍼로 원본 블로킹 sleep을 끝까지 3회 폴링한다", async () => {
+  it("설치는 저하 보고 없이 끝나고 time.sleep(0.05)는 조각 래퍼로 원본 블로킹 sleep을 끝까지 3회 폴링한다", async () => {
     const checkInterrupt = vi.spyOn(pyodide, "checkInterrupt");
     const runner = await setup();
 
-    expect(warn).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
     expect(await runner.run("time.sleep(0.05)")).toEqual(READY);
 
     // 0.05초를 20ms 조각으로 나누면 0.02 + 0.02 + 0.01(3조각) → checkInterrupt 3회.

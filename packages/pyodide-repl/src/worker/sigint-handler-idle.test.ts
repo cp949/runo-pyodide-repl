@@ -26,7 +26,10 @@ import {
   teardownConsoleRunner,
 } from "../test/sigint-setup";
 import { PS1, PS2 } from "./submission-runner";
-import { SIGINT_HANDLER_FILENAME } from "../test/core-internals";
+import {
+  SIGINT_HANDLER_FILENAME,
+  type ReportDegraded,
+} from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 
@@ -37,13 +40,13 @@ beforeAll(async () => {
 /** 이 시험이 연결한 버퍼. `afterEach`가 떼고 비운다. */
 let connected: Int32Array | undefined;
 
-/** 설치 가드가 건너뛴 이유를 받는 가짜. 가드 시험만 넘겨 쓴다. */
-const warn = vi.fn<(message: string) => void>();
+/** 설치 가드가 알리는 저하 지점을 받는 가짜. 가드 시험만 넘겨 쓴다. */
+const report = vi.fn<ReportDegraded>();
 
 afterEach(() => {
   teardownConsoleRunner(pyodide, connected);
   connected = undefined;
-  warn.mockReset();
+  report.mockReset();
 });
 
 const READY = { prompt: PS1, exit: false };
@@ -677,25 +680,23 @@ describe("설치 가드", () => {
     ],
     ["pyodide.ffi", "del pyodide.ffi.run_sync", "pyodide.ffi.run_sync"],
   ])(
-    "%s의 run_sync가 기대와 다르면 깨우기를 건너뛰고 warn으로 알린다",
+    "%s의 run_sync가 기대와 다르면 깨우기를 건너뛰고 run-sync로 report한다",
     async (_title, breakage, label) => {
       pyodide.runPython(`import pyodide.ffi, pyodide.webloop\n${breakage}`, {
         globals: pyodide.toPy({}),
         filename: "<test>",
       });
 
-      const runner = await setup({ warn });
+      const runner = await setup({ report });
 
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0]![0]).toContain("[sigint-handler]");
-      expect(warn.mock.calls[0]![0]).toContain(label);
+      expect(report.mock.calls).toEqual([["run-sync", label]]);
       expect(runner.interruptIdle()).toBe(false);
       await expectStillInterruptible(runner);
     },
     30_000,
   );
 
-  it("console.runcode가 코루틴 함수가 아니면 깨우기를 건너뛰고 warn으로 알린다", async () => {
+  it("console.runcode가 코루틴 함수가 아니면 깨우기를 건너뛰고 run-sync로 report한다", async () => {
     // 클래스 속성을 바꿔 설치 시점의 `console.runcode`를 일반 함수로 만든다. 설치 직후 되돌려 그 뒤의 실행은
     // 원래 `runcode`(인스턴스 속성이 없으므로 클래스 것)를 쓴다.
     pyodide.runPython(
@@ -706,7 +707,7 @@ pyodide.console.PyodideConsole.runcode = lambda self, source, code: None`,
     );
     let runner: Runner;
     try {
-      runner = await setup({ warn });
+      runner = await setup({ report });
     } finally {
       pyodide.runPython(
         `import pyodide.console
@@ -716,9 +717,7 @@ del _saved_runcode`,
       );
     }
 
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]![0]).toContain("[sigint-handler]");
-    expect(warn.mock.calls[0]![0]).toContain("console.runcode");
+    expect(report.mock.calls).toEqual([["run-sync", "console.runcode"]]);
     expect(runner.interruptIdle()).toBe(false);
     await expectStillInterruptible(runner);
   }, 30_000);

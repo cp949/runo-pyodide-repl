@@ -11,12 +11,14 @@ import asyncio
 HANDLERS = ('_keyboard_interrupt_handler', '_system_exit_handler')
 
 
-def install():
+def install(report):
+    """WebLoop 핸들러 속성을 no-op으로 바꾼다. 없는 속성이 있으면 바꾸지 않고 없는 이름마다 report('webloop-handlers', 이름)을 부른다."""
     loop = asyncio.get_event_loop()
     missing = [name for name in HANDLERS if not hasattr(loop, name)]
     if missing:
-        # 일부만 바꾸면 반쪽 동작이 되므로 전부 건너뛴다. 알리는 일은 호출한 쪽(JS)이 한다.
-        return ', '.join(missing)
+        # 일부만 바꾸면 반쪽 동작이 되므로 전부 건너뛴다. 알리는 일은 호출한 쪽(JS)이 report로 받는다.
+        for name in missing:
+            report('webloop-handlers', name)
+        return
     loop._keyboard_interrupt_handler = lambda: None
     loop._system_exit_handler = lambda code: None
-    return ''

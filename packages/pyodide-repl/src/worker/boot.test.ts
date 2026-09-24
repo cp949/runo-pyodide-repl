@@ -116,9 +116,16 @@ function createMainSide(script: unknown[] = []) {
 
 const PROMPT_REQUEST = ["readLine", ">>> ", undefined, true];
 
+/** 고정 버전 pyodide 부팅의 `ready` 페이로드: 저하 지점 없음, 버전 일치, `details` 없음. */
+const CLEAN_READY = {
+  pyodideVersion: PYODIDE_VERSION,
+  versionMismatch: false,
+  degraded: [],
+};
+
 /** 각본 `["1 + 1", "exit()"]`이 눌림의 영향 없이 끝났을 때의 알림·요청 타임라인. */
 const CLEAN_SESSION = [
-  ["ready", { pyodideVersion: PYODIDE_VERSION }],
+  ["ready", CLEAN_READY],
   ["writeOutput", expect.stringMatching(/^Python 3\.14\.2 \(.*[^\n]$/s)],
   PROMPT_REQUEST,
   ["writeOutput", "2"],
@@ -147,7 +154,7 @@ describe("bootReplWorker", () => {
 
     // 배너는 개행을 더해 보내지 않는다(TRAP-29). 빈 조각(`write ""`)은 main sink가 거른다(여기서는 알림 그대로 기록).
     expect(events).toEqual([
-      ["ready", { pyodideVersion: PYODIDE_VERSION }],
+      ["ready", CLEAN_READY],
       ["writeOutput", expect.stringMatching(/^Python 3\.14\.2 \(.*[^\n]$/s)],
       PROMPT_REQUEST,
       ["writeOutput", "2"],
@@ -253,6 +260,45 @@ describe("bootReplWorker", () => {
       expect.anything(),
     );
   }, 30_000);
+
+  test("compiler-flags가 저하된 pyodide도 부팅되고 ready의 degraded에 그 식별자만 실려 REPL이 계속 동작한다", async () => {
+    const { frame, events, waitFor } = createMainSide(["1 + 1", "exit()"]);
+
+    await bootReplWorker(frame, {
+      loadPyodide: async () => {
+        const instance = await loadPyodide();
+        // `_compile.compiler.flags` 경로만 없앤다(안쪽 컴파일러는 그대로). 새 인스턴스라 다른 시험에 새지 않는다.
+        instance.runPython(
+          [
+            "import types",
+            "import pyodide.console as pc",
+            "_orig_init = pc.PyodideConsole.__init__",
+            "def _init(self, *args, **kwargs):",
+            "    _orig_init(self, *args, **kwargs)",
+            "    inner = self._compile",
+            "    class Compiler:",
+            "        compiler = types.SimpleNamespace()",
+            "        def __call__(self, *a, **k):",
+            "            return inner(*a, **k)",
+            "    self._compile = Compiler()",
+            "pc.PyodideConsole.__init__ = _init",
+          ].join("\n"),
+        );
+        return instance;
+      },
+    });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    expect(events[0]).toEqual([
+      "ready",
+      {
+        pyodideVersion: PYODIDE_VERSION,
+        versionMismatch: false,
+        degraded: ["compiler-flags"],
+      },
+    ]);
+    expect(events).toContainEqual(["writeOutput", "2"]);
+  }, 60_000);
 
   test("로더가 던지면 loadFailed만 오고 ready·배너·readLine 요청은 오지 않는다", async () => {
     const { frame, events, waitFor } = createMainSide(["1 + 1"]);

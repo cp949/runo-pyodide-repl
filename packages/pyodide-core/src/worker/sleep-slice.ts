@@ -10,11 +10,12 @@
  */
 import type { PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
+import type { ReportDegraded } from "./compat";
 import SLEEP_SLICE_SOURCE from "./sleep-slice.py?raw";
 
 export interface SleepSliceDeps {
-  /** 설치를 건너뛴 이유. boot.ts가 console.warn을 넣는다. */
-  warn(message: string): void;
+  /** 설치를 건너뛰게 한 어긋난 이름마다 `("sleep-slice", 이름)`으로 불린다. boot.ts가 수집기를 넣는다. */
+  report: ReportDegraded;
 }
 
 /** 조각 래퍼 소스의 Python 파일명. 트레이스백에 새면 알아보기 위한 이름이고 절단은 코드 객체로 한다. */
@@ -23,7 +24,7 @@ export const SLEEP_SLICE_FILENAME = "<sleep-slice>";
 /**
  * `time.sleep`을 20ms 조각 + `checkInterrupt()` 폴링 래퍼로 바꾼다. 돌려주는 proxy는 우리 코드 객체
  * tuple(`sleep`·`poll`)이고, 호출자가 `installSigintHandler`의 `extraOwnCodes`로 넘긴 뒤 destroy한다.
- * pyodide 내부가 기대와 다르면 `warn` 후 `undefined`(교체하지 않는다). 세션당 1회, 동기 함수.
+ * pyodide 내부가 기대와 다르면 `report` 후 `undefined`(교체하지 않는다). 세션당 1회, 동기 함수.
  */
 export function installSleepSlice(
   pyodide: Pick<PyodideInterface, "runPython" | "toPy">,
@@ -39,10 +40,10 @@ export function installSleepSlice(
       filename: SLEEP_SLICE_FILENAME,
     });
     const install = namespace.get("install") as PyProxy &
-      ((warn: (message: string) => void) => PyProxy | undefined);
+      ((report: ReportDegraded) => PyProxy | undefined);
     try {
-      // 경고 문구는 Python 쪽이 만든다(어느 가정이 어긋났는지 이름을 모아야 해서다).
-      return install(deps.warn) ?? undefined;
+      // 어느 가정이 어긋났는지는 Python 쪽이 이름별로 report한다.
+      return install(deps.report) ?? undefined;
     } finally {
       install.destroy();
     }

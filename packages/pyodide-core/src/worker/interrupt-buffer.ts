@@ -22,14 +22,13 @@ export interface InterruptConnectDeps extends SigintHandlerDeps {
    * ack 없이 지우면 살아 있는 송신기가 소실로 읽어 같은 번호로 다시 쓰고, 그 2가 기본 핸들러에 걸린다(TRP-027).
    */
   discard(): void;
-  /** `time.sleep` 조각 교체·정지한 실행 깨우기가 건너뛴 이유. boot.ts가 console.warn을 넣는다. */
-  warn(message: string): void;
 }
 
 /**
  * 순서: `installSleepSlice` → `installSigintHandler` → `deps.discard()` → `pyodide.setInterruptBuffer(buffer)`.
  * 연결 뒤 눌림은 핸들러가 받고, 사용자 프레임이 없으면 정지한 실행을 깨우거나(실행 중) 버린다(ack는 올린다).
- * 돌려주는 `interrupt_idle`은 감시 타이머가 쓰고, 호출자가 세션 끝에 destroy한다.
+ * 돌려주는 `interrupt_idle`은 감시 타이머가 쓰고, 호출자가 세션 끝에 destroy한다. 조각 교체·정지한 실행 깨우기·트레이스백
+ * 파일명 가드가 기대와 다르면 `deps.report`로 알린다(`sleep-slice`·`run-sync`·`webloop-filename`, 경고는 main이 한 번 낸다).
  */
 export function connectInterrupts(
   pyodide: Pick<PyodideInterface, "runPython" | "toPy" | "setInterruptBuffer">,
@@ -38,7 +37,7 @@ export function connectInterrupts(
   deps: InterruptConnectDeps,
 ): InterruptIdle {
   // 조각 교체가 실패해도(가드) 핸들러는 그대로 설치한다. 그 경우 코드 객체가 없어 절단 목록만 짧아진다.
-  const codes = installSleepSlice(pyodide, { warn: deps.warn });
+  const codes = installSleepSlice(pyodide, { report: deps.report });
   let interruptIdle: InterruptIdle;
   try {
     interruptIdle = installSigintHandler(pyodide, pyconsole, deps, codes);

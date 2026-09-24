@@ -1,7 +1,7 @@
 /**
  * REPL worker driver(RD-020). core worker 커널(`runWorker`, `@cp949/runo-pyodide-core/worker`)이 공통 부팅
  * (RPC → loadPyodide → 콘솔 → webloop 억제 → Ctrl+C 연결 → stdin 배선 → `ready` → 감시 타이머)을 맡고, 이 driver는
- * REPL 전용 부분을 낸다(초기화 프레임 `driver` 필드 `{ topLevelAwait }`의 검증 포함): `complete` RPC 핸들러, 콘솔 확장(`sys.ps1/ps2`·헬퍼·TLA·완성기), 배너·제출 러너·`readLine` 루프.
+ * REPL 전용 부분을 낸다(초기화 프레임 `driver` 필드 `{ topLevelAwait }`의 검증 포함): `complete` RPC 핸들러, 콘솔 확장(`sys.ps1/ps2`·헬퍼·TLA·완성기), pyodide 비공개 지점 탐지(`probe`), 배너·제출 러너·`readLine` 루프.
  */
 import {
   discardPendingInterrupt,
@@ -41,6 +41,8 @@ function createReplSession(options: ReplDriverOptions): WorkerDriverSession {
       completer = loadCompleteSource(pyodide, repl.pyconsole);
       return repl.pyconsole;
     },
+    // pyodide 비공개 지점 탐지(`compiler-flags`·`incomplete-input-message`). core가 `createConsole` 직후 한 번 부른다.
+    probe: () => repl.probe(),
     async run({ pyodide, rpc, frame }: RunContext): Promise<void> {
       // sink(println)가 개행을 붙이므로 배너에 개행을 더하지 않는다(TRAP-29).
       rpc.notify("writeOutput", repl.banner);

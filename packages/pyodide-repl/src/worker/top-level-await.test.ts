@@ -10,6 +10,7 @@ import { beforeAll, describe, expect, onTestFinished, test } from "vitest";
 import { createConsole } from "./console";
 import {
   DEFAULT_CONSOLE_FLAGS,
+  hasCompilerFlags,
   setTopLevelAwait,
   TOP_LEVEL_AWAIT_FLAG,
   type CompilerFlagsHolder,
@@ -137,4 +138,53 @@ describe("asyncio.run(main())(RD-012)", () => {
       expect(rejections.count()).toBe(0);
     },
   );
+});
+
+describe("hasCompilerFlags(compiler-flags 탐지)", () => {
+  test("`_compile.compiler.flags`가 숫자이면 참이다", () => {
+    expect(
+      hasCompilerFlags({ _compile: { compiler: { flags: 0x6200 } } }),
+    ).toBe(true);
+  });
+
+  test("flags가 0이어도 숫자이므로 참이다", () => {
+    expect(hasCompilerFlags({ _compile: { compiler: { flags: 0 } } })).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    ["`_compile`이 없다", {}],
+    ["`_compile`이 undefined다", { _compile: undefined }],
+    ["`compiler`가 없다", { _compile: {} }],
+    ["`compiler`가 null이다", { _compile: { compiler: null } }],
+    ["`flags`가 없다", { _compile: { compiler: {} } }],
+    ["`flags`가 문자열이다", { _compile: { compiler: { flags: "0x6200" } } }],
+    ["`flags`가 null이다", { _compile: { compiler: { flags: null } } }],
+  ])("경로가 기대와 다르면 거짓이다: %s", (_name, holder) => {
+    expect(hasCompilerFlags(holder)).toBe(false);
+  });
+
+  test("접근이 던지면 거짓이다", () => {
+    const holder = {
+      get _compile(): never {
+        throw new Error("접근 불가");
+      },
+    };
+
+    expect(hasCompilerFlags(holder)).toBe(false);
+  });
+
+  test("실제 콘솔에서는 참이고, `_compile.compiler.flags`를 지운 콘솔에서는 거짓이다", () => {
+    const real = createTestConsole();
+    const withoutFlags = createTestConsole();
+    pyodide.globals.set("no_flags_console", withoutFlags);
+    pyodide.runPython(
+      "import types\nno_flags_console._compile.compiler = types.SimpleNamespace()",
+    );
+
+    expect(hasCompilerFlags(real)).toBe(true);
+    expect(hasCompilerFlags(withoutFlags)).toBe(false);
+    pyodide.runPython("del no_flags_console");
+  });
 });

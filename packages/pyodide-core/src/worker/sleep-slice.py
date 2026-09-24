@@ -42,18 +42,15 @@ def find_problems():
     return problems
 
 
-def install(warn):
+def install(report):
     """time.sleep을 조각 래퍼로 바꾸고 (sleep.__code__, poll.__code__)를 돌려준다. 호출자가 이 tuple을
     installSigintHandler의 extra_own_codes로 넘겨 트레이스백에서 우리 프레임이 잘리게 한다. 가드에 걸리면
-    warn 후 None(교체하지 않는다)."""
+    어긋난 이름마다 report('sleep-slice', 이름)을 부르고 None(교체하지 않는다)."""
     problems = find_problems()
     if problems:
         # 조각 교체만 건너뛴다. time.sleep은 pyodide 기본으로 남고 SIGINT 핸들러는 그대로 설치된다.
-        warn(
-            '[sleep-slice] pyodide 내부가 기대와 달라 time.sleep의 조각 교체를 건너뜁니다: '
-            + ', '.join(problems)
-            + '. time.sleep은 pyodide 기본 동작으로 남습니다. pyodide 버전이 바뀌었는지 확인하세요.'
-        )
+        for problem in problems:
+            report('sleep-slice', problem)
         return None
 
     original_sleep = time.sleep.__wrapped__

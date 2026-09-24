@@ -26,6 +26,8 @@ import {
   SLEEP_SLICE_FILENAME,
   connectInterrupts,
   suppressWebLoopReraise,
+  warnDegraded,
+  type ReportDegraded,
 } from "../test/core-internals";
 import { loadSplitPaste } from "./multiline";
 import { createSubmissionRunner } from "./submission-runner";
@@ -67,14 +69,14 @@ function setup() {
   const buffer = createInterruptBuffer();
   connected = buffer;
   const discard = vi.fn(() => discardPendingInterrupt(buffer));
-  const warn = vi.fn<(message: string) => void>();
+  const report = vi.fn<ReportDegraded>();
   const deps = {
     ack: () => acknowledgeInterrupt(buffer),
     seq: () => readRequestSeq(buffer),
     discard,
-    warn,
+    report,
   };
-  return { pyconsole, buffer, deps, discard, warn };
+  return { pyconsole, buffer, deps, discard, report };
 }
 
 /** 원본 `setInterruptBuffer`를 부르기 직전에 `hook`을 실행한다. 폴링이 시작되는 순간에 무슨 일이 일어나는지를 만든다. */
@@ -138,14 +140,14 @@ describe("connectInterrupts", () => {
   // 조각 교체는 핸들러보다 먼저여야 한다: 래퍼의 코드 객체를 핸들러의 절단 목록에 넘겨야 트레이스백에서 우리 프레임이
   // 잘린다(절단 결과는 아래 회귀 시험이 실제 배선으로 본다).
   test("연결이 time.sleep 조각 교체까지 한다", () => {
-    const { pyconsole, buffer, deps, warn } = setup();
+    const { pyconsole, buffer, deps, report } = setup();
 
     connectInterrupts(pyodide, pyconsole, buffer, deps);
 
     expect(
       pyodide.runPython("import time\ntime.sleep.__code__.co_filename"),
     ).toBe(SLEEP_SLICE_FILENAME);
-    expect(warn).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
   });
 
   // `installSigintHandler`에 조각 래퍼의 코드 객체(`extraOwnCodes`)를 안 넘기면 `formattraceback`이 그 프레임을
@@ -169,14 +171,12 @@ describe("connectInterrupts", () => {
     connected = buffer;
     // boot.ts와 같은 순서: WebLoop 재보고 억제 → connectInterrupts. 억제가 없으면 Task 밖으로 나간 KeyboardInterrupt가
     // 처리되지 않은 Promise 거부로 남는다(03-ctrl-c.md 2.8).
-    suppressWebLoopReraise(pyodide, {
-      warn: (message) => console.warn(message),
-    });
+    suppressWebLoopReraise(pyodide, { report: warnDegraded });
     connectInterrupts(pyodide, repl.pyconsole, buffer, {
       ack: () => acknowledgeInterrupt(buffer),
       seq: () => readRequestSeq(buffer),
       discard: () => discardPendingInterrupt(buffer),
-      warn: (message) => console.warn(message),
+      report: warnDegraded,
     });
     const { run } = createSubmissionRunner(
       pyodide,

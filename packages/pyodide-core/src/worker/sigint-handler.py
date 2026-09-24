@@ -38,7 +38,9 @@
 #     핸들러가 소비한 SIGINT는 `pending`으로 표시해 두었다가 재개하는 `run_sync` 래퍼가 올린다(TRP-021).
 #   - 이벤트 루프가 비어 폴링이 아예 일어나지 않는 구간은 JS 감시 타이머가 `interrupt_idle()`을 불러 같은 일을 한다.
 #   - 설치 가드 3종에 걸리면 깨우기만 건너뛴다(`active`가 늘 `None`이라 `interrupt_idle()`은 언제나 거짓이고 위 규칙
-#     ①②④는 그대로다).
+#     ①②④는 그대로다). 어긋난 이름마다 `report('run-sync', 이름)`을 부른다.
+#   - `pyodide.webloop.__file__`이 `pyodide/webloop.py`로 끝나지 않으면 `report('webloop-filename', 경로)`를 부른다: `formattraceback`이
+#     `webloop.py` 프레임을 떼는 규칙(`is_webloop`)이 무효가 될 뿐 끌 기능은 없다.
 import asyncio
 import inspect
 import signal
@@ -46,6 +48,9 @@ import signal
 import pyodide.ffi
 import pyodide.webloop as webloop
 
+
+# `formattraceback`이 pyodide webloop 프레임을 알아보는 파일명 끝. `install`이 `webloop.__file__`도 이 값으로 확인한다.
+WEBLOOP_FILE_SUFFIX = 'pyodide/webloop.py'
 
 # 깨운 대기가 정상 값으로 끝났다는 표지. 사용자 awaitable이 돌려줄 수 없는 고유한 객체다.
 WOKEN = object()
@@ -78,7 +83,7 @@ def find_problems(console):
     return problems
 
 
-def install(console, ack, seq, warn, extra_own_codes=()):
+def install(console, ack, seq, report, extra_own_codes=()):
     user_filename = console.filename
     # 사용자 코드를 실행 중인 콘솔 task. runcode 래퍼가 들어갈 때 정하고 나올 때 비운다(시간 조건 없이 이것만이 "실행 중"의 정의다).
     active = None
@@ -155,14 +160,16 @@ def install(console, ack, seq, warn, extra_own_codes=()):
 
     own_codes = {sigint_handler.__code__, *extra_own_codes}
 
+    webloop_file = getattr(webloop, '__file__', None)
+    if not (isinstance(webloop_file, str) and webloop_file.endswith(WEBLOOP_FILE_SUFFIX)):
+        # 트레이스백의 webloop 프레임 떼기만 무효가 된다. 끌 기능은 없어 알리기만 한다.
+        report('webloop-filename', str(webloop_file))
+
     problems = find_problems(console)
     if problems:
         # 깨우기 없이 규칙 ①②④만 남는다: active가 None이라 interrupt_idle()은 아무것도 하지 않는다.
-        warn(
-            '[sigint-handler] pyodide 내부가 기대와 달라 정지한 실행(asyncio.run·run_sync 대기, await 등)의 Ctrl+C 중단을 건너뜁니다: '
-            + ', '.join(problems)
-            + '. pyodide 버전이 바뀌었는지 확인하세요.'
-        )
+        for problem in problems:
+            report('run-sync', problem)
     else:
         original_run_sync = webloop.run_sync
         original_runcode = console.runcode
@@ -272,7 +279,7 @@ def install(console, ack, seq, warn, extra_own_codes=()):
             entries.append(tb)
             tb = tb.tb_next
         ours = lambda entry: entry.tb_frame.f_code in own_codes
-        is_webloop = lambda entry: entry.tb_frame.f_code.co_filename.endswith('pyodide/webloop.py')
+        is_webloop = lambda entry: entry.tb_frame.f_code.co_filename.endswith(WEBLOOP_FILE_SUFFIX)
         if entries and ours(entries[-1]):
             # 예외가 우리 코드에서 시작했다(핸들러·래퍼·조각): 첫 우리 프레임부터 안쪽 전부를 자른다. 그 안쪽은 우리가
             # 부른 라이브러리·JS 가짜 프레임·핸들러다(연타면 핸들러 프레임이 겹친다). 나른 예외(guard가 다듬은 것)는

@@ -8,7 +8,7 @@
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { createConsole, type ReplConsole, type RunLineResult } from "./console";
-import { suppressWebLoopReraise } from "../test/core-internals";
+import { suppressWebLoopReraise, warnDegraded } from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 
@@ -22,7 +22,7 @@ function setup(topLevelAwait = false) {
   const repl = createConsole(pyodide, sinks, { topLevelAwait });
   // KeyboardInterrupt·SystemExit을 실제로 낼 수 있는 시험(exit() 등)이 WebLoop 재보고로 처리되지 않은 Promise
   // 거부를 남기지 않도록 worker와 같은 순서로 설치한다(03-ctrl-c.md 2.8).
-  suppressWebLoopReraise(pyodide, { warn: (message) => console.warn(message) });
+  suppressWebLoopReraise(pyodide, { report: warnDegraded });
   return { sinks, repl };
 }
 

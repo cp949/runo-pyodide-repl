@@ -6,9 +6,11 @@
  */
 import { postInitFrame } from "../protocol/init-frame";
 import type { InitFrame } from "../protocol/init-frame";
+import type { ReadyPayload } from "../protocol/ready-payload";
 import type { InterruptSender } from "../protocol/interrupt-sender";
 import { createRpc } from "../protocol/rpc";
 import type { Rpc } from "../protocol/rpc";
+import { PYODIDE_VERSION } from "../pyodide-version";
 import { composeRpcHandlers } from "../protocol/rpc-handlers";
 import {
   createMailboxWriter,
@@ -161,8 +163,17 @@ export function startCoreSession(options: CoreSessionOptions): CoreSession {
       endSession();
       onStatus("terminated");
     },
-    ready: ({ pyodideVersion }: { pyodideVersion: string }) => {
-      driver.onReady?.(pyodideVersion);
+    ready: (payload: ReadyPayload) => {
+      // 호환 경고는 여기서 세션당 한 번만 낸다(worker는 개별 경고를 내지 않는다). 문제가 없으면 아무것도 내지 않는다.
+      if (payload.versionMismatch || payload.degraded.length > 0) {
+        console.warn("[session] pyodide 호환 경고", {
+          expected: PYODIDE_VERSION,
+          actual: payload.pyodideVersion,
+          degraded: payload.degraded,
+          details: payload.details,
+        });
+      }
+      driver.onReady?.(payload);
       onStatus("ready");
     },
     // worker는 죽지 않는다. 접두사·표시는 driver가 정한다(01-protocols.md 1.2).

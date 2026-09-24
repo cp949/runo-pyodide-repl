@@ -8,7 +8,7 @@
  * 폴링이 사용자 프레임 없는 콜백에서 일어나기 때문이다(TRP-020). 깨우기는 `pyodide.webloop.run_sync`·
  * `pyodide.ffi.run_sync`·`console.runcode`를 래퍼로 바꿔 대기 Task나 콘솔 task를 취소하는 방식이고, 돌려주는
  * `interrupt_idle`은 감시 타이머가 같은 일을 하는 진입점이다. 그 밖(다음 문장 컴파일, 트레이스백 생성, 시작 코드)의
- * SIGINT는 버린다(TRP-009). pyodide 내부가 기대와 다르면 깨우기만 건너뛰고 `warn`으로 알린다.
+ * SIGINT는 버린다(TRP-009). pyodide 내부가 기대와 다르면 깨우기만 건너뛰고 `report`로 알린다.
  *
  * 이 파일은 `protocol/`을 import하지 않는다. `ack`·`seq`는 `boot.ts`가 `acknowledgeInterrupt`·`readRequestSeq`를
  * 클로저로 넣는다(`stdin-callback.ts`와 같은 패턴).
@@ -16,6 +16,7 @@
 import type { PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
 import type { PyodideConsoleProxy } from "./core-console";
+import type { ReportDegraded } from "./compat";
 import SIGINT_HANDLER_SOURCE from "./sigint-handler.py?raw";
 
 export interface SigintHandlerDeps {
@@ -23,8 +24,11 @@ export interface SigintHandlerDeps {
   ack(): void;
   /** 현재 요청 번호. `readRequestSeq(buffer)`를 boot.ts가 넣는다. */
   seq(): number;
-  /** 설치 가드가 건너뛴 부분을 알린다. boot.ts가 console.warn을 넣는다. */
-  warn(message: string): void;
+  /**
+   * 설치 가드가 건너뛴 부분을 알린다: 정지한 실행 깨우기 가드의 어긋난 이름마다 `("run-sync", 이름)`, 트레이스백 파일명 가드가
+   * `("webloop-filename", 경로)`. boot.ts가 수집기를 넣는다.
+   */
+  report: ReportDegraded;
 }
 
 /** 핸들러·래퍼 소스의 Python 파일명. 트레이스백에 새면 알아보기 위한 이름이고 절단은 코드 객체로 한다. */
@@ -68,15 +72,15 @@ export function installSigintHandler(
         console: PyodideConsoleProxy,
         ack: () => void,
         seq: () => number,
-        warn: (message: string) => void,
+        report: ReportDegraded,
         extraOwnCodes?: PyProxy,
       ) => InterruptIdle);
     try {
-      // JS 함수 세 개는 pyodide가 JsProxy로 넘긴다. `ack`·`seq`는 핸들러 진입에서만 불리며 폴링 경로가 아니다
+      // JS 함수 세 개는 pyodide가 JsProxy로 넘긴다. `ack`·`seq`는 핸들러 진입에서만 불리며 폴링 경로가 아니고 `report`는 설치 중에만 불린다
       // (TRP-024 무관). `undefined`를 넘기면 Python이 `None`으로 받아 기본값 `()`가 무시되므로 인자 수를 나눠 부른다.
       return extraOwnCodes
-        ? install(pyconsole, deps.ack, deps.seq, deps.warn, extraOwnCodes)
-        : install(pyconsole, deps.ack, deps.seq, deps.warn);
+        ? install(pyconsole, deps.ack, deps.seq, deps.report, extraOwnCodes)
+        : install(pyconsole, deps.ack, deps.seq, deps.report);
     } finally {
       install.destroy();
     }

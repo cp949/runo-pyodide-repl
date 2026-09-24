@@ -11,7 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, onTestFinished } from "vite
 import { createConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
 import { createSubmissionRunner } from "./submission-runner";
-import { suppressWebLoopReraise } from "../test/core-internals";
+import { suppressWebLoopReraise, warnDegraded } from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 /** 파일 전체가 공유하는 실제 WebLoop. `asyncio.get_event_loop()`는 항상 이 객체를 돌려준다(억제 설치 가드가 그 함수를
@@ -92,7 +92,7 @@ function setup() {
     { topLevelAwait: false },
   );
   suppressWebLoopReraise(pyodide, {
-    warn: (message) => console.warn(message),
+    report: warnDegraded,
   });
   const { run } = createSubmissionRunner(
     pyodide,
@@ -198,7 +198,17 @@ describe("억제 설치 가드", () => {
     }
   });
 
-  it("WebLoop에 두 속성이 모두 없으면 설치를 건너뛰고 warn을 정확히 1회 부른다(부분 설치 없음)", () => {
+  it("WebLoop에 두 속성이 모두 있으면 report를 부르지 않는다", () => {
+    const reports: [string, string][] = [];
+
+    suppressWebLoopReraise(pyodide, {
+      report: (id, detail) => reports.push([id, detail]),
+    });
+
+    expect(reports).toEqual([]);
+  });
+
+  it("WebLoop에 두 속성이 모두 없으면 설치를 건너뛰고 없는 이름마다 webloop-handlers로 report한다(부분 설치 없음)", () => {
     // 이전 시험(들)이 설치해 둔 흔적을 지워 실제 loop을 초기 상태(None)로 되돌린다.
     resetLoopAttrToNone("_keyboard_interrupt_handler");
     resetLoopAttrToNone("_system_exit_handler");
@@ -220,14 +230,15 @@ describe("억제 설치 가드", () => {
       namespace.destroy();
     }
 
-    const messages: string[] = [];
+    const reports: [string, string][] = [];
     suppressWebLoopReraise(pyodide, {
-      warn: (message) => messages.push(message),
+      report: (id, detail) => reports.push([id, detail]),
     });
 
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toContain("_keyboard_interrupt_handler");
-    expect(messages[0]).toContain("_system_exit_handler");
+    expect(reports).toEqual([
+      ["webloop-handlers", "_keyboard_interrupt_handler"],
+      ["webloop-handlers", "_system_exit_handler"],
+    ]);
     // 부분 설치가 없었다는 뜻: 실제 loop의 두 속성은 손대지 않아 그대로 None이다.
     expect(loopAttrIsNone("_keyboard_interrupt_handler")).toBe(true);
     expect(loopAttrIsNone("_system_exit_handler")).toBe(true);
@@ -248,14 +259,13 @@ describe("억제 설치 가드", () => {
       namespace.destroy();
     }
     try {
-      const messages: string[] = [];
+      const reports: [string, string][] = [];
       suppressWebLoopReraise(pyodide, {
-        warn: (message) => messages.push(message),
+        report: (id, detail) => reports.push([id, detail]),
       });
 
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toContain("_system_exit_handler");
-      expect(messages[0]).not.toContain("_keyboard_interrupt_handler");
+      // 없는 이름만 알린다.
+      expect(reports).toEqual([["webloop-handlers", "_system_exit_handler"]]);
       // 부분 설치가 없었다는 뜻: 있던 속성(_keyboard_interrupt_handler)도 손대지 않아 그대로 None이다.
       expect(loopAttrIsNone("_keyboard_interrupt_handler")).toBe(true);
     } finally {

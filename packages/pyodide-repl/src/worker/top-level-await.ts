@@ -14,6 +14,24 @@ export const DEFAULT_CONSOLE_FLAGS = 0x6200;
 // `CompilerFlagsHolder`(pyodide private 경로 `_compile.compiler.flags`)는 core 콘솔 뼈대 타입이 소유한다.
 export type { CompilerFlagsHolder };
 
+/**
+ * pyodide 비공개 경로 `_compile.compiler.flags`가 숫자로 있는가(RD-021 `compiler-flags` 탐지). PyProxy에서 없는 속성 접근은
+ * 던지지 않고 `undefined`이지만, 접근 자체가 던져도 없는 것으로 본다. 없으면 REPL은 TLA 토글·EOF 문구 정규화를 건너뛰고
+ * `compilerFlags()`를 `TOP_LEVEL_AWAIT_FLAG`로 대체한다(확정 7).
+ */
+export function hasCompilerFlags(pyconsole: unknown): boolean {
+  try {
+    const flags = (
+      pyconsole as {
+        _compile?: { compiler?: { flags?: unknown } | null } | null;
+      }
+    )._compile?.compiler?.flags;
+    return typeof flags === "number";
+  } catch {
+    return false;
+  }
+}
+
 /** 콘솔 생성 직후 한 번만 부른다. 실행 중 바꾸면 `... ` 블록의 다음 push가 실패한다(TRAP-03). */
 export function setTopLevelAwait(
   pyconsole: CompilerFlagsHolder,

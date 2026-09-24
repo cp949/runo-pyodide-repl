@@ -410,21 +410,133 @@ describe("startCoreSession: readInput 처리", () => {
   });
 });
 
-describe("startCoreSession: 상태 알림", () => {
-  test("ready 알림은 driver에 버전을 알린 뒤 onStatus('ready')를 낸다", async () => {
+/** 문제 없는 부팅의 `ready` 페이로드(고정 버전, 저하 없음). */
+const CLEAN_READY = {
+  pyodideVersion: PYODIDE_VERSION,
+  versionMismatch: false,
+  degraded: [],
+};
+
+describe("startCoreSession: pyodide 호환 경고", () => {
+  /** ready 알림을 보내고 상태 알림이 올 때까지 기다린다. `console.warn` 호출은 스파이가 기록한다. */
+  async function bootWith(payload: unknown, driver = createFakeDriver().driver) {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { workerRpc, onStatus, log } = start({ driver });
+    onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
+    workerRpc.notify("ready", payload);
+    await waitFor(() => onStatus.mock.calls.length === 1);
+    return { warn, onStatus, log };
+  }
+
+  test("문제가 없으면 console.warn을 부르지 않는다", async () => {
+    const { warn, onStatus } = await bootWith(CLEAN_READY);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(onStatus).toHaveBeenCalledWith("ready");
+  });
+
+  test("버전이 다르면 expected·actual과 함께 정확히 1회 경고한다", async () => {
+    const { warn, onStatus } = await bootWith({
+      pyodideVersion: "0.0.0-other",
+      versionMismatch: true,
+      degraded: [],
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[session] pyodide 호환 경고", {
+      expected: PYODIDE_VERSION,
+      actual: "0.0.0-other",
+      degraded: [],
+      details: undefined,
+    });
+    expect(onStatus).toHaveBeenCalledWith("ready");
+  });
+
+  test("degraded가 비어 있지 않으면 식별자·상세와 함께 정확히 1회 경고한다", async () => {
+    const { warn } = await bootWith({
+      pyodideVersion: PYODIDE_VERSION,
+      versionMismatch: false,
+      degraded: ["run-sync", "compiler-flags"],
+      details: { "run-sync": ["pyodide.ffi.run_sync"] },
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[session] pyodide 호환 경고", {
+      expected: PYODIDE_VERSION,
+      actual: PYODIDE_VERSION,
+      degraded: ["run-sync", "compiler-flags"],
+      details: { "run-sync": ["pyodide.ffi.run_sync"] },
+    });
+  });
+
+  test("버전 불일치와 degraded가 함께 있어도 경고는 1회다", async () => {
+    const { warn } = await bootWith({
+      pyodideVersion: "0.0.0-other",
+      versionMismatch: true,
+      degraded: ["sleep-slice"],
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  test("경고는 driver.onReady보다 먼저, 상태 알림보다 앞에 난다", async () => {
     const log: string[] = [];
     const { driver } = createFakeDriver({
-      onReady: (version) => {
-        log.push(`driver.onReady(${version})`);
+      onReady: () => {
+        log.push("driver.onReady");
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {
+      log.push("console.warn");
+    });
+    const { workerRpc, onStatus } = start({ driver, log });
+    onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
+
+    workerRpc.notify("ready", {
+      pyodideVersion: PYODIDE_VERSION,
+      versionMismatch: false,
+      degraded: ["webloop-filename"],
+    });
+    await waitFor(() => onStatus.mock.calls.length === 1);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(log).toEqual(["console.warn", "driver.onReady", "status:ready"]);
+  });
+});
+
+describe("startCoreSession: 상태 알림", () => {
+  test("ready 알림은 driver에 페이로드를 알린 뒤 onStatus('ready')를 낸다", async () => {
+    const log: string[] = [];
+    const { driver } = createFakeDriver({
+      onReady: (payload) => {
+        log.push(`driver.onReady(${payload.pyodideVersion})`);
       },
     });
     const { workerRpc, onStatus } = start({ driver, log });
     onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
 
-    workerRpc.notify("ready", { pyodideVersion: PYODIDE_VERSION });
+    workerRpc.notify("ready", CLEAN_READY);
     await waitFor(() => onStatus.mock.calls.length === 1);
 
     expect(log).toEqual([`driver.onReady(${PYODIDE_VERSION})`, "status:ready"]);
+  });
+
+  test("ready 알림은 페이로드 객체를 그대로 driver.onReady에 넘긴다", async () => {
+    const onReady = vi.fn();
+    const { driver } = createFakeDriver({ onReady });
+    const { workerRpc, onStatus } = start({ driver });
+    const payload = {
+      pyodideVersion: PYODIDE_VERSION,
+      versionMismatch: false,
+      degraded: ["run-sync"],
+      details: { "run-sync": ["pyodide.ffi.run_sync"] },
+    };
+
+    workerRpc.notify("ready", payload);
+    await waitFor(() => onStatus.mock.calls.length === 1);
+
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(onReady.mock.calls[0]?.[0]).toEqual(payload);
   });
 
   test("loadFailed 알림은 게이트를 닫고 driver에 알린 뒤 onStatus('load-failed')를 낸다", async () => {

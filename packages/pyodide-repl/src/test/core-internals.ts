@@ -17,3 +17,9 @@ export {
 } from "../../../pyodide-core/src/worker/sleep-slice";
 export { createStdinCallback } from "../../../pyodide-core/src/worker/stdin-callback";
 export { suppressWebLoopReraise } from "../../../pyodide-core/src/worker/webloop-reraise";
+import type { ReportDegraded } from "../../../pyodide-core/src/worker/compat";
+export type { ReportDegraded };
+
+/** 저하 보고를 `console.warn`으로 내는 시험용 `report`. 기대와 다른 지점이 시험 로그에 보이게 한다(worker 부팅은 수집기를 쓴다). */
+export const warnDegraded: ReportDegraded = (id, detail) =>
+  console.warn(`[degraded] ${id}: ${detail}`);

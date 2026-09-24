@@ -1,6 +1,6 @@
 /**
  * worker 부팅 시퀀스(01-protocols.md 5절 S1, 00-architecture.md 3.1). 초기화 프레임을 받은 뒤
- * pyodide 로드 → 콘솔 생성 → Ctrl+C 연결 → stdin 배선 → `ready` → driver 실행 순서로 진행한다. 로더는 주입해 node에서 npm
+ * pyodide 로드 → 콘솔 생성 → 호환 탐지 → Ctrl+C 연결 → stdin 배선 → `ready` → driver 실행 순서로 진행한다. 로더는 주입해 node에서 npm
  * `loadPyodide`로 시험하고 브라우저에서는 CDN 로더(`loadPyodideFromCdn`)를 쓴다.
  */
 import type { PyodideInterface } from "pyodide";
@@ -13,9 +13,12 @@ import {
   readRequestSeq,
   signalInterrupt,
 } from "../protocol/interrupt-protocol";
+import { createReadyPayload } from "../protocol/ready-payload";
 import { createRpc } from "../protocol/rpc";
 import { composeRpcHandlers } from "../protocol/rpc-handlers";
 import { createMailboxReader } from "../protocol/stdin-mailbox";
+import { PYODIDE_VERSION } from "../pyodide-version";
+import { createDegradedCollector, findMissingInterruptApi } from "./compat";
 import type { ConsoleSinks } from "./core-console";
 import type { WorkerDriver } from "./driver";
 import { connectInterrupts } from "./interrupt-buffer";
@@ -40,11 +43,14 @@ export interface BootOptions extends BootDeps {
 const CORE_WORKER_HANDLERS = {};
 
 /**
- * 순서: driver 옵션 검증(`parseOptions`) → driver 세션 생성 → RPC 생성(core + driver 핸들러 합성) → loadPyodide → `driver.createConsole` →
- * suppressWebLoopReraise → connectInterrupts → setStdin → ntf ready → 감시 타이머 시작 → `driver.run`(00-architecture.md
- * 3.1(5)). `suppressWebLoopReraise`(WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제, 03-ctrl-c.md 2.8)는 콘솔 생성
+ * 순서: driver 옵션 검증(`parseOptions`) → driver 세션 생성 → RPC 생성(core + driver 핸들러 합성) → loadPyodide → interrupt 공개
+ * API 확인 → `driver.createConsole` → `driver.probe` → suppressWebLoopReraise → connectInterrupts → setStdin → ntf ready →
+ * 감시 타이머 시작 → `driver.run`(00-architecture.md 3.1(5)). interrupt 공개 API(`setInterruptBuffer`·`checkInterrupt`)가 없으면
+ * Ctrl+C가 성립하지 않아 콘솔을 만들기 전에 loadFailed로 시작을 거부한다. 비공개 API 지점(driver `probe` + core 4지점)은 부팅 중
+ * 한 번 탐지해 `ready` 페이로드 `{ pyodideVersion, versionMismatch, degraded, details? }`로 알린다(RD-021). worker는 경고를
+ * 내지 않고 main 세션이 문제가 있을 때만 `console.warn`을 한 번 낸다. `suppressWebLoopReraise`(WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제, 03-ctrl-c.md 2.8)는 콘솔 생성
  * 직후·Ctrl+C 연결 전에 한 번만 부른다. `connectInterrupts`(SIGINT 핸들러 설치 → 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중
- * 눌림이 시작 코드를 죽이지 않도록 `setStdin`보다 앞이다(03-ctrl-c.md 2.6). 로드·콘솔 생성·재보고 억제·Ctrl+C 연결·stdin
+ * 눌림이 시작 코드를 죽이지 않도록 `setStdin`보다 앞이다(03-ctrl-c.md 2.6). 로드·interrupt API 확인·콘솔 생성·probe·재보고 억제·Ctrl+C 연결·stdin
  * 배선 실패는 ntf loadFailed(String(error))로 알리고 돌아온다(worker는 살아 있다). 감시 타이머(`startInterruptWatch`,
  * 03-ctrl-c.md 2.5)는 driver 실행 직전에 켜고 실행이 끝나면(`exit()`) `finally`에서 끈다. `ready` 알림 뒤(감시·driver 실행)의
  * 잡히지 않은 예외는 ntf crashed({ message: String(error) })로 나간다(RD-010, worker는 살아 있을 수 있다).
@@ -69,13 +75,21 @@ export async function bootWorker(
   let pyconsole: ReturnType<typeof session.createConsole>;
   let pyodide: PyodideInterface;
   let interruptIdle: InterruptIdle | undefined;
+  const collector = createDegradedCollector();
   try {
     pyodide = await options.loadPyodide(frame.pyodide.indexURL);
+    // 시작 거부: interrupt 공개 API가 없으면 중단 없이 실행하게 되므로 콘솔을 만들기 전에 끝낸다(`degraded`가 아니다).
+    const missingApi = findMissingInterruptApi(pyodide);
+    if (missingApi.length > 0) {
+      throw new Error(
+        `pyodide에 Ctrl+C 공개 API(${missingApi.join(", ")})가 없어 시작할 수 없습니다`,
+      );
+    }
     pyconsole = session.createConsole({ pyodide, sinks, frame });
-    // WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제. 세션당 1회, 실패해도 REPL 동작은 그대로다(경고만 남는다).
-    suppressWebLoopReraise(pyodide, {
-      warn: (message) => console.warn(message),
-    });
+    // driver가 기대하는 비공개 API 지점 탐지. 콘솔 생성 직후 한 번이고 던지면 loadFailed다.
+    collector.addIds(session.probe?.({ pyodide, pyconsole }) ?? []);
+    // WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제. 세션당 1회, 실패해도 REPL 동작은 그대로다(`webloop-handlers`로 알린다).
+    suppressWebLoopReraise(pyodide, { report: collector.report });
     // time.sleep 조각 교체 → SIGINT 핸들러 설치 → 폐기 → 버퍼 연결. 폴링은 연결 뒤에 시작하므로 이 순서가 부팅 중
     // 눌림으로부터 시작 코드를 지킨다.
     // 프로토콜 함수는 여기서 클로저로 넣는다(`interrupt-buffer.ts`는 `protocol/`을 import하지 않는다). 실패는 loadFailed다.
@@ -83,7 +97,7 @@ export async function bootWorker(
       ack: () => acknowledgeInterrupt(interruptBuffer),
       seq: () => readRequestSeq(interruptBuffer),
       discard: () => discardPendingInterrupt(interruptBuffer),
-      warn: (message) => console.warn(message),
+      report: collector.report,
     });
     const mailbox = createMailboxReader({
       ctrl: frame.stdinCtrl,
@@ -100,7 +114,15 @@ export async function bootWorker(
         checkInterrupt: () => pyodide.checkInterrupt(),
       }),
     });
-    rpc.notify("ready", { pyodideVersion: pyodide.version });
+    rpc.notify(
+      "ready",
+      createReadyPayload({
+        actual: pyodide.version,
+        expected: PYODIDE_VERSION,
+        degraded: collector.degraded(),
+        details: collector.details(),
+      }),
+    );
   } catch (error) {
     // connectInterrupts는 성공했지만 이후(setStdin·ready 알림 등)에서 던지면 SIGINT 핸들러·time.sleep 조각이 이미
     // 설치돼 있다. loadFailed를 알리기 전에 interrupt_idle(PyProxy)을 destroy해 부분 설치 상태를 정리한다.

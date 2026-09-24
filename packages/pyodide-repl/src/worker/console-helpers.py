@@ -32,6 +32,22 @@ def format_syntax_error(source, flags):
         return "".join(traceback.format_exception_only(type(e), e))
     return None
 
+# pyodide가 EOF에서 끊긴 입력(`1 +`)을 어떤 문구로 표시하는지 시작 시 한 번 확인한다(RD-021 `incomplete-input-message` 탐지).
+# 실제 콘솔이 아니라 빈 globals의 독립 `PyodideConsole`에 push해서 실제 콘솔의 buffer·builtins._·전역을 건드리지 않는다.
+# 같은 클래스라 같은 컴파일·`formattraceback` 경로다. 문법 오류가 아니면(문구를 판정할 수 없으면) None.
+def incomplete_input_message():
+    from pyodide.console import PyodideConsole
+    probe = PyodideConsole({})
+    fut = probe.push("1 +")
+    try:
+        if fut.syntax_check != "syntax-error":
+            return None
+        return fut.formatted_error
+    finally:
+        # 사이클 GC 때 "exception was never retrieved"가 sys.stderr로 새지 않게 회수한다.
+        if fut.done():
+            fut.exception()
+
 # await하지 않는 문법 오류 future의 예외를 회수한다. 그대로 두면 사이클 GC 때 asyncio가
 # "ConsoleFuture exception was never retrieved"를 sys.stderr로 내 터미널에 끼어든다
 # (JS에서 부르면 예외 proxy를 destroy해야 해 Python에 둔다).
