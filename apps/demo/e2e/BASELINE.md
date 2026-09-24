@@ -16,7 +16,7 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
   forced 오류는 뺀 값) **0** + `ok: true`. "미실행"(`unrun`)은 실패가 아니다 — 담당 RD가
   아직 없어 그 확인 코드 자체가 스크립트에 없다는 뜻이다(2026-09-24 RD-016 완료로 현재 목록은 비어 있다).
 - `pnpm --filter demo e2e:<이름>` 단독 실행은 서버(주로 5173)가 이미 떠 있어야 한다
-  (`e2e/README.md` "실행 전제", 27항목 목록은 같은 문서).
+  (`e2e/README.md` "실행 전제", 28항목 목록은 같은 문서).
 - `pnpm --filter demo e2e:measure` — dev만 기동, 측정 5종(`boot-press` 제외, 참고값은 4절,
   이 실행기는 exit code만 본다).
 - `e2e:baseline`·`e2e:measure`는 사용자가 지시할 때만 돌린다(`docs/agents/rubber-workflow.md` "검증 실행 예산").
@@ -42,17 +42,18 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 | `carryover-check.mjs` | 이월 시나리오 4개 | 미실행(RD-005 인계) | 통과 |
 | `stdin-input-check.mjs` | E1·K1~K3·L1·M1·M2·N1~N3·O1·O2·P1~P9·R1·U1·RM1·TICK 19개 | `RM1·L1·O1·M1·M2·O2·TICK` 8/8 | 통과 |
 | `bg-input-guard-probe.mjs` | 배경 `input()` 가드 3개 | 전부 3/3 | 통과 |
-| `ctrl-c-check.mjs` | RM1~RM3·G1·G2·S1a·S1·S08(다단 중첩 포함) 10개 | 전부 10/10 | 통과 |
-| `prompt-cancel-check.mjs` | A1~A4·B0~B2·W2·C1·C2·D1~D3·E1·E2·F1·F2·H1·I1~I3 등 23개 | `RM1,B0` 3/3 | 통과 |
+| `ctrl-c-check.mjs` | RM1~RM3·G1·G2·S1a·S1·S08(다단 중첩 포함) 10개 | 전부 10/10 | 통과. 2026-09-24 RD-022a DELTA-05 dev L1 전체 1회 10/10(`pageErrors` 0) |
+| `prompt-cancel-check.mjs` | A1~A4·B0~B2·W2·C1·C2·D1~D3·E1·E2·F1·F2·H1·I1~I3 등 23개 | `RM1,B0` 3/3 | 통과. 2026-09-24 RD-022a DELTA-05 dev L1 전체 1회 23/23(`pageErrors` 0) |
 | `input-cancel-check.mjs` | RM2/A1~A5·B1~B3·C1·C2·D1·E1·E2·F1~F3·G1~G3·H1·H2·Q1·EC·T35 26개 | `RM2,EC` 3/3 | 통과 |
-| `session-reset-check.mjs` | reset·cursor·ctrll·carry·ccreset·exit·crash·strict 8절 25개 | `reset·exit·crash` 4/4 | 통과(단, `crash` 절의 forced pageerror 1건은 의도됨 — 3절 참고) |
+| `session-reset-check.mjs` | reset·cursor·ctrll·carry·ccreset·exit·crash·strict 8절 25개 | `reset·exit·crash` 4/4 | 통과(단, `crash` 절의 forced pageerror 1건은 의도됨 — 3절 참고). 2026-09-24 RD-022a DELTA-05 dev L1 전체 1회 25/25, `pageErrors`는 등록된 forced 1건(`Error: forced`)뿐 |
 | `multiline-check.mjs` | paste·tab·parse 등 18개 | `paste·tab·parse` 4/4 | 통과 |
 | `tla-check.mjs` | scenario·smoke·arun·toggle-off·sticky 5절 16개 | `초기,scenario` 4/4 | 통과(단, `sticky` 절의 forced pageerror 1건은 의도됨 — 3절 참고) |
-| `auto-indent-check.mjs` | prefill·shift·unit·history 등 26개(`history E1`은 DELTA-03이 RD-014 동작에 맞게 갱신[^e1]) | `초기,prefill,shift,unit` 9/9 | 통과 |
+| `auto-indent-check.mjs` | prefill·shift·unit·history 등 26개(`history E1`은 DELTA-03이 RD-014 동작에 맞게 갱신[^e1]) | `초기,prefill,shift,unit` 9/9 | 통과. 2026-09-24 RD-022a DELTA-05 dev L1 전체 1회 26/26(`pageErrors` 0) |
 | `block-history-check.mjs` | A·B·C·X 절 29개 | `초기,A,B,C` 11/11 | 통과 |
-| `tab-check.mjs` | C1~C15(C12 왕복 지연 포함) 76개 = 기존 C1~C14 68개 + RD-016 C15 8개(a·b·c·d×2·e×2·f) | `C1·C3·C8·C11` 30/30 | 통과. RD-016(2026-09-24): C15 절 8개 추가, C9c를 `from os import pa` → `path` 채움으로 재정의, C5e 제목 정정(왕복 + 큐), C12에 `import os.pa` 지연 기록 추가(판정 없음, 웜 N=20 중앙값·최대는 결과 JSON `notes`). dev `ONLY=C5,C9,C12,C15` 20/20(C15 8개 포함, `pageErrors` 0)만 실측했고 76개 전체 재실행은 하지 않았다(L2). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2) |
+| `tab-check.mjs` | C1~C15(C12 왕복 지연 포함) 76개 = 기존 C1~C14 68개 + RD-016 C15 8개(a·b·c·d×2·e×2·f) | `C1·C3·C8·C11` 30/30 | 통과. RD-016(2026-09-24): C15 절 8개 추가, C9c를 `from os import pa` → `path` 채움으로 재정의, C5e 제목 정정(왕복 + 큐), C12에 `import os.pa` 지연 기록 추가(판정 없음, 웜 N=20 중앙값·최대는 결과 JSON `notes`). dev `ONLY=C5,C9,C12,C15` 20/20(C15 8개 포함, `pageErrors` 0)만 실측했고 76개 전체 재실행은 하지 않았다(L2). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2). **2026-09-24 RD-022a DELTA-05 dev L1 전체 1회 76/76**(`pageErrors` 0, 위 부분 실행 기록에 이어 전체 결과를 처음 남긴다) |
 | `selection-copy-check.mjs` | S01~S12 등 14개 | `S01,S02,S05,S07` 4/4 | 통과 |
-| `type-ahead-check.mjs` | 초기·T01~T09(T08·T09a·T09b 포함, T10 제외)·T11·T12·콘솔/`pageerror` 확인 14개(T10 상한 4096은 벤더 단위 시험이 고정해 브라우저 셀 없음) | 미실행(dev 전용) | 통과 13/13(2026-09-24 RD-019 dev L1 1회, `pageErrors` 0. T11은 Tab이 마지막 키인 입력만 판정 — Tab 뒤 이어진 키는 응답 적용 조건으로 완성이 버려진다). T12(실행 중 `if 1:`+Shift+Enter+`pass` → `>>> if 1:` / `    pass`, 커서 열 8)는 2026-09-24 L1 `ONLY=T12` 1회만 통과 2/2(초기 포함, `pageErrors` 0. 나머지 셀은 위 RD-019 기록 유지) |
+| `type-ahead-check.mjs` | 초기·T01~T09(T08·T09a·T09b 포함, T10 제외)·T11·T12·콘솔/`pageerror` 확인 14개(T10 상한 4096은 벤더 단위 시험이 고정해 브라우저 셀 없음) | 미실행(dev 전용) | 통과 13/13(2026-09-24 RD-019 dev L1 1회, `pageErrors` 0. T11은 Tab이 마지막 키인 입력만 판정 — Tab 뒤 이어진 키는 응답 적용 조건으로 완성이 버려진다). T12(실행 중 `if 1:`+Shift+Enter+`pass` → `>>> if 1:` / `    pass`, 커서 열 8)는 2026-09-24 L1 `ONLY=T12` 1회만 통과 2/2(초기 포함, `pageErrors` 0. 나머지 셀은 위 RD-019 기록 유지). 2026-09-24 RD-022a DELTA-05 dev L1 전체 1회 **14/14**(T12 포함, `pageErrors` 0, `problemLogs` 0) |
+| `run-source-check.mjs`(REPL 화면, `runSource(code)`) | 초기 1개(프롬프트·요소 3종·xterm 1개·`window` 전역 노출 없음) + S01~S10 10개 + 끝 콘솔·pageerror 1개 = 12개. S01 `pri` 입력 중 호출 → 행 `1`·마지막 행 `>>> pri`·`ok`, 이어서 `x` → `1`, S02 `1/0` → `error`·`ZeroDivisionError`·트레이스백 행(빨강), S03 블록 입력 중 → `busy`·화면 무변경, S04 REPL 실행 중 → `busy`·Ctrl+C 정리, S05 실행 → Ctrl+C → `interrupted`(`^CTraceback` 형태, 평소 명령 실행과 같다), S06 `input("n: ")` 경유, S07 `sys.exit(3)`·`exit()` → `exit` 뒤 세션 유지·`input()`, S08 실행 중 `reset` → `restarted`, S09 커서 `p\|ri` 복원 → `X` → `pXri`, S10 꼬리 `a>>> pri` 보존 | 미실행(dev 전용) | **통과 12/12**(2026-09-24 RD-022a DELTA-05 dev L1 전체 1회, `pageErrors` 0, `problemLogs` 0) |
 | `runner-check.mjs normal`(실행창 `?view=runner`) | 초기 3개(격리·ready 빈 화면·터미널/worker 1개) + R01~R13 13개 = 16개. R01 `input("이름: ")`, R02 Ctrl+C `interrupted`, R03 `stop` `interrupted`, R04 삼키는 루프 + `stop` → `restarted`·`restarting` → `ready`, R05 실행 중 `run` → `busy`, R06 실행 중 키·붙여넣기 폐기(다음 `input()`에도 없음), R07 `ready` Ctrl+C 무동작, R08 드래그 복사, R09 `sys.exit(3)`, R10 `1/0` 트레이스백, R11 두 번째 run `NameError`·`__main__`, R12 미종결 줄 뒤 새 줄, R13 콘솔 무결 | 미실행(dev 전용) | **통과 16/16**(2026-09-24 RD-022 DELTA-07 L1 전체 1회, `pageErrors` 0, `problemLogs` 0). R04→R05→R06 순서 의존(R04가 `stop()` 폴백으로 재시작한 worker에서 R05·R06이 첫 interrupt를 보낸다)을 포함한다 |
 | `runner-check.mjs not-isolated`(4174 비격리 정적) | N01~N05 5개(경고 문구·노랑·상태 `not-isolated`·`run` → `unavailable`·worker 없음) | 미실행(정적 서버 전용) | 통과 5/5(2026-09-24 DELTA-07 L1 1회, `pageErrors` 0) |
 | `measure/boot-press.mjs`(baseline 세트 소속, DELTA-05가 배선) | 부팅 중 Ctrl+C N=30 | 미실행(baseline dev 전용) | 통과 30/30 |

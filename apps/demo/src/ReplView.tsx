@@ -1,4 +1,4 @@
-import { createRepl } from "@cp949/runo-pyodide-repl";
+import { createRepl, RunRejectedError } from "@cp949/runo-pyodide-repl";
 import type { CopyResult, ReplHandle, ReplStatus } from "@cp949/runo-pyodide-repl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -20,6 +20,12 @@ function readCopyOnSelect(): boolean {
   }
 }
 
+/** `runSource()`가 끝났을 때 결과 칸에 보여 줄 문자열. 결과 유니온은 JSON, 거부는 `{"rejected":"<reason>"}`. */
+function describeError(error: unknown): string {
+  if (error instanceof RunRejectedError) return JSON.stringify({ rejected: error.reason });
+  return JSON.stringify({ error: String(error) });
+}
+
 /**
  * xterm Terminal을 마운트하고 `createRepl`로 세션을 시작한다(RD-004). Terminal은 이 컴포넌트가 소유한다.
  * 크기는 xterm 기본값(80×24)으로 고정한다(FitAddon 없음). 세션 상태는 코어의 `onStatus`를 그대로 보여준다.
@@ -29,7 +35,9 @@ function readCopyOnSelect(): boolean {
  * (RD-012). 저장하지 않으므로 새로고침하면 항상 꺼짐이다. 리셋 버튼·크래시 재시작은 무인자라 마지막
  * 값을 유지한다(sticky, 코어가 보관). "선택 시 자동 복사" 체크박스는 localStorage에 저장되고
  * (`COPY_ON_SELECT_KEY`), Ctrl+C 복사는 이 값과 무관하게 항상 동작한다(RD-017). 복사 결과는 우측
- * 하단 토스트로 1초간 보여준다.
+ * 하단 토스트로 1초간 보여준다. `runSource(code)` 시험용으로 plain 요소 `textarea`(`source`)·버튼
+ * (`run-source`)·결과(`source-result`, JSON 텍스트, 거부는 `{"rejected":"<reason>"}`)를 둔다. 새 호출을
+ * 시작하면 이전 결과를 지운다(RD-022a). 결과 칸은 xterm DOM보다 먼저 바뀔 수 있다.
  */
 export function ReplView() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,6 +47,8 @@ export function ReplView() {
   const [topLevelAwait, setTopLevelAwait] = useState(false);
   const [copyOnSelect, setCopyOnSelect] = useState(readCopyOnSelect);
   const [toast, setToast] = useState<string | null>(null);
+  const [source, setSource] = useState("");
+  const [sourceResult, setSourceResult] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // `setToast`·`toastTimerRef`만 참조하는 안정된 콜백(useCallback 빈 deps) — 아래 마운트 effect의
@@ -86,6 +96,17 @@ export function ReplView() {
     };
   }, []);
 
+  // `runSource`를 부른다. 터미널에 포커스를 주지 않는다(치던 줄·`input()` 입력은 호출자가 정한다).
+  const runSource = () => {
+    const repl = replRef.current;
+    if (repl === null) return;
+    setSourceResult("");
+    repl.runSource(source).then(
+      (result) => setSourceResult(JSON.stringify(result)),
+      (error: unknown) => setSourceResult(describeError(error)),
+    );
+  };
+
   return (
     <>
       <p>
@@ -131,6 +152,24 @@ export function ReplView() {
         />{" "}
         선택 시 자동 복사
       </label>
+      <div>
+        <textarea
+          data-testid="source"
+          rows={4}
+          cols={80}
+          spellCheck={false}
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+        />
+      </div>
+      <div>
+        <button type="button" data-testid="run-source" onClick={runSource}>
+          run-source
+        </button>
+      </div>
+      <p>
+        source-result: <output data-testid="source-result">{sourceResult}</output>
+      </p>
       {status === "terminated" && (
         <div role="alert" data-testid="terminated">
           Python session terminated. "세션 리셋" 버튼으로 새 세션을 시작하세요.

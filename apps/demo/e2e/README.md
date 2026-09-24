@@ -28,7 +28,7 @@
   환경에서는 `e2e/run.mjs`가 "이미 죽었다"로 조용히 오판할 수 있다(`pending-traps/01.md` 계열,
   아래 함정 절 참고).
 
-## 명령 표(27항목, `apps/demo/package.json`)
+## 명령 표(28항목, `apps/demo/package.json`)
 
 | 이름 | 실행 |
 | --- | --- |
@@ -53,6 +53,7 @@
 | `e2e:tab` | `node e2e/checks/tab-check.mjs` |
 | `e2e:selection-copy` | `node e2e/checks/selection-copy-check.mjs` |
 | `e2e:type-ahead` | `node e2e/checks/type-ahead-check.mjs` |
+| `e2e:run-source` | `node e2e/checks/run-source-check.mjs`(REPL 화면의 `source`·`run-source`·`source-result` 요소로 `runSource(code)`를 조작, RD-022a) |
 | `e2e:boot-press` | `node e2e/measure/boot-press.mjs` |
 | `e2e:press-loss` | `node e2e/measure/press-loss.mjs` |
 | `e2e:burst-matrix` | `node e2e/measure/burst-matrix.mjs` |
