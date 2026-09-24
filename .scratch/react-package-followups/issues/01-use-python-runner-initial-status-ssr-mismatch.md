@@ -1,6 +1,6 @@
 # `usePythonRunner` 첫 렌더 `status`가 `crossOriginIsolated`에 의존해 SSR 하이드레이션이 어긋난다
 
-Status: open
+Status: done
 Origin: RD-024 병합 전 리뷰. `renderToString`으로 재현(2026-09-25).
 
 ## 현상
@@ -22,3 +22,4 @@ Origin: RD-024 병합 전 리뷰. `renderToString`으로 재현(2026-09-25).
 ## Comments
 
 - 2026-09-25 등록: 재현 가능한 코드 결함(SSR 소비자)과 관찰 가능한 완료 기준이 있어 `open`. SSR은 RD-024 범위 밖이라 우선순위는 낮다.
+- 2026-09-25 종결: `useSyncExternalStore`의 서버 스냅샷으로 고쳤다(사용자 확정: 고정 초기값 대신 서버 스냅샷, 값 `"loading"`). `use-lifecycle.ts` `useInitialRunnerStatus()`(구독 없음, `getSnapshot` = `initialRunnerStatus`, `getServerSnapshot` = `"loading"`)를 폴백으로 두고 `usePythonRunner`는 `onStatus` 통지값이 있으면 그것을 쓴다. 일반 CSR(`createRoot`) 첫 렌더는 그대로 격리 여부 값이라 기존 시험 "격리되지 않으면 첫 렌더부터 not-isolated"가 유지된다. 시험 `use-python-runner.test.tsx` "SSR 하이드레이션" 3건(서버 문자열 `<span>loading</span>`, 격리·비격리 클라이언트 `hydrateRoot`에서 `onRecoverableError` 0·첫 렌더 `loading`·정착 값) RED 3 → GREEN. 변이 2건(서버 스냅샷 `"not-isolated"`, 폴백을 `initialRunnerStatus()` 직접 호출) 모두 3건 실패로 killed. L0: react 패키지 시험 111 → 114, `turbo run check-types lint build test --filter=@cp949/runo-pyodide-react --filter=demo --force` 17/17. 브라우저 L1은 CSR 동작이 바뀌지 않아 0회. `PythonRunner` handle의 `status`(렌더에 쓰지 않는 ref)는 바꾸지 않았다.

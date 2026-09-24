@@ -116,7 +116,7 @@ const { status, run, stop, reset, interrupt, busy } = usePythonRunner({
 
 - React 상태는 `status`뿐이다. `run`·`stop`·`reset`·`interrupt`는 컴포넌트 수명 내내 같은 참조이고 살아 있는 `createRunner` 핸들로 위임한다(15.3의 핸들 없음 규칙: `interrupt`도 no-op). `busy`는 게터다.
 - `onOutput`·`inputProvider`는 호출자가 채운다(xterm이 없다). `<PythonRunner>`는 이 hook을 쓰지 않고 terminal 실행창을 쓴다. 수명·latest-ref 로직은 내부 공용 hook(`use-lifecycle.ts`) 하나를 둘이 공유한다.
-- 초기 `status`는 `crossOriginIsolated === true ? "loading" : "not-isolated"`(첫 렌더 값)이고 이후 `onStatus` 통지마다 갱신한다.
+- 초기 `status`는 일반 렌더에서 `crossOriginIsolated === true ? "loading" : "not-isolated"`(첫 렌더 값)이고 이후 `onStatus` 통지마다 갱신한다. 서버 렌더와 하이드레이션 첫 렌더는 `"loading"`이다(`useSyncExternalStore`의 서버 스냅샷, `use-lifecycle.ts` `useInitialRunnerStatus`). 서버에는 `crossOriginIsolated`가 없어 격리된 클라이언트의 첫 렌더와 달라지는 하이드레이션 불일치를 막는다. 비격리 클라이언트는 하이드레이션 뒤 마운트 effect의 첫 통지로 `not-isolated`가 된다.
 
 ## 15.8 사용과 소비자 요구
 
@@ -170,7 +170,7 @@ function App() {
 - **`autoFocus` prop**: 없다(15.6, `ref.current?.focus()`를 부모의 마운트 effect에서 부른다).
 - **`PythonRunner`의 `interrupt`·`busy`**: terminal 핸들에 없어 노출하지 않는다(15.2).
 - REPL + dom-bridge 조합은 지원하지 않는다(ADR-0006).
-- SSR 렌더링은 시험하지 않았다. `Terminal`·worker는 마운트 effect 안에서만 만든다. 번들 없는 Node ESM에서의 모듈 평가는 `pnpm smoke:pack`의 import 검사가 확인한다.
+- SSR 렌더링은 `usePythonRunner`의 `status`만 시험한다(`renderToString` → `hydrateRoot`, 격리·비격리 클라이언트에서 `onRecoverableError` 0). 컴포넌트의 SSR은 시험하지 않았다. `Terminal`·worker는 마운트 effect 안에서만 만든다. 번들 없는 Node ESM에서의 모듈 평가는 `pnpm smoke:pack`의 import 검사가 확인한다.
 
 판단 기록:
 
