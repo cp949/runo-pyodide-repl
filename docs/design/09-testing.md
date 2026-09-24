@@ -2,7 +2,20 @@
 
 > 이 문서의 규칙·상수는 이전 구현(`/work/cp949/pyodide-samples/apps/repl`, 읽기 전용 참고)이 CPython 3.14.4 pty 실측과 브라우저 회귀로 확정한 것이다. 새 구현은 통신 계층만 바꾸고(`docs/design/00-architecture.md`, `01-protocols.md`) 이 규칙은 그대로 지킨다. 절 끝의 "참고:" 경로는 이전 구현의 근거 위치다.
 
-파일 이름은 이전 구현의 시험 인벤토리다. 새 구현은 같은 검증 범위를 목표로 하되 파일 배치는 `packages/pyodide-repl/src/**/*.test.ts`를 따른다. 새로 추가되는 시험 대상: `rpc`(실제 `MessageChannel`), `stdin-mailbox`(node `worker_threads`로 실제 `Atomics.wait` 왕복·청크·취소), 초기화 프레임.
+파일 이름은 이전 구현의 시험 인벤토리다. 새 구현은 같은 검증 범위를 목표로 하되 파일 배치는 패키지별 `src/**/*.test.ts`를 따른다(RD-020 뒤 core·repl·testkit 세 곳). 새로 추가되는 시험 대상: `rpc`(실제 `MessageChannel`), `stdin-mailbox`(node `worker_threads`로 실제 `Atomics.wait` 왕복·청크·취소), 초기화 프레임, core 세션, 패키지 경계(9.8).
+
+**시험 배치(RD-020)**. 아래 9.1·9.2의 파일 이름에서 `worker/`·`protocol/`·`terminal/`은 그 파일이 있는 패키지를 따른다.
+
+| 위치 | 시험 |
+| --- | --- |
+| `packages/pyodide-core/src/` | `protocol/*.test.ts`(init-frame·interrupt-protocol·interrupt-sender·rpc·rpc-handlers·stdin-mailbox·thread-scenario), `terminal/output-tail.test.ts`, `session/core-session.test.ts`(가짜 worker·가짜 driver로 세션 게이트·출력 계약·핸들러 충돌·종료 순서), `worker/{run-worker,boot-driver-options,core-console,interrupt-watch,sink-writer,sink-writer-pyodide}.test.ts`, `package-boundary.test.ts` |
+| `packages/pyodide-repl/src/` | `terminal/*.test.ts`, `worker/*.test.ts`(SIGINT 통합 4종·`interrupt-buffer`·`stdin-callback`·`console`·`submission-runner`·`webloop-reraise`·`boot`·`repl-driver`·`repl-loop`·`multiline`·`complete-source`·`top-level-await`·`module-completion-parity`), `index.test.ts`(실제 `Readline` + 가짜 worker로 REPL 세션 전체), `worker.test.ts`, `package-boundary.test.ts` |
+| `packages/pyodide-testkit/src/` | `fake-terminal.test.ts`, `package-boundary.test.ts`(도우미 시험), `check-dist-script.test.ts` |
+
+- SIGINT 통합 시험(`sigint-handler*.test.ts` 4종)과 `interrupt-buffer`·`stdin-callback`·`console`·`submission-runner`·`webloop-reraise` 시험은 repl에 남는다. 공용 조립 `src/test/sigint-setup.ts`가 repl의 `worker/console`(`createConsole`)·`worker/multiline`(`loadSplitPaste`)을 조립하는 REPL 콘솔 통합 시험이라, core로 옮기면 core → repl 역의존이 생기기 때문이다. 실행 driver(RD-022)가 생겨 core 전용 하니스가 가능해지면 다시 나눈다.
+- 이 시험들이 core 부품(`connectInterrupts`·`installSigintHandler`·`installSleepSlice`·`createStdinCallback`·`suppressWebLoopReraise`·`createSinkWriter`)을 쓰는 통로는 repl `src/test/core-internals.ts` 한 곳이다. core 공개 export가 아니라 core 소스를 상대 경로(`../../../pyodide-core/src/worker/…`)로 re-export한다(시험 전용 이름이 공개 표면에 섞이지 않게). 눌림 스레드 역할도 같은 방식으로 `sigint-setup.ts`의 `INTERRUPT_PRESSER_ROLE`(core `src/test/roles/interrupt-presser.ts`의 URL)이 가리킨다. 저장소 체크아웃에서만 성립하는 경로이고 시험 전용이다. 패키지 배치가 바뀌면 이 두 파일만 고친다.
+- repl 시험이 core를 공개 export(`@cp949/runo-pyodide-core`·`/worker`)로 import하면 `development` 조건이 없는 vitest·tsc에서는 `dist`로 해석된다. 루트 `pnpm test`는 turbo `test`가 `^build`에 의존해 항상 최신 core `dist`를 쓰지만, core 소스를 고친 뒤 repl 시험만 직접 돌릴 때는 먼저 `pnpm --filter @cp949/runo-pyodide-core build`를 한다. `core-internals.ts` 경로는 소스를 직접 읽어 이 영향이 없다.
+- `runWorker`가 같은 번들 안에서 `bootWorker`를 부르므로 진입점 시험(옛 `worker.test.ts`의 4건)은 core `worker/run-worker.test.ts`에 있고, repl `worker.test.ts`는 `runReplWorker`가 REPL driver로 `runWorker`를 부르는지만 본다.
 
 ## 9.1 node + 실제 pyodide(`// @vitest-environment node`)
 파이썬 의미·pyodide 내부 가정·프로토콜 불변식을 실제로 돌려 고정한다. 해당 파일:
@@ -14,7 +27,7 @@
 `terminal-sinks.test.ts`(실제 `PyodideConsole`·sink·`Readline`의 터미널 바이트),
 `complete-source.test.ts`, `module-completion-parity.test.ts`(RD-016, 아래 별도 항목), `auto-indent-parity.test.ts`
 (pyodide에 든 `_pyrepl.readline` 함수와 차분 검증), `rpc.test.ts`(실제 `MessageChannel`).
-- 파일 지정 실행: `pnpm --filter @cp949/runo-pyodide-repl test -- <이름>`은 필터가 적용되지 않아 패키지 전체(43개 파일·1185건, 약 18초)를 돌린다(2026-09-24 실측).
+- 파일 지정 실행: `pnpm --filter @cp949/runo-pyodide-repl test -- <이름>`은 필터가 적용되지 않아 패키지 전체를 돌린다(RD-020 뒤 repl 34개 파일·1034건, 약 18초. 2026-09-24 실측. 이동 전에는 43개 파일·1185건, 약 18초).
   대상만 돌리려면 `cd packages/pyodide-repl && pnpm exec vitest run <파일 일부 이름...> [--reporter=verbose]`.
 - **모듈 완성(RD-016)**: `worker/complete-source.test.ts`는 실제 pyodide에서 `complete_source`의 모듈 분기를 본다 — 후보(`os.path`·`path`·`collections.abc`),
   zip 보정 사전 조건(원본 `ModuleCompleter`가 `import collections.a`에 `[]`, `_stdlib_path`가 `str` `'/lib/python314.zip'`, `_is_stdlib_module` 존재, TRAP-10),
@@ -34,7 +47,7 @@
   `worker/sigint-handler-idle.test.ts`(정지한 대기 깨우기·TLA·`pending`·가드 3종. RD-009a가 더한 것:
   `run_sync` 계열 대기에서 코루틴이 낸 예외의 나르기·프레임 보존),
   `worker/sigint-handler-nojspi.test.ts`(JSPI 없는 경로 5건).
-- 공용 조립은 `src/test/sigint-setup.ts`의 `setupConsoleRunner(pyodide, options)` →
+- 공용 조립은 repl `src/test/sigint-setup.ts`의 `setupConsoleRunner(pyodide, options)` →
   `{ run, screen, buffer, pyconsole, presser, wakeAfter }`와 `teardownConsoleRunner`다. `wakeAfter(ms)`는 감시
   타이머 대신 시험이 직접 `interruptIdle()`을 부르는 도우미이고(프로덕션 경로는 타이머다) `{ woke, … }`를
   돌려준다. 해체는 버퍼 해제·`discardPendingInterrupt`·`signal.signal(SIGINT, default_int_handler)`에 더해
@@ -44,7 +57,7 @@
   `delete`하고 `afterAll`에서 되돌린다. pyodide는 `"Suspending" in WebAssembly`로 판정하고 Node 24는 기본으로
   JSPI가 켜져 있다(`--no-experimental-wasm-jspi`는 듣지 않는다). vitest는 파일 격리라 다른 파일에 새지 않는다
   (같은 실행에서 JSPI 있는 `sigint-handler-idle.test.ts`가 통과하는 것으로 확인한다).
-- 눌림은 눌림 스레드 역할 `src/test/roles/interrupt-presser.ts`가 `node:worker_threads`로 실제 스레드에서 버퍼에
+- 눌림은 눌림 스레드 역할 core `src/test/roles/interrupt-presser.ts`가 `node:worker_threads`로 실제 스레드에서 버퍼에
   쓴다. 시나리오 Python은 JS 전역 `started()`로 "실행에 들어갔다"를 알리고, 그 호출을 `try` **본문 안**에 둔다
   (폴링 위상에 따라 호출 직후의 SIGINT가 `try` 진입 전에 처리되면 예외가 `except`를 벗어난다, TRP-012). 무한
   루프 대신 상한 있는 루프를 쓴다(눌림이 소실되면 vitest가 멈출 수 없다).
@@ -52,11 +65,11 @@
   `setTimeout`이라 스레드를 막으면 재전송이 한 번도 돌지 않고 "소실 0"이 저절로 나온다(TRP-014).
 - pyodide private 의존(플래그, `run_sync`, `time.sleep.__wrapped__`, WebLoop 속성)은 **테스트가 깨지는 것이
   버전 업그레이드 알림**이라는 전제로 쓴다.
-- worker 스레드 시험(메일박스·프로토콜 통합 시나리오): `src/test/thread.ts`의 `spawnRole(name, workerData)`가
-  `src/test/roles/<name>.ts`를 실제 `worker_threads` 스레드로 띄운다. `Atomics.wait`에 영구히 막힌 스레드도 시험이
+- worker 스레드 시험(메일박스·프로토콜 통합 시나리오): `packages/pyodide-testkit/src/thread.ts`(`@repo/pyodide-testkit/thread`)의
+  `spawnRole(roleUrl: URL, workerData?)`가 호출한 패키지가 넘긴 역할 스크립트(core `src/test/roles/<name>.ts`)를 실제 `worker_threads` 스레드로 띄운다. `Atomics.wait`에 영구히 막힌 스레드도 시험이
   끝나면 `terminate()`로 회수된다. 역할 스크립트와 그것이 import하는 소스는 Node 타입 제거로 실행되므로 enum·
   namespace·매개변수 프로퍼티를 쓰지 않고 타입 import는 `import type`으로 쓴다. 확장자 없는 상대 import는
-  `src/test/ts-resolve-hook.mjs`(`module.registerHooks`)가 푼다.
+  `packages/pyodide-testkit/src/ts-resolve-hook.mjs`(`@repo/pyodide-testkit/ts-resolve-hook.mjs`, `module.registerHooks`)가 푼다. 역할 스크립트를 testkit이 아니라 core에 두는 것은 역할이 core `protocol/`을 import하기 때문이다(testkit에 두면 testkit → core → (dev) testkit 순환).
 - 변이 검사 주의: 비동기 폴링 대기를 없애는 변이는 마이크로태스크 스핀이 되어 이벤트 루프를 굶기고 시험 타임아웃도
   발동하지 못한다. 그런 변이는 간격·호출 경로를 바꾸는 방식으로 대체한다. `MessagePort`를 든 객체에는 `toContain`·
   `toEqual`을 쓰지 않는다(순환 내부 참조로 스택이 넘친다). 정체성 비교(`includes`)를 쓴다.
@@ -90,12 +103,12 @@
     없다.
   - stdin 콜백(`worker/stdin-callback.test.ts`)은 실제 pyodide에 `setStdin({ stdin: createStdinCallback(...) })`을 걸고 `input()`·`sys.stdin.readline()`·`read(3)`·`readlines(1)`·`for line in sys.stdin`이 같은 경로로 값을 받는지, 콜백 호출 수가 소비한 줄 수와 같은지 본다. `requestInput`과 `wait`의 앞뒤 순서는 호출 순서를 기록하는 주입 함수로 단언한다(알림을 `wait()` 뒤로 옮긴 변이가 이 시험에서 잡힌다). `setStdin` 없이 `input()`을 부르면 시험이 실패하지 않고 스위트가 멈추므로(외부 `timeout`이 필요하다) 시험 인스턴스에 `setStdin({ error: true })`를 먼저 걸고, `afterEach`에서 `sys.stdin`을 새 스트림으로 교체한다(`read(n)`이 남긴 `\n`이 다음 시험을 채운다, `docs/traps/TRP-010`).
   - 같은 파일의 **취소 변환**(RD-008)은 `runPython`이 아니라 **콘솔 러너 경로**로 돌린다: 핸들러는 스택에 `<console>` 프레임이 있을 때만 `KeyboardInterrupt`를 내므로 `runPython`의 파일명 `<exec>`에서는 취소가 버려지고 CPython이 읽기를 재시도한다. `sigint-handler.test.ts`의 `setup()`과 같은 순서로 `createConsole` → `createInterruptBuffer` → `installSigintHandler` → `setInterruptBuffer` → `createSubmissionRunner`를 만들어 제출하고 `screen.stderr`로 트레이스백 바이트를 단언한다. 보는 것: `input()`·`readline()`·`read()`·`for line in sys.stdin`·함수 프레임의 트레이스백, `try/except/finally/with`, 재시도 없음(`countWaits === 1`), 요청 번호를 올리지 않은 전송은 무시(TRP-035 검출), `checkInterrupt()`가 던지지 않으면 `EOFError` + `console.warn` 1회, 20회 반복 뒤 SIGINT 잔류 0.
-  - **취소와 눌림의 경합**(같은 파일)은 눌림 스레드(`src/test/roles/interrupt-presser.ts`)를 띄운다. 읽기가 열린 순간을 기준으로 삼기 위해 `installStdin`에 `onRead` 훅을 두고 그 안에서 시작 표시(`ctl`)를 세운다. 0ms 연타는 취소와 같은 읽기 안에 떨어져 콜백의 `checkInterrupt()`가 함께 소비하고(실측 20라운드 잔류 0), 취소가 끝난 뒤 도착한 눌림은 돌고 있는 Python이 없어 슬롯에 남아 루프의 `discardPendingInterrupt`가 지운다(그 시험이 `SIGNAL === 2`를 단언한다). `except KeyboardInterrupt` 뒤 계산 중 눌림은 시간과 stderr 둘 다 본다(대조 215ms → 눌림 34ms).
+  - **취소와 눌림의 경합**(같은 파일)은 눌림 스레드(core `src/test/roles/interrupt-presser.ts`)를 띄운다. 읽기가 열린 순간을 기준으로 삼기 위해 `installStdin`에 `onRead` 훅을 두고 그 안에서 시작 표시(`ctl`)를 세운다. 0ms 연타는 취소와 같은 읽기 안에 떨어져 콜백의 `checkInterrupt()`가 함께 소비하고(실측 20라운드 잔류 0), 취소가 끝난 뒤 도착한 눌림은 돌고 있는 Python이 없어 슬롯에 남아 루프의 `discardPendingInterrupt`가 지운다(그 시험이 `SIGNAL === 2`를 단언한다). `except KeyboardInterrupt` 뒤 계산 중 눌림은 시간과 stderr 둘 다 본다(대조 215ms → 눌림 34ms).
   - 부팅의 `input()` 시험(`worker/boot.test.ts`)은 **선전달 기법**을 쓴다. `Atomics.wait(ctrl, STATE, IDLE)`은 STATE가 이미 READY면 즉시 돌아오므로, 각본이 `input()` 줄을 답하기 전에 main 역할이 `deliver`를 해 두고 타임라인(`write("x: ")` → `readInput(true)` → 다음 `readLine`)과 값(`x`의 에코 `'abc'`, `sys.stdin.readline()`의 에코 `'def\n'`)을 단언한다. 스레드는 쓰지 않는다. 메일박스 대기 중 `complete`가 큐잉되는 프로토콜 쪽은 `protocol/thread-scenario.test.ts`의 스레드 시험이 본다.
   - `exit()`·중단·`input()` 취소는 asyncio가 `SystemExit`·`KeyboardInterrupt`를 WebLoop로 다시 던져 vitest를
     `Unhandled Rejection`으로 실패 종료시킨다. RD-009의 `suppressWebLoopReraise`가 이 재보고를 없앴고
     **`vitest.config.ts`의 `onUnhandledError` 필터는 제거했다**(억제 없이 필터만 떼면 개별 시험이 다 통과해도
-    `Errors 210` + 종료코드 1이다 — 실측). 실제 pyodide를 직접 로드하는 시험 파일은 `boot.ts`의 배선이 닿지
+    `Errors 210` + 종료코드 1이다 — 실측). 실제 pyodide를 직접 로드하는 시험 파일은 core `worker/boot.ts`(`bootWorker`)의 배선이 닿지
     않으므로 **그 파일의 콘솔 조립 지점에서 `suppressWebLoopReraise`를 직접 불러야** 한다. `process.on
     ("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
   - `time.sleep`의 무효 인자 문구(`-1`·`'a'`·NaN·inf·키워드·인자 2개·`9.3e9`)를 단정하는 시험의 기준은 **로컬
@@ -125,7 +138,7 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 `history-filter.test.ts`, `paste-tabs.test.ts`, `interrupt-protocol.test.ts`,
 `interrupt-sender.test.ts`(주입 타이머로 전송·재전송·10회 상한·읽기 순서), `interrupt-watch.test.ts`,
 `App.test.tsx`(배선: 전송·재전송, `readLine`/`readInput` 진입, 세션 리셋, 언마운트).
-- 가짜 터미널(`src/test/fake-terminal.ts`)은 `write` 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다
+- 가짜 터미널(`packages/pyodide-testkit/src/fake-terminal.ts`, `@repo/pyodide-testkit/fake-terminal`)은 `write` 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다
   (동기만 쓰면 TRP-008을 놓친다). history는 ↑ 재호출로만 관찰한다.
   `createFakeTerminal({ asyncWrite, cols, rows })`가 `{ term, screen, written, type, paste, keyDown, flush, disposedBufferReads }`를 돌려준다.
   `entries` 직접 단언은 ↑ 재호출로 구분할 수 없는 복구 두 경우(50개 제한으로 밀린 항목 복구, 중복 제거로 옮겨진 옛 항목의 원래 자리 복구)에만 쓴다(`block-history.test.ts`, RD-014 확정 8).
@@ -364,3 +377,50 @@ e2e 스크립트에 적용한다. 기존 고정 대기(2026-09-24 기준 `checks
 6. **성능 수치는 기록이다.** 결과 JSON에 N과 함께 남기고, 비교는 같은 장비의 이전 값과만 한다.
    `apps/demo/e2e/BASELINE.md` 4절의 ms 값은 참고값이다. 참고값을 벗어난 것은 회귀 판정이 아니라 `deferred` 이슈
    대상이다(`docs/agents/issue-tracker.md` "등록·분류 기준").
+
+## 9.8 패키지 경계 검사(RD-020)
+
+"core·repl·terminal·react는 coincident에 의존하지 않는다"([ADR-0006](../adr/0006-pyodide-core-and-plugin-packages.md))와 "core는 터미널 라이브러리를 모른다"를 시험·스크립트로 강제한다. 검사 대상이 서로 달라 세 가지로 나눴고, 하나가 다른 것을 대신하지 않는다.
+
+| 검사 | 대상 | 실행 | 위치 |
+| --- | --- | --- | --- |
+| 의존 트리 시험 | 설치된 `node_modules`의 의존 트리 | `pnpm test`(vitest) | core·repl `src/package-boundary.test.ts`, 도우미 `@repo/pyodide-testkit/package-boundary` |
+| `dist` 문자열 검사 | 빌드 산출물 파일 내용 | `pnpm check-dist`, 루트 `pnpm test`가 함께 실행 | `scripts/check-dist.mjs`, 패키지 `check-dist` 스크립트 |
+| tarball 스모크 | `pnpm pack` tarball을 저장소 밖에 설치한 결과 | `pnpm smoke:pack`(L0 수동) | `scripts/pack-smoke.mjs` |
+
+### 9.8.1 의존 트리 시험
+
+- 도우미 `packages/pyodide-testkit/src/package-boundary.ts`: `collectInstalledDependencyNames(packageDir)`가 `package.json`에서 시작해 `dependencies`·`peerDependencies`·`optionalDependencies`를 설치된 `node_modules`(심볼릭 링크는 실제 경로)로 끝까지 따라가 이름 집합을 낸다. 작업공간 내부 패키지와 외부 패키지의 전이 의존을 모두 포함한다. `devDependencies`는 소비자에게 가지 않으므로 따라가지 않는다. `findForbiddenDependencies(names)`가 `FORBIDDEN_RUNTIME_DEPENDENCIES`(`coincident`·`reflected-ffi`)와 겹치는 이름을 낸다.
+- `dependencies` 항목을 해석하지 못하면 던진다(부분 트리로 통과해 금지 이름이 가려지는 것을 막는다). 설치되지 않을 수 있는 peer·optional은 `unresolved`에 적고 넘어간다. 그러므로 `pnpm install` 없이 시험을 돌리면 `의존 …을(를) 해석하지 못했다`로 실패한다.
+- core 시험: 트리에 금지 이름이 없고, `@cp949/runo-xterm-readline`이 없다. repl 시험: 금지 이름이 없고, 트리에 `@cp949/runo-pyodide-core`·`@cp949/runo-xterm-readline`·`string-width`·`@xterm/xterm`이 있다(아무것도 따라가지 못해 빈 집합으로 항상 통과하는 것을 막는 대조).
+- 도우미 자체는 testkit `package-boundary.test.ts`가 가짜 해석기·임시 `node_modules`로 시험한다. 이 도우미는 `node:fs`를 쓰므로 시험 파일 상단에 `// @vitest-environment node`를 둔다.
+
+### 9.8.2 `dist` 문자열 검사
+
+- `node scripts/check-dist.mjs <dist 폴더>...`: 폴더 아래 모든 파일(`.map` 포함)에 `coincident`·`reflected-ffi`가 없는지 본다(대소문자 무시). 폴더가 없거나, 파일이 하나도 없거나, 인자가 없으면 통과하지 않고 실패한다(빌드 전에 돌린 것을 통과로 착각하지 않게). 실패는 `check-dist 실패: …`를 표준 오류에 내고 종료 코드 1이다.
+- xterm-readline·core·repl의 `package.json`에 `"check-dist": "node ../../scripts/check-dist.mjs dist"`가 있다.
+- turbo 태스크 `check-dist`는 `dependsOn: ["build"]`, `cache: false`다. 루트 `pnpm test`는 `turbo run test check-dist`이고 `pnpm check-dist`로 단독 실행할 수 있다. `check-dist`는 vitest가 아니라 turbo 태스크라 시험 수에 잡히지 않는다.
+- 시험 안이 아니라 별도 태스크인 이유: turbo `test`는 `^build`(의존 패키지의 빌드)에만 의존하고 자기 패키지의 `build`에는 의존하지 않는다. 시험이 자기 `dist`를 읽으면 빌드 전에는 실패하고 빌드 뒤에는 낡은 산출물을 볼 수 있다. `test`가 `build`에 의존하게 바꾸면 demo(vite)까지 매번 빌드된다. `cache: false`는 `dist`가 `.gitignore` 대상이라 turbo 입력 해시에 들지 않아, 캐시가 켜져 있으면 변조가 가려지기 때문이다.
+- 스크립트 자체는 testkit `check-dist-script.test.ts`(자식 프로세스로 실행, 9건)가 시험한다. 실패 케이스는 종료 코드 1만 단언하면 스크립트가 없어도(`MODULE_NOT_FOUND`) 통과하므로 표식 `check-dist 실패`를 함께 단언한다.
+
+### 9.8.3 tarball 스모크(`pnpm smoke:pack`)
+
+- `pnpm build && node scripts/pack-smoke.mjs`. 기본 파이프라인(`pnpm test`·turbo)에는 넣지 않는다. L0 범위의 수동 검사이고 레지스트리 접근(네트워크)이 필요하다(`@xterm/xterm`·`string-width`·`typescript`·`pyodide`·`@types/*` 설치, `--prefer-offline`이라 pnpm 저장소에 있으면 다시 받지 않는다). `dist`가 없으면 스크립트가 실패한다.
+- 절차 5단계:
+  1. xterm-readline·core·repl을 `pnpm pack`하고 tarball 안 `package.json`의 `dependencies`·`peerDependencies`·`optionalDependencies`에 `workspace:`가 남지 않았는지 확인한다.
+  2. 저장소 밖 임시 소비자 프로젝트에 세 tarball(`file:`)과 `@xterm/xterm`·`pyodide`를 설치한다.
+  3. node ESM `import`로 공개 진입점 5개(`@cp949/runo-xterm-readline`, `@cp949/runo-pyodide-core`, `@cp949/runo-pyodide-core/worker`, `@cp949/runo-pyodide-repl`, `@cp949/runo-pyodide-repl/worker`)의 대표 export가 기대한 타입인지 본다.
+  4. `tsc --noEmit`을 `skipLibCheck: false`로 돌려 배포된 `.d.mts`의 타입 해석까지 검사한다.
+  5. 설치된 트리(lockfile·`node_modules` 이름·설치된 `dist` 문자열)에 `coincident`·`reflected-ffi`가 없는지 본다(`dist` 문자열은 9.8.2의 `check-dist.mjs`를 재사용한다).
+- 확인된 사실:
+  - `pnpm pack`은 `dependencies`의 `workspace:*`를 실제 버전(현재 `0.0.0`)으로 바꿔 쓴다(`devDependencies`도 같다). 스모크가 1단계에서 매번 단언한다.
+  - `"private": true`인 패키지도 pack 된다. tarball 안 `package.json`에도 `private: true`가 남지만 설치에는 영향이 없다. tarball 파일은 `dist/**`·`package.json`(xterm-readline은 `LICENSE-MIT`·`README.md` 포함)이다.
+- 내부 패키지를 tarball로 고정하는 메커니즘: 소비자 폴더에 `pnpm-workspace.yaml`을 두고 `overrides:`(내부 패키지 3개 → `file:` tarball)를 적은 뒤 `pnpm install --prefer-offline`을 `--ignore-workspace` 없이 실행한다. pnpm 11.25.0에서 `package.json`의 `pnpm.overrides`는 읽히지 않고(`The "pnpm" field in package.json is no longer read by pnpm`), `--ignore-workspace`는 `pnpm-workspace.yaml`의 `overrides`도 무시한다. 둘 다 내부 패키지가 레지스트리로 조회돼 `ERR_PNPM_FETCH_404`가 난다. 소비자 `package.json`의 `packageManager`를 저장소 루트 값(pnpm 11.25.0)으로 고정해야 전역 pnpm 10이 쓰이지 않는다(pnpm 10은 `pnpm.overrides`를 읽는다). 소비자가 pnpm 10 이하이면 다른 메커니즘이 필요하다.
+- 소비자 요구사항(스모크 소비자가 충족하는 것):
+  - core `./worker` 타입(`dist/worker.d.mts`)이 `pyodide`·`pyodide/ffi` 타입을 import한다. core는 `pyodide`를 `devDependencies`로만 두고(배포 의존이 아니다) tsdown `external`로 타입을 인라인하지 않는다. 그래서 core 타입을 직접 쓰는 소비자는 `pyodide`를 직접 설치해야 한다. repl은 core 타입을 `dist/*.d.mts`에서 import하지 않으므로(`@xterm/xterm`만) repl만 쓰는 소비자는 영향이 없다.
+  - `skipLibCheck: false`이면 pyodide 자체 타입이 `lib`에 `ESNext`(`Symbol.dispose`)를, `@types/node`와 `@types/emscripten`(전역 `FS`)을 요구한다. TypeScript 6은 `@types/*`를 자동 포함하지 않으므로 소비자 tsconfig에 `types: ["node", "emscripten"]`를 적는다. 저장소 내부 `tsc`는 `skipLibCheck: true`라 이 요구가 가려져 있다. 스모크가 `false`를 쓰는 이유는 `true`이면 `pyodide` 미해석도 가려지기 때문이다.
+  - 소비자 tsconfig: `module`·`moduleResolution: "NodeNext"`, `strict`, `noEmit`, `lib: ["ESNext", "DOM", "DOM.Iterable"]`.
+- 임시 폴더: `SMOKE_TMPDIR`(기본 `os.tmpdir()`) 아래 `mkdtemp`. 성공하면 지우고, 실패하면 원인 조사용으로 남기고 경로를 출력한다(실패가 쌓이면 수동으로 지운다). `KEEP=1`이면 성공해도 남긴다.
+- 소비자 버전 원천: `pyodide`는 core `devDependencies.pyodide`, `@xterm/xterm`은 repl `devDependencies`, `typescript`·`packageManager`는 루트 `package.json`이다. `@types/node`(`24`)·`@types/emscripten`(`^1.41.4`)는 스크립트에 적은 범위라 시간이 지나면 해석되는 버전이 바뀐다.
+- 소요 시간: 2026-09-24 실측 통과 2.6초(스크립트 내부 기록), `time` real 3.3초. pnpm 저장소에 필요한 패키지가 이미 있고 `pnpm build`가 turbo 캐시인 상태의 값이며, 저장소가 비어 있는 첫 실행은 재지 않았다.
+- 한계: 소비자 검사는 `moduleResolution: NodeNext`·strict 기준 한 가지다. 번들러(Vite)의 `development` 조건은 검사하지 않는다(데모 빌드가 덮는다).

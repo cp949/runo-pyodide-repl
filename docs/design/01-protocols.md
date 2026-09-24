@@ -1,6 +1,6 @@
 # 프로토콜: RPC·stdin 메일박스·interrupt buffer·초기화 프레임
 
-`00-architecture.md` 2절의 채널 세 개와 초기화 프레임의 정확한 형식이다. 이 문서의 상수·상태 전이가 `packages/pyodide-repl/src/protocol/`의 계약이고, 시험은 이 문서를 기준으로 쓴다.
+`00-architecture.md` 2절의 채널 세 개와 초기화 프레임의 정확한 형식이다. 이 문서의 상수·상태 전이가 `packages/pyodide-core/src/protocol/`의 계약이고(RD-020 전에는 `pyodide-repl`에 있었다), 시험은 이 문서를 기준으로 쓴다.
 
 ## 1. RPC (MessagePort 위 요청/응답/알림)
 
@@ -36,6 +36,8 @@ type RpcMessage =
 | `loadFailed` | ntf | worker→main | `message: string` | — | pyodide 로드 실패. worker는 살아 있고 루프에 들어가지 않는다 |
 | `sessionTerminated` | ntf | worker→main | — | — | `exit()`/`quit()`/`SystemExit` |
 | `crashed` | ntf | worker→main | `{ message: string }` | — | 부팅 뒤(REPL 루프)의 잡히지 않은 예외. worker는 살아 있을 수 있으나 루프는 끝났다(RD-010) |
+
+표의 핸들러 소유(RD-020): `write`·`writeErrorRaw`·`readInput`·`ready`·`loadFailed`·`sessionTerminated`·`crashed`는 core 핸들러(main 쪽 표 `CORE_MAIN_HANDLER_NAMES`)이고, `readLine`(worker→main)·`writeOutput`·`writeError`는 REPL main driver 핸들러, `complete`(main→worker)는 REPL worker driver 핸들러다. 각 RPC 끝점은 생성 시 `composeRpcHandlers(core 표, driver 표)`로 표를 합치고 이름이 겹치면 예외를 던진다(늦은 등록 API 없음). core는 `write`·`writeErrorRaw`를 `{ stream: 'stdout' | 'stderr', text }` 원문으로 세션 `output` 콜백에 넘긴다.
 
 `loadFailed`의 `message`는 worker의 `String(error)`이고 main이 `pyodide 로드 실패: ` 접두사를 붙여 `writeError`로 낸다(빨강 + 개행). pyodide 로드뿐 아니라 콘솔 생성 실패도 같은 알림으로 온다.
 
@@ -131,7 +133,7 @@ const SEQ    = 2   // 요청 번호. 새 눌림마다 +1, 재전송은 같은 �
 - 초기화 프레임으로 worker에 넘기고 `pyodide.setInterruptBuffer(buffer)`에 **그대로**(접근자·Proxy 없이) 연결한다.
 - 세션 간 재사용한다. 새 worker를 만들기 직전 main이 송신기를 취소하고 `SIGNAL`을 0으로 비운다.
 - 쓰기·ack·재전송·핸들러 규칙 전체는 `03-ctrl-c.md`에 있다. 새 SIGINT를 쓰는 곳은 main 송신기와 worker의 stdin 콜백(취소 변환) 둘뿐이다.
-- 읽기 함수 `readRequestSeq(buffer)`(슬롯 `[2]`)는 핸들러가 재전송과 새 눌림을 구분할 때 쓴다. `worker/`는 `protocol/`을 import하지 않으므로 `boot.ts`가 클로저로 넣는다.
+- 읽기 함수 `readRequestSeq(buffer)`(슬롯 `[2]`)는 핸들러가 재전송과 새 눌림을 구분할 때 쓴다. core `worker/`의 `sigint-handler.ts`·`interrupt-buffer.ts` 등은 `protocol/`을 import하지 않으므로 core `worker/boot.ts`가 클로저로 넣는다.
 
 ## 4. 초기화 프레임
 
@@ -142,25 +144,33 @@ interface InitFrame {
   interruptBuffer: Int32Array     // SAB 뷰. 구조적 복제로 같은 메모리를 가리킨다
   stdinCtrl: Int32Array           // 메일박스 제어
   stdinData: Uint8Array           // 메일박스 데이터
-  topLevelAwait: boolean
+  driver: unknown                 // driver 전용 옵션. core는 모양을 모른다(REPL은 { topLevelAwait: boolean })
   pyodide: { indexURL: string }
 }
 ```
 
 - main: `worker.postMessage(frame, [frame.rpcPort])`. worker 생성 직후 첫 메시지로 보낸다.
-- worker: 스크립트 최상단(첫 `await` 이전)에서 `addEventListener('message', once)`로 첫 메시지를 받고 `parseInitFrame`으로 검증한다. 검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`). 실패하면 필드 이름을 담아 `console.error` 후 프레임을 무시한다. 이후 네이티브 `message` 채널은 쓰지 않는다.
+- worker: 스크립트 최상단(첫 `await` 이전, 모듈 본문에서 동기로)에서 core `runWorker({ driver })`가 `addEventListener('message', listener)`로 리스너를 건다. `{ once: true }`가 아니라 필터다(coincident 같은 다른 프로토콜이 같은 worker에 있어도 그 메시지를 삼키지 않는다, ADR-0006). 리스너는 메시지를 다음 규칙으로 처리한다.
+  - 배열 메시지(다른 프로토콜의 것): 조용히 넘기고 리스너를 유지한다.
+  - `kind === 'init'`인 객체(init 후보): 리스너를 떼고(이후 네이티브 `message` 채널은 쓰지 않는다) `parseInitFrame`으로 검증한다. 실패하면 필드 이름을 담아 `console.error("[worker] 초기화 프레임이 올바르지 않다", …)` 후 프레임을 버린다.
+  - 그 밖의 메시지(`kind`가 다른 객체·`null`·원시값): 같은 `console.error`(`parseInitFrame`의 오류 메시지 포함)를 남기되 리스너를 **유지**해 뒤에 오는 init을 받는다. 무시하지 않고 로그를 남기는 것은 옛 `{ once: true }` 동작의 오류 표시를 유지하기 위해서다.
+  검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`).
+- `driver` 필드: `parseInitFrame`은 필드가 있는지만 본다(`"driver" in frame`, 값은 `undefined`도 통과). 옛 모양(최상위 `topLevelAwait`, `driver` 없음)의 프레임을 worker가 조용히 받아 driver 옵션을 잃는 것을 막는다. 값은 worker 쪽 driver가 `WorkerDriver.parseOptions(frame.driver)`로 검증한다. REPL은 `{ topLevelAwait: boolean }`이고 repl `driver-options.ts`의 파서가 `driver: 객체 필요`·`topLevelAwait: boolean 필요` 오류를 낸다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 그 오류로 거부되고 `runWorker`가 `console.error("[worker] 부팅 시퀀스 예외", …)`로 남긴다. main 쪽 driver의 `options`가 프레임의 `driver` 필드로 실린다.
 - `SharedArrayBuffer` 뷰는 postMessage로 넘겨도 같은 메모리를 공유한다(coincident 프록시가 값으로 직렬화하던 문제가 없다).
-- 설정 변경(`topLevelAwait`)은 새 프레임 = 새 worker다. worker가 main에 설정을 되묻는 호출은 없다.
+- 설정 변경(REPL의 `topLevelAwait`)은 새 프레임 = 새 worker다. worker가 main에 설정을 되묻는 호출은 없다.
 
 ## 5. 시퀀스
 
 ```text
 (S1) 시작
-main : Terminal/Readline 생성 → 채널 3종 생성 → createWorker() → postMessage(init, [port]) → onStatus('loading')
+main : Terminal/Readline·interrupt buffer 생성(핸들) → REPL main driver 생성 → core 세션(`startCoreSession`): 메일박스 생성 → RPC 핸들러 합성(이름 충돌이면 여기서 예외, 채널·worker는 아직 없다)
+       → MessageChannel 생성 → createRpc → createWorker() → postMessage(init, [port]) → onStatus('loading')
        (crossOriginIsolated가 거짓이면 위를 하지 않고 경고 한 줄 + onStatus('not-isolated')로 끝난다)
-worker: init 수신 → loadPyodide → setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(프레임 값)
-      → webloop 재보고 억제 → sleep 조각 + 핸들러 설치 → 폐기 → 버퍼 연결 → setStdin → (ready·배너 뒤) 감시 타이머
-      → ntf ready → ntf writeOutput(BANNER) → req readLine('>>> ')   (RD-004는 readLine 대신 시험용 스크립트를 runLine으로 실행)
+worker: init 수신(필터 리스너, 4절) → parseOptions(frame.driver) → driver.createSession → createRpc(core 핸들러 + driver 핸들러 합성)
+      → loadPyodide → driver.createConsole(setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(driver 옵션 값))
+      → webloop 재보고 억제 → sleep 조각 + 핸들러 설치 → 폐기 → 버퍼 연결 → setStdin → ntf ready → 감시 타이머 시작
+      → driver.run(ntf writeOutput(BANNER) → req readLine('>>> '))   (RD-004는 readLine 대신 시험용 스크립트를 runLine으로 실행)
+      옵션 검증·핸들러 합성 실패 → console.error만 남기고 부팅을 시작하지 않는다(RPC가 아직 없어 loadFailed를 보낼 수 없다)
       로드·콘솔 생성 실패 → ntf loadFailed(String(error))만 보내고 돌아온다(worker는 살아 있다)
 main : ready → onStatus('ready') → readLine 핸들러: 꼬리 + '>>> ' 합성 → readline.read()
        loadFailed → writeError('pyodide 로드 실패: ' + message) + onStatus('load-failed')

@@ -2,12 +2,12 @@
 
 > 이 문서의 규칙·상수는 이전 구현(`/work/cp949/pyodide-samples/apps/repl`, 읽기 전용 참고)이 CPython 3.14.4 pty 실측과 브라우저 회귀로 확정한 것이다. 새 구현은 통신 계층만 바꾸고(`docs/design/00-architecture.md`, `01-protocols.md`) 이 규칙은 그대로 지킨다. 절 끝의 "참고:" 경로는 이전 구현의 근거 위치다.
 
-새 구현에서 `readInput(cancelable)`은 coincident proxy 호출이 아니라 **stdin 메일박스**(`01-protocols.md` 2절)다: worker가 RPC 알림 `readInput`을 보낸 뒤 `Atomics.wait`로 멈추고, main이 메일박스에 줄(또는 취소 표식)을 써서 깨운다. worker 쪽 `stdin-callback`은 `createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt })`다. `boot.ts`가 `requestInput`에 `rpc.notify("readInput", cancelable)`를, `wait`에 `createMailboxReader(...).wait`를, `signalInterrupt`에 `() => signalInterrupt(interruptBuffer)`를, `checkInterrupt`에 `() => pyodide.checkInterrupt()`를 주입하고 `readInput` 알림 → `wait()` 순서는 이 모듈이 소유한다(3.1).
+새 구현에서 `readInput(cancelable)`은 coincident proxy 호출이 아니라 **stdin 메일박스**(`01-protocols.md` 2절)다: worker가 RPC 알림 `readInput`을 보낸 뒤 `Atomics.wait`로 멈추고, main이 메일박스에 줄(또는 취소 표식)을 써서 깨운다. worker 쪽 `stdin-callback`(core `worker/stdin-callback.ts`)은 `createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt })`다. core `worker/boot.ts`가 `requestInput`에 `rpc.notify("readInput", cancelable)`를, `wait`에 `createMailboxReader(...).wait`를, `signalInterrupt`에 `() => signalInterrupt(interruptBuffer)`를, `checkInterrupt`에 `() => pyodide.checkInterrupt()`를 주입하고 `readInput` 알림 → `wait()` 순서는 이 모듈이 소유한다(3.1).
 
 ## 3.1 stdin 콜백과 취소 변환 규칙(`createStdinCallback`)
 - `createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt })`. 호출마다 `requestInput(true)`(= `readInput` 알림) → `wait()`(메일박스 `Atomics.wait`) 순서로 돌고 `wait()`가 돌려준 줄을 그대로 반환한다. 순서를 이 모듈이 소유하므로 알림을 `wait()` 뒤로 옮기면 worker가 알림 없이 정지한다. `wait()`가 던진 오류(main의 `fail`)는 그대로 전파되어 `input()`에서 `OSError`가 된다. `null`(취소 표식)은 아래 변환을 거친다.
 - `pyodide.setStdin({ stdin })`만 쓴다(기본 `isatty: false`, `autoEOF: true`, pyodide 314.0.7 `LegacyReader`). 콜백이 돌려준 문자열 끝에 `\n`이 없으면 pyodide가 붙이고 마지막 바이트가 `\n`이면 EOF를 넣지 않으므로 콜백은 `\n`을 붙이지 않는다. `input()`은 `"abc"`, `readline()`은 `"abc\n"`이고 `read()`·`readlines()`·`for line in sys.stdin`은 줄마다 콜백을 다시 불러 끝나지 않는다(편차 34). `read(n)`은 줄 끝 `\n`을 남겨 다음 읽기를 콜백 없이 채운다(`docs/traps/TRP-010`).
-- 취소 변환(RD-008). 의존성은 **객체가 아니라 클로저 둘**(`signalInterrupt`·`checkInterrupt`)로 받는다: `worker/`는 `protocol/`을 import하지 않고(`00-architecture.md` 4.2), 실제 pyodide 없이도 변환 순서와 "재시도 없음"을 단위로 고정할 수 있다.
+- 취소 변환(RD-008). 의존성은 **객체가 아니라 클로저 둘**(`signalInterrupt`·`checkInterrupt`)로 받는다: core `worker/stdin-callback.ts`는 `protocol/`을 import하지 않고(`00-architecture.md` 4.2), 실제 pyodide 없이도 변환 순서와 "재시도 없음"을 단위로 고정할 수 있다.
 - `readInput(true)`(취소 가능)로 읽는다. 프롬프트는 넘기지 않는다(main이 꼬리로 정한다).
 - 결과가 `null`(Ctrl+C 취소)이면 **`signalInterrupt(interruptBuffer)` → `pyodide.checkInterrupt()`**.
   stdin 콜백은 GIL이 풀린 상태라 `checkInterrupt()`가 `FS.ErrnoError(EINTR)`를 던지고, CPython이

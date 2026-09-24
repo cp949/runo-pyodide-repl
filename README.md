@@ -23,7 +23,9 @@
 
 ```text
 apps/demo                Vite + React 19 데모
-packages/pyodide-repl    @cp949/runo-pyodide-repl — 코어(main 쪽 + worker 쪽 + 프로토콜 + Python 스크립트)
+packages/pyodide-core    @cp949/runo-pyodide-core — 프로토콜·worker 커널·main 세션(private, UI·xterm·coincident 비의존)
+packages/pyodide-repl    @cp949/runo-pyodide-repl — REPL driver + REPL 프런트(main 쪽 + worker 쪽 + Python 스크립트)
+packages/pyodide-testkit @repo/pyodide-testkit — 시험 전용 도우미(private, pack 제외)
 packages/xterm-readline  @cp949/runo-xterm-readline — strtok/xterm-readline 1.2.2 벤더링(MIT), 변경 목록은 패키지 README
 packages/eslint-config, packages/typescript-config
 ```
@@ -35,7 +37,8 @@ pnpm install
 pnpm dev          # apps/demo의 vite dev 서버만 띄운다. 패키지는 소스 TS를 직접 해석한다(빌드 불필요)
 pnpm build        # 패키지 tsdown 빌드 뒤 데모 vite build
 pnpm preview      # 빌드(필요하면 자동 실행) 뒤 apps/demo의 vite preview. 빌드 산출물 확인용
-pnpm test
+pnpm test         # 패키지 시험 + 빌드 산출물 검사(check-dist)
+pnpm smoke:pack   # pnpm pack tarball을 저장소 밖에 설치해 import·tsc 확인(수동, 네트워크 필요)
 pnpm lint
 pnpm check-types  # 의존 패키지 빌드(d.ts) 뒤 실행된다
 ```

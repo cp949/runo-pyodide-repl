@@ -72,12 +72,12 @@
   성립한다).
 - 모듈 경계: `terminal/repl-reader.ts`의 `createReplReader(readline, term, sinks, autoIndent)`가
   `readline.read(합성 프롬프트, { cancelable, ...autoIndent.readOptions(pending) })`를 부른다. 가드
-  (`read-guard.ts`)·`session.ts`의 RPC `readLine(prompt, pending, cancelable)` 핸들러는 `pending`을 그대로
+  (`read-guard.ts`)·`repl-main-driver.ts`의 RPC `readLine(prompt, pending, cancelable)` 핸들러는 `pending`을 그대로
   통과시킨다. stdin 리더(`stdin-reader.ts`)는 `autoIndent`를 받지 않는다.
 
 ## 6.4 블록 히스토리 규칙(`createBlockHistory(readline)`, RD-014 완료)
 - 블록(`... `) 입력의 줄들을 history 항목 하나로 묶는 **세션 소유** 정책 객체(`terminal/block-history.ts`).
-  `startSession()`이 `createAutoIndent` 옆에서 만든다(`08-session.md` 8.1). 노출은
+  `createReplMainDriver`(`repl-main-driver.ts`)가 `createAutoIndent` 옆에서 만든다(`08-session.md` 8.1). 노출은
   `readOptions(pending): Pick<ReplReadOptions, "historyEntry" | "onKey">`와 `discard(): void` 둘뿐이다 —
   블록 시작을 알리는 별도 메서드는 없다. 매 REPL 읽기가 `readOptions(pending)` 호출 자체로 시작을 겸한다.
 - 기록 방식은 **"진행형 교체"**: 블록 첫 줄이 append되기 직전의 `entries` 스냅샷(`beforeFirstLine`)을
@@ -93,8 +93,8 @@
   걸러 훅이 안 불린다(항목 불변). 블록 안 빈 줄은 보존한다. 문법 오류·예외로 끝난 블록도 전체가 남는다.
 - `discard()`: `blockBase !== null`이면 `getHistory().restore(blockBase)` 후 `blockBase = null`. 블록이
   없으면 무동작. 스냅샷 복원이므로 첫 줄 append가 밀어낸 항목(50개 제한)·중복 제거로 옮겨진 옛 항목도 함께
-  복구된다. 호출 지점은 둘: **취소** = `session.ts`의 `readLine` continuation에서 `line === null`일 때.
-  **리셋** = `terminate()`가 `readline.cancelRead()` **앞**에서 `if (reading) blockHistory.discard()`
+  복구된다. 호출 지점은 둘: **취소** = `repl-main-driver.ts`의 `readLine` continuation에서 `line === null`일 때.
+  **리셋** = REPL main driver의 `terminate` 훅(core 세션 `terminate()`가 부른다)이 `readline.cancelRead()` **앞**에서 `if (reading) blockHistory.discard()`
   (`reading`은 REPL 읽기 전용 플래그라 `input()` 대기 중·실행 중·`exit()`로 끝난 블록은 자동 제외 —
   `08-session.md` 8.1).
 - `... ` 입력줄의 ↑ 삼킴 판정은 **공개 API만으로** 한다: `onKey`가 `pending`이 있고(`pendingBlock !== ""`)
@@ -116,7 +116,7 @@
     `... `로 이어지는 유일한 경로는 애초에 `... ` 프롬프트에서 붙여넣는 경우뿐이다.
 - 재호출한 블록은 Enter 1회로 실행된다(여러 줄 제출 경로). history는 중복을 제거한다(3.14는 안 한다,
   편차 9).
-- 리더 합성 순서: `session.ts`가 `mergeReadOptions(blockHistory.readOptions(pending),
+- 리더 합성 순서: `repl-main-driver.ts`가 `mergeReadOptions(blockHistory.readOptions(pending),
   autoIndent.readOptions(pending))`로 합성한다(blockHistory 먼저 — ↑ 삼킴은 blockHistory만 보고 겹치는
   키가 없다). `mergeReadOptions`는 `terminal/read-options.ts`의 순수 함수다(6.3·`00-architecture.md` 4.2).
 

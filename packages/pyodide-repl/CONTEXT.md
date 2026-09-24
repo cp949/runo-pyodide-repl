@@ -1,6 +1,6 @@
 # pyodide-repl
 
-브라우저 Python REPL 코어. main 스레드의 터미널과 worker의 pyodide를 잇는다. 이 문서는 코드·문서·시험 이름에 쓰는 용어를 정의한다.
+브라우저 Python REPL 코어. main 스레드의 터미널과 worker의 pyodide를 잇는다. 이 문서는 코드·문서·시험 이름에 쓰는 용어를 정의한다. 프로토콜·worker 커널·main 세션은 `@cp949/runo-pyodide-core`가 소유하고 repl은 그 위에 REPL driver(`repl-main-driver.ts`·`worker/repl-driver.ts`)와 REPL 프런트를 얹는다. driver·게이트·출력 조각 같은 core 용어는 `packages/pyodide-core/CONTEXT.md`를 따른다.
 
 ## Language
 
@@ -141,7 +141,7 @@ worker `worker/complete-source.py`의 진입 함수. `console.complete(source)`�
 `except Exception`을 지나 그대로 전파된다.
 
 **Python 소스**:
-worker가 pyodide에 넣는 Python 코드. TS 문자열이 아니라 `src/worker/*.py` 파일이고 `import SOURCE from "./x.py?raw"`로 가져온다(tsdown `load` 훅 + `src/py-modules.d.ts`). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 **`<…>` 꺾쇠 이름**을 쓴다 — 트레이스백에 새면 알아보기 위한 것이고, 절단은 문자열이 아니라 코드 객체로 한다.
+worker가 pyodide에 넣는 Python 코드. TS 문자열이 아니라 `.py` 파일(REPL 전용은 repl `src/worker/*.py`, 공통 `sigint-handler.py`·`sleep-slice.py`·`webloop-reraise.py`는 core `src/worker/`)이고 `import SOURCE from "./x.py?raw"`로 가져온다(tsdown `load` 훅 + `src/py-modules.d.ts`). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 **`<…>` 꺾쇠 이름**을 쓴다 — 트레이스백에 새면 알아보기 위한 것이고, 절단은 문자열이 아니라 코드 객체로 한다.
 _Avoid_: 인라인 스크립트, 템플릿 문자열
 
 ### 인터럽트
@@ -165,13 +165,13 @@ _Avoid_: seq(코드 상수명으로만), 시퀀스 ID
 _Avoid_: 재시도
 
 **폐기**:
-대상 코드가 없는 SIGINT를 지우고 ack하는 것(실행 직전은 `worker/repl-loop.ts`, 버퍼 연결 직전은 `worker/interrupt-buffer.ts`, 프롬프트 유휴는 `worker/interrupt-watch.ts`의 감시 타이머). 핸들러의 "`<console>` 프레임 없으면 버린다"도 같은 목적이다.
+대상 코드가 없는 SIGINT를 지우고 ack하는 것(실행 직전은 repl `worker/repl-loop.ts`, 버퍼 연결 직전은 core `worker/interrupt-buffer.ts`, 프롬프트 유휴는 core `worker/interrupt-watch.ts`의 감시 타이머). 핸들러의 "`<console>` 프레임 없으면 버린다"도 같은 목적이다.
 
 **송신기**:
-main의 눌림 전송·점검·재전송 상태기계(`protocol/interrupt-sender.ts`).
+main의 눌림 전송·점검·재전송 상태기계(core `protocol/interrupt-sender.ts`).
 
 **게이트**:
-main이 보는 "Python 실행 중"(`createRepl`의 `pythonRunning`). worker가 살아 있고(`alive`) 대기 중인 `readLine`·`readInput` 읽기가 없고 취소 직후 구간이 아니면(`!cancelSettling`) 참이다. 거짓이면 Ctrl+C를 에코도 전송도 하지 않는다. 로딩 중은 참이다(부팅 중 눌림은 worker의 연결 단계가 폐기한다).
+main이 보는 "Python 실행 중"(`createRepl`의 `pythonRunning`). core 세션의 식 `alive && inputReadsPending === 0 && !driver.isIdle()`이고, REPL driver의 `isIdle`은 `readLinePending || cancelSettling`이다. 즉 worker가 살아 있고(`alive`) 대기 중인 `readLine`·`readInput` 읽기가 없고 취소 직후 구간이 아니면(`!cancelSettling`) 참이다. 거짓이면 Ctrl+C를 에코도 전송도 하지 않는다. 로딩 중은 참이다(부팅 중 눌림은 worker의 연결 단계가 폐기한다).
 _Avoid_: running 플래그, busy
 
 **cancelSettling**:
@@ -196,7 +196,7 @@ _Avoid_: 동기 브리지, 채널
 pyodide `setInterruptBuffer`에 넘기는 `Int32Array(4)`. 세션 간 재사용한다.
 
 **초기화 프레임**:
-worker 생성 직후 main이 보내는 단 하나의 네이티브 메시지. 포트·버퍼·설정을 담는다.
+worker 생성 직후 main이 보내는 단 하나의 네이티브 메시지. 포트·버퍼·driver 옵션(`driver` 필드, REPL은 `{ topLevelAwait }`)을 담는다.
 _Avoid_: handshake
 
 ### 출력

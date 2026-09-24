@@ -19,7 +19,7 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
 ## 2.2 쓰기·ack 규칙
 - `signalInterrupt(buffer)`: **`Atomics.add(SEQ, 1)`을 먼저** 하고 그다음 `Atomics.store(SIGNAL, 2)`.
   SIGINT가 보이는 순간 핸들러가 읽는 번호가 이 눌림의 것이어야 새 눌림이 직전 눌림의 재전송으로 오인되지 않는다.
-  새 SIGINT를 쓰는 경로는 main 송신기와 `stdin-callback.ts` 두 곳뿐이다(후자는 RD-008이 넣었다: `boot.ts`가
+  새 SIGINT를 쓰는 경로는 main 송신기와 core `worker/stdin-callback.ts` 두 곳뿐이다(후자는 RD-008이 넣었다: core `worker/boot.ts`가
   주입한 `signalInterrupt` 클로저가 취소 표식을 받은 콜백 안에서 쓰고 `checkInterrupt()`가 그 자리에서 소비한다).
 - 재전송은 번호를 올리지 않고 `Atomics.compareExchange(SIGNAL, 0, 2)`만 한다.
 - ack를 올리는 지점은 셋뿐이다: ① 핸들러 진입(스택 검사·예외보다 먼저, 버려지는 SIGINT도 ack),
@@ -43,7 +43,7 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
 - **main 게이트 `pythonRunning`**(RD-007, 2.7): 거짓이면 `send()` 자체를 하지 않는다. 그래서 `exit()`·로드
   실패 뒤의 눌림이 슬롯에 SIGNAL 2를 영원히 남겨 5ms 점검이 무한히 도는 일이 없다(이전 구현 RD-012h(a)).
 
-## 2.4 worker 핸들러(`worker/sigint-handler.py`, `worker/sleep-slice.py`)
+## 2.4 worker 핸들러(core `worker/sigint-handler.py`, `worker/sleep-slice.py`)
 
 Python 소스는 `.py` 파일이고 TS가 `?raw`로 가져와 `runPython(source, { globals, filename })`에 넘긴다. 파일명은
 `<sigint-handler>`·`<sleep-slice>`(트레이스백에 새면 알아보기 위한 이름이고, 절단은 문자열이 아니라 코드
@@ -116,15 +116,15 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 - 설치 가드(pyodide 내부 의존) 5종. 핸들러(`sigint-handler.py`)의 셋: ① `pyodide.webloop.run_sync`
   ② `pyodide.ffi.run_sync` ③ `console.runcode`가 코루틴 함수. 조각(`sleep-slice.py`)의 둘:
   ④ `time.sleep.__wrapped__`가 원본 C 함수(`inspect.isbuiltin`) ⑤ `pyodide_js.checkInterrupt` 호출 가능.
-  하나라도 다르면 **해당 부분만** 건너뛰고 `warn`(boot가 `console.warn`을 넣는다) — 핸들러 가드가 걸려도 바쁜
+  하나라도 다르면 **해당 부분만** 건너뛰고 `warn`(core `boot.ts`가 `console.warn`을 넣는다) — 핸들러 가드가 걸려도 바쁜
   루프 중단과 조각은 살아 있고, 조각 가드가 걸려도 깨우기는 살아 있다.
 
 ## 2.5 감시 타이머(`startInterruptWatch(deps)` → 중지 함수)
-- `deps` = `interruptIdle`·`atPrompt`·`hasPending`·`consume`·`discard`·`tickMs = 20`. `worker/`는 `protocol/`을
-  import하지 않으므로 버퍼가 아니라 클로저를 받는다(`boot.ts`가 넣는다): `hasPending` =
+- `deps` = `interruptIdle`·`atPrompt`·`hasPending`·`consume`·`discard`·`tickMs = 20`. core `worker/interrupt-watch.ts`는 `protocol/`을
+  import하지 않으므로 버퍼가 아니라 클로저를 받는다(core `boot.ts`가 넣는다): `hasPending` =
   `hasPendingInterrupt(buffer)`(`Atomics.load(SIGNAL) === 2`), `consume` =
   `consumeInterrupt(buffer)`(`compareExchange(2 → 0) === 2`이면 ack 후 `true`), `discard` =
-  `discardPendingInterrupt(buffer)`, `atPrompt`는 REPL 루프의 `setAtPrompt`가 갱신하는 값을 읽는다.
+  `discardPendingInterrupt(buffer)`, `atPrompt`는 `WorkerDriverSession.atPrompt()`가 돌려주는 값이다(REPL은 루프의 `setAtPrompt`가 갱신하는 변수를 읽는다).
 - 이벤트 루프가 비는 구간(정지한 `run_sync`·`asyncio.run` 대기, top-level await 대기)에만 실제로 돈다.
 - 엿보기는 `hasPending()`, 소비는 **깨웠을 때만** `consume()`. 깨울 수 없으면 SIGINT를 남겨 재개한 사용자 스택의
   폴링이 받게 한다. 소비 성공 시에만 ack.
@@ -136,17 +136,17 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   그 틱에서 버린다(2를 지웠을 때만 ack). 실행 중(`atPrompt` 거짓) 규칙은 위와 같다.
 - 타이머는 요청 번호를 확인하지 않는다(알려진 한계).
 - 틱 콜백의 예외는 잡아 로그만 남기고 다음 틱에 재시도한다.
-- REPL 루프 직전에 켜고, 루프가 끝나면(`exit()`) 끈다. 세션 리셋은 worker 교체라 함께 사라진다.
+- `ready` 알림 뒤·`driver.run` 직전에 켜고(REPL은 배너·러너 생성 앞, 그 사이에 `await`가 없다), `driver.run`이 끝나면(REPL은 루프가 `exit()`로 끝날 때) 끈다. 세션 리셋은 worker 교체라 함께 사라진다.
 
 ## 2.6 연결 순서와 시작 코드 보호
 - `connectInterrupts(pyodide, pyconsole, buffer, { ack, seq, discard, warn })` → `InterruptIdle`이 유일한
-  진입점이다. `worker/`는 `protocol/`을 import하지 않으므로 네 함수는 `boot.ts`가 클로저로 넣는다
-  (`stdin-callback.ts`와 같은 패턴). 부팅 순서에서 위치는 `createConsole`·`suppressWebLoopReraise` 뒤·`setStdin`
+  진입점이다. core `worker/interrupt-buffer.ts`는 `protocol/`을 import하지 않으므로 네 함수는 core `boot.ts`가 클로저로 넣는다
+  (`stdin-callback.ts`와 같은 패턴). 부팅 순서에서 위치는 `driver.createConsole`·`suppressWebLoopReraise` 뒤·`setStdin`
   앞이고 `try` 안이라 실패하면 `loadFailed`다. 내부 순서는 **`installSleepSlice` → `installSigintHandler`(조각의
   코드 객체를 `extraOwnCodes`로 넘긴다) → `discard()` → `setInterruptBuffer`**다. 폴링은 연결 뒤에야 시작하므로
   연결이 먼저이면 그 사이(Node 3.5~6.6ms)의 눌림을 pyodide 기본 핸들러가 받아 시작 코드가 죽는다.
-  돌려주는 `interrupt_idle` proxy는 감시 타이머가 쓰고 세션 끝(`boot.ts`의 `finally`)에 `destroy()`한다.
-- REPL 루프는 `readLine`이 줄을 돌려준 직후, `runner.run` **전에** `discardPendingInterrupt(buffer)`로
+  돌려주는 `interrupt_idle` proxy는 감시 타이머가 쓰고 세션 끝(core `boot.ts`의 `finally`)에 `destroy()`한다.
+- REPL 루프(repl `worker/repl-loop.ts`)는 `readLine`이 줄을 돌려준 직후, `runner.run` **전에** `discardPendingInterrupt(buffer)`로
   비운다(취소 `null`에도 적용). 읽는 동안이나 Enter 직후 쓴 SIGINT는 대상 코드가 없다(TRP-009).
 - 새 worker를 만들기 직전 main이 `interruptSender.cancel()` → `Atomics.store(buffer, SIGNAL, 0)` 순서로
   치운다(재전송이 새 worker에 도착하면 같은 사고).
@@ -154,15 +154,15 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 ## 2.7 main 쪽 Ctrl+C 처리
 - `readline.setCtrlCHandler(...)`는 읽는 중이 아닐 때만 불린다. 눌림마다 `^C`를 **sink `write`로**
   에코하고(꼬리에 들어가야 한다) `interruptSender.send()`를 부른다.
-- **게이트 `pythonRunning = alive && !readLinePending && inputReadsPending === 0 && !cancelSettling`**. 거짓이면
-  에코도 전송도 하지 않는다. 각 항의 뜻:
+- **게이트 `pythonRunning = alive && inputReadsPending === 0 && !driver.isIdle()`**(core 세션, RD-020). REPL driver의 `isIdle = readLinePending || cancelSettling`이라 옛 식 `alive && !readLinePending && inputReadsPending === 0 && !cancelSettling`과 같은 불리언이다. 거짓이면
+  에코도 전송도 하지 않는다. `alive`·`inputReadsPending`은 core 세션이, `readLinePending`·`cancelSettling`은 REPL main driver(`repl-main-driver.ts`)가 소유한다. 각 항의 뜻:
   - `alive`: worker 생성부터 `sessionTerminated`·`loadFailed`·`dispose()` 전까지. 그 뒤에는 눌림이 닿을
     코드가 없다(3.14에도 프로세스가 없으므로 편차가 아니다).
-  - `!readLinePending`: 수락한 `readLine`의 읽기가 끝나기 전. 요청 도착부터 응답이 포트에 올라가기 전까지라
+  - `!readLinePending`(`isIdle`의 첫 항): 수락한 `readLine`의 읽기가 끝나기 전. 요청 도착부터 응답이 포트에 올라가기 전까지라
     **읽기가 실제로 열리기 전의 갭(약 20ms)도 포함한다** — 그 사이 눌림은 에코 없이 버려진다(Ctrl+C는 쌓이지 않는다. 대신 그때까지 쌓인 키를 비운다 — RD-019, `06-editing.md` 6.7. 편차 32 해소 뒤에도 이 Ctrl+C 손실은 남는다, `docs/traps/TRP-005`).
   - `inputReadsPending === 0`: `readInput` 알림 도착부터 `deliver`/`fail`/`cancel`이 끝날 때까지. 값을 다 전달한
     시점이 worker가 깨어나 실행을 재개하는 시점이다.
-  - `!cancelSettling`(RD-008): REPL 읽기가 취소(`null` 응답)로 끝난 continuation에서 참이 되고, **`readLine`
+  - `!cancelSettling`(`isIdle`의 둘째 항, RD-008): REPL 읽기가 취소(`null` 응답)로 끝난 continuation에서 참이 되고, **`readLine`
     도착·`readInput` 도착·`inputReadsPending → 0`** 세 지점에서 거짓이 된다. 즉 "취소 응답 → 다음 요청 도착"
     구간을 덮는다. `!readLinePending`이 덮는 "요청 도착 → 응답" 구간과 이어져 빈틈이 없다(`06-editing.md` 6.3).
     불변식: worker가 코드를 돌리기 시작하는 모든 지점에서 게이트가 열린다. **`input()` 취소에는 세우지 않는다**
@@ -183,7 +183,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 - 이 억제 뒤 `vitest.config.ts`의 `onUnhandledError` 필터(`PythonError` + 줄 시작 `SystemExit|KeyboardInterrupt`)를
   실제로 제거했다. 억제 없이 필터만 떼면 스위트는 개별 시험이 다 통과해도 `Errors 210` + 종료코드 1이다(실측).
   억제를 넣으면 `Errors 0`이다. 시험 파일이 자기 pyodide 인스턴스를 만들 때는 그 조립에도
-  `suppressWebLoopReraise`를 불러야 한다(`boot.ts`의 배선은 그 인스턴스에 닿지 않는다).
+  `suppressWebLoopReraise`를 불러야 한다(core `boot.ts`의 배선은 그 인스턴스에 닿지 않는다).
 
 ## 2.9 텍스트 시퀀스
 ```

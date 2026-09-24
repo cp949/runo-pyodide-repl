@@ -45,10 +45,10 @@
 0. `crossOriginIsolated`가 거짓이면 main은 worker를 만들지 않는다. 안내 줄(`writeNotice`, `05-output.md` 4.1)로 경고만 내고 `onStatus('not-isolated')`를 부른 뒤 끝난다(ADR-0004). 아래 1~5는 격리된 페이지의 절차다.
 1. main이 `Terminal`·`Readline`을 만든다(세션과 무관하게 마운트당 1회).
 2. main이 `MessageChannel`, interrupt buffer, stdin 메일박스를 만들고 worker를 생성한다(`createWorker()` 팩토리).
-3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `topLevelAwait`, pyodide `indexURL`. worker 스크립트는 첫 `await` 이전에 `message` 리스너를 걸어 이 프레임을 받는다. 프레임은 하나뿐이라 구분자(`instanceof`)가 필요 없다.
-4. worker가 pyodide를 로드하고 콘솔을 만든 뒤 `ready` 알림(또는 `loadFailed`)을 보낸다. 로드 실패는 worker를 죽이지 않는다.
-5. worker가 SIGINT 핸들러 설치 → interrupt buffer 연결 → `setStdin` → 감시 타이머 시작 → 배너 출력 → REPL 루프 진입(`03-ctrl-c.md` 2.6 순서).
-   `createConsole` 직후 `suppressWebLoopReraise(pyodide, { warn })`(WebLoop의 `KeyboardInterrupt`·`SystemExit` 재보고 억제, `03-ctrl-c.md` 2.8)를 한 번 부르고, 이어서 `connectInterrupts(pyodide, repl.pyconsole, frame.interruptBuffer, { ack, seq, discard, warn })`(조각 교체 → 핸들러 설치 → 폐기 → 연결, 반환값은 `InterruptIdle`)를 부른 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). 전부 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머(`startInterruptWatch`)는 `ready`·배너 뒤·REPL 루프 직전에 켜고, 루프가 끝나면 `finally`에서 `stopWatch()`·`interruptIdle.destroy()`로 정리한다.
+3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `driver` 필드(driver 옵션, core는 모양을 모른다. REPL은 `{ topLevelAwait }`), pyodide `indexURL`. worker 스크립트는 모듈 본문에서 동기로(첫 `await` 이전) core `runWorker`를 불러 `message` 리스너를 건다. 리스너는 `kind: "init"`인 객체만 소비하고 배열 같은 다른 메시지는 넘긴다(`01-protocols.md` 4절). 프레임은 하나뿐이다.
+4. worker가 driver 옵션을 검증(`WorkerDriver.parseOptions(frame.driver)`)하고 pyodide를 로드하고 콘솔을 만든 뒤 `ready` 알림(또는 `loadFailed`)을 보낸다. 로드 실패는 worker를 죽이지 않는다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 거부되고 `console.error`만 남는다(`loadFailed`를 보낼 RPC가 아직 없다).
+5. worker(core `bootWorker`)의 순서는 `WorkerDriver.parseOptions` → `createSession` → RPC 생성(core 핸들러 + driver 핸들러 합성) → `loadPyodide` → `driver.createConsole` → `suppressWebLoopReraise` → `connectInterrupts`(SIGINT 핸들러 설치 → interrupt buffer 연결) → `setStdin` → `ready` 알림 → 감시 타이머 시작 → `driver.run`(REPL: 배너 출력 → 제출 러너 생성 → REPL 루프 진입)이다(`03-ctrl-c.md` 2.6 순서).
+   `driver.createConsole` 직후 `suppressWebLoopReraise(pyodide, { warn })`(WebLoop의 `KeyboardInterrupt`·`SystemExit` 재보고 억제, `03-ctrl-c.md` 2.8)를 한 번 부르고, 이어서 `connectInterrupts(pyodide, pyconsole, frame.interruptBuffer, { ack, seq, discard, warn })`(조각 교체 → 핸들러 설치 → 폐기 → 연결, 반환값은 `InterruptIdle`)를 부른 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). `ready` 알림까지 전부 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머(`startInterruptWatch`)는 `ready` 뒤·`driver.run` 직전에 켠다(배너·러너 생성보다 앞이지만 그 사이에 `await`가 없다). `driver.run`이 끝나면 `finally`에서 `stopWatch()`, 부팅 전체의 `finally`에서 `interruptIdle.destroy()`로 정리한다.
 
 ### 3.2 REPL 루프(worker)
 
@@ -65,7 +65,7 @@ loop:
 
 프롬프트 대기 중 main→worker `complete` 요청에 답한다(RD-015). 실행 중 도착한 요청은 빈 후보로 답한다.
 
-루프(`worker/repl-loop.ts`의 `runReplLoop(deps)`)는 `complete` 응답(RD-015)을 빼면 위 그대로다. `protocol/`을 import하지 않고 `readLine`·`setAtPrompt`(RD-009)·`discardPendingInterrupt`(RD-007)·`run`·`onTerminated`·`onError`를 주입받으며 `boot.ts`가 RPC 래퍼와 `atPrompt` 변수를 만든다. `complete` 핸들러는 `createRpc` 생성 시에만 등록할 수 있어(`protocol/rpc.ts`, 나중 등록 API 없음) `boot.ts`가 `atPrompt`·`completer`(콘솔 생성 뒤 `loadCompleteSource`가 채운다) 두 클로저 변수를 `createRpc` 앞에서 선언해 `atPrompt && completer ? completer(source, pending) : emptyCompletion()`으로 답한다(RD-015, `07-tab-completion.md` 7.1). 호출 순서는 시험이 고정한다: `setAtPrompt(true)` → `readLine` → `setAtPrompt(false)` → `discardPendingInterrupt` → `run`. 오류 정책: `run`이 `KeyboardInterrupt`가 아닌 오류를 던지면 `onError`(`console.error` + 빨간 `repl 내부 오류: …` + `clearPending()`) 뒤 `>>> `로 계속한다. `readLine` 요청이 reject되면 `rpc disposed`(main의 `dispose()`)일 때는 조용히, 그 밖의 이유면 `console.error`만 남기고 루프를 끝낸다.
+루프(repl `worker/repl-loop.ts`의 `runReplLoop(deps)`)는 `complete` 응답(RD-015)을 빼면 위 그대로다. core 프로토콜을 import하지 않고 `readLine`·`setAtPrompt`(RD-009)·`discardPendingInterrupt`(RD-007)·`run`·`onTerminated`·`onError`를 주입받으며 repl `worker/repl-driver.ts`(`createReplSession`)가 RPC 래퍼와 `atPrompt` 변수를 만든다. `complete` 핸들러는 `createRpc` 생성 시에만 등록할 수 있어(core `protocol/rpc.ts`, 나중 등록 API 없음) `createReplSession`이 `atPrompt`·`completer`(콘솔 생성 뒤 `loadCompleteSource`가 채운다) 두 클로저 변수를 핸들러와 함께 세션 객체(`WorkerDriverSession.handlers`)로 내고, core `bootWorker`가 `composeRpcHandlers(core 표, session.handlers)`로 합성해 `createRpc`에 넘긴다. 핸들러는 `atPrompt && completer ? completer(source, pending) : emptyCompletion()`으로 답한다(RD-015, `07-tab-completion.md` 7.1). 호출 순서는 시험이 고정한다: `setAtPrompt(true)` → `readLine` → `setAtPrompt(false)` → `discardPendingInterrupt` → `run`. 오류 정책: `run`이 `KeyboardInterrupt`가 아닌 오류를 던지면 `onError`(`console.error` + 빨간 `repl 내부 오류: …` + `clearPending()`) 뒤 `>>> `로 계속한다. `readLine` 요청이 reject되면 `rpc disposed`(main의 `dispose()`)일 때는 조용히, 그 밖의 이유면 `console.error`만 남기고 루프를 끝낸다.
 
 ### 3.3 `input()`(worker, 동기)
 
@@ -97,10 +97,14 @@ main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미
 ```text
 packages/
   xterm-readline/        @cp949/runo-xterm-readline — strtok/xterm-readline 1.2.2 벤더링(TS 소스), ADR-0003
-  pyodide-repl/          @cp949/runo-pyodide-repl — 프레임워크 무관 코어(main 쪽 + worker 쪽 + 프로토콜 + Python 스크립트)
+  pyodide-core/          @cp949/runo-pyodide-core — 프로토콜(RPC·메일박스·interrupt)·worker 커널·main 세션. UI·xterm·coincident 비의존. private(RD-020), ADR-0006
+  pyodide-repl/          @cp949/runo-pyodide-repl — REPL driver + REPL 프런트(main 쪽 + worker 쪽 + Python 스크립트). 프레임워크 무관, 공개 API 유지
+  pyodide-testkit/       @repo/pyodide-testkit — 시험 전용 도우미(worker_threads 하니스·가짜 터미널·패키지 경계 도우미). private, 빌드·pack 없음
 apps/
-  demo/                  Vite + React 19 데모 셸. 코어를 소비하는 유일한 앱. UI 상태(Chip·버튼·스위치)만 가진다.
+  demo/                  Vite + React 19 데모 셸. repl을 소비하는 유일한 앱(core를 직접 import하지 않는다). UI 상태(Chip·버튼·스위치)만 가진다.
 ```
+
+의존 방향: `pyodide-repl → pyodide-core`, `pyodide-repl → xterm-readline`, `pyodide-core → (작업공간 의존 없음)`, `pyodide-testkit → (없음)`. `pyodide-core`·`pyodide-repl`의 devDependencies에 `@repo/pyodide-testkit`이 있다(시험 전용). core는 coincident(`reflected-ffi` 포함)와 `@cp949/runo-xterm-readline`에 의존하지 않고 repl은 coincident에 의존하지 않는다. 둘 다 시험·스크립트로 강제한다(`09-testing.md` 9.8). 향후 패키지(`pyodide-terminal`·`pyodide-dom-bridge`·`pyodide-react`)는 [ADR-0006](../adr/0006-pyodide-core-and-plugin-packages.md)이 정하고 RD-021 이후에 추가된다.
 
 ### 4.1 `@cp949/runo-pyodide-repl` export
 
@@ -140,24 +144,84 @@ main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 �
 
 앱의 worker 파일은 두 줄이다: `import { runReplWorker } from '@cp949/runo-pyodide-repl/worker'; runReplWorker()`. 앱은 `new Worker(new URL('./repl.worker.ts', import.meta.url), { type: 'module' })`로 만든다. worker 파일에 top-level `await`가 들어갈 수 있으므로 Vite `worker.format`은 `'es'`여야 한다. RD-001에서 확인했다: `es`는 빌드가 성공하고 번들 끝에 `await`가 남는다. 기본 `iife`는 `[UNSUPPORTED_FEATURE] Top-level await is currently not supported with the 'iife' output format`으로 실패한다. 앱의 얇은 worker 파일이 패키지 서브패스를 import하는 이 방식은 dev(소스 해석)와 build·preview(`dist` 해석) 양쪽에서 동작한다(4.4).
 
+#### core export(`@cp949/runo-pyodide-core`, 내부 계약)
+
+core는 `private`이고 이 인터페이스는 공개 API로 확정하지 않았다. REPL이 실제로 쓰는 것만 낸다(실행 driver·`InputProvider` 공개는 RD-022, `plugins`는 RD-023). 진입점이 둘이라 worker 번들이 main 전용 코드(송신기·메일박스 writer)를 끌어오지 않는다.
+
+```ts
+// main 쪽: '@cp949/runo-pyodide-core'
+export function startCoreSession(options: CoreSessionOptions): CoreSession
+interface CoreSessionOptions {
+  createWorker: () => Worker            // 세션마다 호출
+  indexURL: string                      // 끝 '/'가 붙은 pyodide CDN 위치
+  interruptBuffer: Int32Array           // 핸들 소유, 세션을 넘어 산다
+  interruptSender: InterruptSender      // 핸들 소유
+  driver: MainDriver                    // 화면 상호작용 (아래)
+  output: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void   // Python stdout·stderr 원문
+  onStatus: (s: 'ready' | 'load-failed' | 'terminated' | 'crashed') => void
+  onCrash?: (message: string) => void
+}
+interface CoreSession { pythonRunning(): boolean; endSession(): void; terminate(): void; readonly ended: boolean; call(name, ...args): Promise<T> }
+// 그 밖에 프로토콜: postInitFrame·InitFrame, SIGNAL·ACK·SEQ·createInterruptBuffer·signalInterrupt, createInterruptSender, createRpc,
+// createStdinMailbox·createMailboxWriter, composeRpcHandlers, createOutputTail, CORE_MAIN_HANDLER_NAMES
+
+// worker 쪽: '@cp949/runo-pyodide-core/worker'
+export function runWorker(options: { driver: WorkerDriver }): void
+// 그 밖에: bootWorker, parseInitFrame, InitFrame, createRpc, composeRpcHandlers, createMailboxReader,
+// acknowledgeInterrupt·consumeInterrupt·discardPendingInterrupt·hasPendingInterrupt·readRequestSeq·signalInterrupt,
+// installStdioWriters·createCoreConsole, 타입 WorkerDriver·WorkerDriverSession·ConsoleContext·RunContext·PyodideConsoleProxy 등
+```
+
+- `MainDriver`(`session/driver.ts`): `options: unknown`(초기화 프레임 `driver` 필드로 실린다), `handlers`(worker → main RPC 핸들러, core 핸들러와 합성), `isIdle()`, `readInput(cancelable)`, `isReadCancelled(error)`, 선택 훅 `inputRequested`·`inputResumed`·`onReady`·`onLoadFailed`·`terminate`. `input` 읽기는 공개 `InputProvider`가 아니라 내부 seam이다.
+- `WorkerDriver<Options>`(`worker/driver.ts`): `parseOptions(raw): Options`(프레임 `driver` 필드 검증), `createSession(options): WorkerDriverSession`. 세션은 `handlers`(main → worker RPC 핸들러)·`createConsole(ctx)`·`run(ctx)`·`atPrompt()`를 낸다. 세션 상태는 클로저에 두어 worker 하나마다 새로 만든다.
+- 핸들러 합성: main 쪽 core 핸들러 표(`CORE_MAIN_HANDLER_NAMES`: `write`·`writeErrorRaw`·`readInput`·`sessionTerminated`·`ready`·`loadFailed`·`crashed`, worker → main)와 worker 쪽 core 표(`worker/boot.ts`의 `CORE_WORKER_HANDLERS`, main → worker, 현재 비어 있다)는 방향이 반대인 두 RPC 끝점이라 표도 둘이다. 각 끝점에서 `composeRpcHandlers(core 표, driver 표)`가 이름 충돌을 검사하고, 겹치면 생성 시 `RPC 핸들러 이름이 겹친다: <name>` 예외를 던진다. 늦은 등록 API는 없다. main 쪽 합성은 `MessageChannel`·worker 생성 앞에서 하므로 충돌해도 자원이 새지 않는다.
+- 출력 계약: core는 `write`·`writeErrorRaw` 알림을 `{ stream, text }`로 `output`에 넘긴다(원문, 줄 끝 처리·색은 소비자가 정한다). `writeOutput`·`writeError`(값 에코·트레이스백)는 core가 아니라 REPL driver 핸들러다(`05-output.md`).
+- "Python 실행 중" 게이트: core `pythonRunning = alive && inputReadsPending === 0 && !driver.isIdle()`. REPL `isIdle = readLinePending || cancelSettling`(`03-ctrl-c.md` 2.7).
+- repl의 공개 진입점(4.1)은 그대로다: `createRepl`은 core 세션(`startCoreSession`) + REPL main driver(`repl-main-driver.ts`)를 `session.ts`가 조립해 만들고, `runReplWorker`는 `runWorker({ driver: replDriver })`의 얇은 래퍼다.
+
 ### 4.2 코어 모듈 지도
 
-깊은 모듈(작은 인터페이스, 큰 구현)을 seam으로 삼고 통신은 주입한다. 이전 구현에서 순수 함수·콜백 주입으로 격리돼 있던 모듈은 이름을 유지해 이식 비용을 줄인다(`12-previous-implementation.md` 4절).
+깊은 모듈(작은 인터페이스, 큰 구현)을 seam으로 삼고 통신은 주입한다. 이전 구현에서 순수 함수·콜백 주입으로 격리돼 있던 모듈은 이름을 유지해 이식 비용을 줄인다(`12-previous-implementation.md` 4절). RD-020이 공통 부분(프로토콜·worker 커널·main 세션)을 `pyodide-core`로 옮겼다. 시험 파일은 지도에서 뺀다(`09-testing.md`).
 
 ```text
-packages/pyodide-repl/src/
-  index.ts                 createRepl (main 쪽 조립, readline·interruptBuffer·sender·Ctrl+C 핸들러·dispose만)
-  session.ts               세션 1개의 자원·게이트. reset()(RD-010)이 통째로 교체하는 단위      ← 08-session.md
-  worker.ts                runReplWorker (프레임 검증 → CDN 로더를 주입해 boot 호출)
+packages/pyodide-core/src/                      (공통. UI·xterm 비의존)
+  index.ts                 main 쪽 진입점: 프로토콜 + startCoreSession + driver 타입
+  worker.ts                worker 쪽 진입점: runWorker·bootWorker + worker 쪽 프로토콜 + 콘솔 뼈대 + driver 타입
   protocol/
     rpc.ts                 MessagePort 위 요청/응답/알림          ← 01-protocols.md 1절
+    rpc-handlers.ts        composeRpcHandlers: 핸들러 표 합성, 이름 충돌은 생성 시 예외   ← 아래 4.1 core export
     stdin-mailbox.ts       SAB 메일박스 (main: deliver/cancel/fail, worker: wait)   ← 01 2절
     interrupt-protocol.ts  interrupt buffer 슬롯·원자 연산         ← 01 3절, 03-ctrl-c.md
     interrupt-sender.ts    송신·점검·재전송 상태기계(main 절반)      ← 03 2.3
-    init-frame.ts          초기화 프레임 타입·검증                  ← 01 4절
+    init-frame.ts          초기화 프레임 타입·검증(`driver` 필드는 존재만)   ← 01 4절
+  terminal/
+    output-tail.ts         출력 꼬리 추적(순수 모듈)                  ← 04 3.3, 05-output.md 4.1
+  session/                 main 쪽. worker 하나에 대응하는 공통 자원·게이트
+    core-session.ts        startCoreSession: 채널·메일박스·프레임·RPC 합성·readInput·게이트·크래시·종료   ← 08-session.md 8.1
+    driver.ts              MainDriver·OutputChunk·SessionStatus (driver 경계)
+  worker/                  worker 쪽. 대부분 pyodide 프록시에만 의존(boot.ts·run-worker.ts는 조립 모듈이라 예외, 아래)
+    run-worker.ts          runWorker: init 필터 수신 → 검증 → CDN 로더를 주입해 bootWorker 호출   ← 01 4절
+    boot.ts                bootWorker: 부팅 시퀀스(옵션 검증 → RPC → 로드 → 콘솔 → 연결 → ready → 감시 → driver.run)   ← 01 5절 S1
+    driver.ts              WorkerDriver·WorkerDriverSession·ConsoleContext·RunContext (driver 경계)
+    core-console.ts        installStdioWriters·createCoreConsole(PyodideConsole 뼈대)·콘솔 프록시 타입   ← 02 5.1
+    load-pyodide.ts        CDN 동적 import(브라우저 전용, 시험은 npm loadPyodide 주입)
+    interrupt-buffer.ts    connectInterrupts(설치 → 폐기 → 연결)       ← 03 2.6
+    sigint-handler.ts      SIGINT 핸들러(`sigint-handler.py`, `.py?raw`)  ← 03 2.4
+    sleep-slice.ts         time.sleep 20ms 조각(`sleep-slice.py`)        ← 03 2.4
+    interrupt-watch.ts     감시 타이머                                ← 03 2.5
+    stdin-callback.ts      readInput 알림 → wait() → null이면 signal+check           ← 04 3.1
+    sink-writer.ts         전역 stdout/stderr Writer                   ← 05 4.2
+    webloop-reraise.ts     WebLoop 재보고 억제(`webloop-reraise.py`)     ← 03 2.8
+  test/roles/              시험 전용 worker_threads 역할(interrupt-presser·mailbox-reader·repl-worker)   ← 09 9.1
+
+packages/pyodide-repl/src/                      (REPL driver + REPL 프런트)
+  index.ts                 createRepl (main 쪽 조립, readline·interruptBuffer·sender·Ctrl+C 핸들러·dispose만)
+  session.ts               core 세션(startCoreSession)과 REPL main driver를 조립해 ReplSession을 만든다. reset()(RD-010)이 통째로 교체하는 단위   ← 08-session.md
+  repl-main-driver.ts      REPL main driver: sink·리더·가드·자동 들여쓰기·블록 히스토리·Tab 리더를 세션마다 만들고 `readLine`·`writeOutput`·`writeError` 핸들러, `isIdle`, 종료 시 읽기 정리를 낸다   ← 08 8.1
+  driver-options.ts        REPL driver 옵션 타입(`{ topLevelAwait }`)·파서. main 쪽 driver가 싣고 worker 쪽 driver가 검증한다
+  worker.ts                runReplWorker (core `runWorker({ driver: replDriver })`의 얇은 래퍼)
   terminal/                main 쪽. Terminal·Readline에만 의존
-    sinks.ts               sink 4종 + 꼬리 추적                      ← 05-output.md
-    output-tail.ts
+    sinks.ts               sink 4종 + 꼬리 추적(core `createOutputTail`을 쓴다)   ← 05-output.md
     notice.ts              세션 밖 안내 줄(writeNotice)              ← 05-output.md 4.1
     rewind-tail.ts         꼬리가 폭을 넘으면 첫 행까지 커서를 올림     ← 04 3.3 (repl-reader·stdin-reader 공용)
     repl-reader.ts         꼬리 + '>>> ' 합성 읽기                   ← 04 3.3
@@ -167,32 +231,33 @@ packages/pyodide-repl/src/
                              `readOptions(pending)` → 벤더 `ReadOptions`)   ← 06 6.3(RD-013 완료)
     read-options.ts        readOptions 합성(mergeReadOptions, 순수 함수)   ← 06 6.4(RD-014 완료)
     block-history.ts       블록 → history 항목 하나(createBlockHistory, 세션 소유)  ← 06 6.4(RD-014 완료)
-    history-filter.ts
     tab-completion.ts      순수 로직                                  ← 07
     tab-reader.ts          Tab 가로채기·큐·complete RPC 왕복(목록 재그리기는 벤더 printAbove)
     selection-copy.ts      Ctrl+Shift+C                              ← 06 6.6
-  worker/                  worker 쪽. pyodide 프록시에만 의존(boot.ts는 조립 모듈이라 예외, 아래)
-    boot.ts                부팅 시퀀스(로드 → 콘솔 → ready → 배너 → 루프)  ← 01 5절 S1
+  worker/                  worker 쪽. REPL 전용. pyodide 프록시에만 의존(repl-driver.ts·boot.ts는 조립 모듈이라 예외, 아래)
+    repl-driver.ts         replDriver(WorkerDriver): `complete` 핸들러·콘솔 확장·배너·러너·readLine 루프를 core 커널에 끼운다   ← 00 3.2
+    boot.ts                bootReplWorker: core `bootWorker`에 replDriver를 끼우는 얇은 진입점(시험용)   ← 01 5절 S1
     repl-loop.ts           REPL 루프(readLine → run, 종료·오류 정책)    ← 00 3.2
-    load-pyodide.ts        CDN 동적 import(브라우저 전용, 시험은 npm loadPyodide 주입)
-    console.ts             PyodideConsole 생성·runLine·await_fut·정규화  ← 02 5.1
+    console.ts             REPL 콘솔(createConsole: core 뼈대 + sys.ps1/ps2·헬퍼·TLA)·runLine·await_fut·정규화  ← 02 5.1
+    console-helpers.py     `await_fut` 등 헬퍼 namespace(`.py?raw`)
     submission-runner.ts   제출 실행 규칙(한 줄 제출 + 여러 줄 분할·줄 흘림, RD-011)  ← 02 5.2
     multiline.py           split_paste 본체(`.py?raw`, 파싱 + 2차 compile)         ← 02 5.2
     multiline.ts           loadSplitPaste(pyodide) — multiline.py를 별도 namespace에서 실행
     multiline-corpus.json  split_paste 코퍼스 27개(이름·소스, node + 실제 pyodide 차등 검증) ← 09 9.1
-    top-level-await.ts
-    interrupt-buffer.ts    connectInterrupts(설치 → 폐기 → 연결)       ← 03 2.6
-    sigint-handler.ts      SIGINT 핸들러(`sigint-handler.py`, `.py?raw`)  ← 03 2.4
-    interrupt-watch.ts     감시 타이머                                ← 03 2.5
-    stdin-callback.ts      readInput 알림 → wait() → null이면 signal+check           ← 04 3.1
-    sink-writer.ts         전역 stdout/stderr Writer                   ← 05 4.2
-    complete-source.ts     완성 후처리·ZipStdlibModuleCompleter        ← 07 7.5
-    webloop-reraise.ts                                                 ← 03 2.8
+    top-level-await.ts     setTopLevelAwait                           ← 02 5.4
+    complete-source.ts     완성 후처리·ZipStdlibModuleCompleter(`complete-source.py`)   ← 07 7.5
+  test/                    시험 전용: sigint-setup.ts(REPL 콘솔 통합 조립), core-internals.ts(core 소스 상대 경로 re-export)   ← 09 시험 배치(9.1 앞)
+
+packages/pyodide-testkit/src/                   (시험 전용, exports가 소스를 직접 가리킨다)
+  thread.ts                spawnRole: worker_threads 역할 하니스
+  fake-terminal.ts         가짜 xterm Terminal
+  package-boundary.ts      의존 트리 수집 도우미   ← 09 9.8
+  ts-resolve-hook.mjs      worker_threads 역할의 확장자 없는 상대 import 해석 훅
 ```
 
-Python 소스는 `.py?raw`로 임포트한다(vite는 내장 지원, tsdown/rolldown은 `tsdown.config.ts`의 `raw-text` 플러그인 + `src/py-modules.d.ts` 타입 선언). 적용 파일: `console-helpers.py`·`sleep-slice.py`·`sigint-handler.py`·`webloop-reraise.py`·`multiline.py`(RD-011)·`complete-source.py`(RD-015, `07-tab-completion.md` 7.1). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 `<…>` 꺾쇠 이름을 쓴다(트레이스백에 새면 알아보기 위한 것, 절단은 코드 객체로 한다).
+Python 소스는 `.py?raw`로 임포트한다(vite는 내장 지원, tsdown/rolldown은 각 패키지 `tsdown.config.ts`의 `raw-text` 플러그인 + `src/py-modules.d.ts` 타입 선언). 적용 파일: core `sigint-handler.py`·`sleep-slice.py`·`webloop-reraise.py`, repl `console-helpers.py`·`multiline.py`(RD-011)·`complete-source.py`(RD-015, `07-tab-completion.md` 7.1). `runPython(SOURCE, { globals, filename })`의 `filename`은 `<console-helpers>`처럼 `<…>` 꺾쇠 이름을 쓴다(트레이스백에 새면 알아보기 위한 것, 절단은 코드 객체로 한다).
 
-`terminal/`은 `protocol/`을 import하지 않는다(읽기 함수·sink를 `index.ts`가 주입). `worker/`도 마찬가지다(`worker.ts`가 주입). 예외는 `worker/boot.ts`다. 부팅 시퀀스를 조립하는 모듈이라 `createRpc`·`createMailboxReader`·`InitFrame`과 `acknowledgeInterrupt`·`readRequestSeq`·`discardPendingInterrupt`를 import해 `connectInterrupts`의 `{ ack, seq, discard }`와 루프의 `discardPendingInterrupt`를 클로저로 넣고, pyodide 로더는 `worker.ts`가 주입한다(브라우저는 CDN 로더, node 시험은 npm `loadPyodide`). `console.ts`·`sink-writer.ts`·`top-level-await.ts`는 `protocol/`을 import하지 않고 sink 함수를 받는다. `repl-loop.ts`와 `submission-runner.ts`도 `readLine`·`run`·출력 함수를 주입받고, `stdin-callback.ts`도 `requestInput`·`wait`·`signalInterrupt`·`checkInterrupt`를 주입받으며(뒤 둘은 `boot.ts`가 `() => signalInterrupt(interruptBuffer)`·`() => pyodide.checkInterrupt()`로 넣는다), RPC 래퍼는 `boot.ts`가 만든다. 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
+의존 주입 규칙. repl `terminal/`은 core 프로토콜을 import하지 않는다(읽기 함수·sink를 `repl-main-driver.ts`가 주입하고, `sinks.ts`가 순수 모듈 `createOutputTail`만 core에서 import한다). core `worker/`에서 `protocol/`을 import하는 모듈은 조립 모듈 `boot.ts`·`run-worker.ts`와 타입만 쓰는 `driver.ts`뿐이다. `boot.ts`는 `createRpc`·`composeRpcHandlers`·`createMailboxReader`·`InitFrame`과 `acknowledgeInterrupt`·`readRequestSeq`·`discardPendingInterrupt`를 import해 `connectInterrupts`의 `{ ack, seq, discard }`와 감시 타이머의 클로저를 만들고, pyodide 로더는 `run-worker.ts`가 주입한다(브라우저는 CDN 로더, node 시험은 npm `loadPyodide`). 나머지 core `worker/` 모듈(`interrupt-buffer.ts`·`sigint-handler.ts`·`interrupt-watch.ts`·`stdin-callback.ts` 등)은 `protocol/`을 import하지 않고 클로저를 받는다(`stdin-callback.ts`는 `requestInput`·`wait`·`signalInterrupt`·`checkInterrupt`, 뒤 둘은 `boot.ts`가 `() => signalInterrupt(interruptBuffer)`·`() => pyodide.checkInterrupt()`로 넣는다). repl `worker/`는 `repl-driver.ts`가 조립 모듈이라 core worker 진입점에서 `discardPendingInterrupt`와 driver 타입을 import하고, `repl-loop.ts`·`submission-runner.ts`는 `readLine`·`run`·출력 함수를 주입받는다. RPC 래퍼(`rpc.call("readLine", …)`·`rpc.notify(…)`)는 `repl-driver.ts`가 만든다. 그래서 이전 구현의 시험(가짜 터미널, node+실제 pyodide)이 그대로 옮겨진다.
 
 ### 4.3 apps/demo
 
@@ -219,6 +284,11 @@ RD-001에서 클린 체크아웃(`dist` 없음)으로 재현한 결과다.
 - 루트 `pnpm dev`는 `apps/demo`만 띄운다(`turbo run dev --filter=demo`). 패키지의 `dev`(`tsdown --watch`)는 `dist`를 지우고 다시 써서 `build`와 경합하므로 필요할 때 `pnpm --filter <패키지> dev`로 따로 실행한다.
 - `check-types`는 `^build`에 의존한다. 앱이 패키지 타입을 `dist/*.d.mts`에서 읽으므로 d.ts가 먼저 있어야 한다. 이전 값(`^check-types`)은 클린 상태에서 `TS2307: Cannot find module '@cp949/runo-pyodide-repl/worker'`로 실패했다. `customConditions`로 소스를 읽게 하면 앱의 컴파일러 옵션(`noUncheckedIndexedAccess`)이 벤더링한 xterm-readline 소스를 검사하므로 쓰지 않는다.
 - `pnpm preview`는 `build`에 의존한다.
+- 패키지 의존 순서(RD-020): `pyodide-repl`이 `pyodide-core`에 `workspace:*`로 의존하므로 turbo `^build`가 core를 먼저 빌드한다. repl의 `check-types`·`test`도 core `dist`(`./dist/*.d.mts`·`./dist/*.mjs`)를 읽는다(vitest·tsc에는 `development` 조건이 없다). demo는 dev에서 `development` 조건으로 core 소스를 직접 읽고 build·preview에서는 repl `dist`가 core를 외부 import로 남기므로 vite 워커 번들링이 `node_modules`의 core를 해석한다.
+- `pyodide-testkit`은 빌드하지 않는다. `exports`가 `./src/*.ts`(`./thread`·`./fake-terminal`·`./package-boundary`)와 `./ts-resolve-hook.mjs`를 직접 가리키고 소비자가 vitest·tsc뿐이다. `private`이고 pack 대상이 아니다.
+- `check-dist` 태스크(RD-020): `dependsOn: ["build"]`, `cache: false`. xterm-readline·core·repl의 `dist`에 `coincident`·`reflected-ffi` 문자열이 없는지 검사한다(`scripts/check-dist.mjs`). 루트 `pnpm test`는 `turbo run test check-dist`라 시험과 함께 돌고 `pnpm check-dist`로 단독 실행할 수 있다. turbo `test`가 자기 패키지 `build`에 의존하지 않아 `dist` 검사를 시험 안에 둘 수 없다(`09-testing.md` 9.8.2).
+- core는 `pyodide`를 `devDependencies`로만 두고 `tsdown.config.ts`의 `external`(`pyodide`·`pyodide/*`)로 `.d.mts`에 pyodide 타입을 인라인하지 않는다. core `./worker` 타입을 쓰는 소비자는 `pyodide`(+`@types/node`·`@types/emscripten`)를 직접 설치해야 한다(`packages/pyodide-core/CONTEXT.md`, `09-testing.md` 9.8.3). repl만 쓰는 소비자는 영향이 없다.
+- tarball 스모크: 루트 `pnpm smoke:pack`(`pnpm build && node scripts/pack-smoke.mjs`)이 xterm-readline·core·repl을 pack해 저장소 밖에 설치·`import`·`tsc`로 확인한다. 기본 파이프라인에는 넣지 않는다(`09-testing.md` 9.8.3).
 
 ## 5. 이전 구현 대비 무엇이 사라지고 무엇이 남는가
 

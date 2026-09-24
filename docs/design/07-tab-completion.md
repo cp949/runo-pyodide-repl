@@ -5,18 +5,18 @@
 `complete(source, pending)` 요청은 main→worker RPC 요청이다(`01-protocols.md` 1절). worker가 프롬프트 대기 중(`readLine` 요청을 보내고 응답을 기다리는 동안)에만 답하고, `input()` 메일박스 대기 중에는 worker가 멈춰 있어 답하지 못한다(그 구간의 Tab은 main이 무동작 처리). `pending`은 main이 넘기고 worker는 RD-016 전까지 무시한다.
 
 ## 7.1 요청 프로토콜
-- 요청: `complete(source, pending)` → 응답 `{ completions: string[], start: number }`(`worker/complete-source.ts`
+- 요청: `complete(source, pending)` → 응답 `{ completions: string[], start: number }`(repl `worker/complete-source.ts`
   의 `SourceCompletion`). `source`는 커서 앞 텍스트(`buf.slice(0, pos)`), `pending`은 `... ` 블록의 이전 줄들
   (`\n`으로 이음).
-- worker 핸들러(`boot.ts`가 `createRpc(frame.rpcPort, { complete })`로 등록)는 **프롬프트를 기다리는
+- worker 핸들러(repl `worker/repl-driver.ts`가 `WorkerDriverSession.handlers`로 내고 core `bootWorker`가 core 표와 합성해 `createRpc(frame.rpcPort, …)`로 등록)는 **프롬프트를 기다리는
   동안(`atPrompt`)에만** 실제로 계산하고, `completer`가 아직 없거나(로드 중) 실행 중에 늦게 도착한 요청은
   `{ completions: [], start: 0 }`로 돌려 사용자 코드와 겹쳐 돌지 않게 한다.
 - main은 `terminal/tab-reader.ts`의 `createTabReader(readline, { complete, interruptCompletion })`(세션
-  소유 정책 객체, `session.ts`가 `blockHistory`·`autoIndent` 옆에서 만든다)가 벤더 readline의 **키 가로채기
+  소유 정책 객체, `repl-main-driver.ts`가 `blockHistory`·`autoIndent` 옆에서 만든다)가 벤더 readline의 **키 가로채기
   공개 훅**(`ReadOptions.onKey`, RD-013이 범용으로 이미 추가)으로 Tab(`UnsupportedControlChar`, `data:
   ['\t']`)을 가로챈다(이전 구현은 private `readKey`를 런타임 래핑했다. 벤더링 뒤에는 `06-editing.md` 6.1
   규칙대로 private 멤버를 쓰지 않는다). 노출은 둘뿐이다: `readOptions(pending)`(세대 `generation` +1,
-  `ended=false`, `pendingBlock` 저장, `lastKeyWasTab=false`, `queuedTabs=[]` — `session.ts`가
+  `ended=false`, `pendingBlock` 저장, `lastKeyWasTab=false`, `queuedTabs=[]` — `repl-main-driver.ts`가
   `mergeReadOptions(blockHistory.readOptions(pending), autoIndent.readOptions(pending),
   tabReader.readOptions(pending))`로 3항 합성해 `createReplReader`에 넘긴다)와 `readEnded(line)`(세션이
   `readLine` continuation에서 `null`·문자열 둘 다에 호출, `blockHistory.discard()`와 같은 자리 — 순서는

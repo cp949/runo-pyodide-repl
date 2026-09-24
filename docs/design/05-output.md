@@ -5,6 +5,8 @@
 새 구현에서 sink 4종은 worker→main **단방향 RPC 알림**(`notify`)으로 전달된다. 이전 구현은 조각마다 worker를 멈추는 동기 호출이었고, 그 동기성은 요구사항이 아니었다. 순서 보장은 같은 MessagePort의 FIFO에 의존한다(`01-protocols.md` 1절).
 
 ## 4.1 sink 4종(`createTerminalSinks(readline)`)
+sink 4종은 repl `terminal/sinks.ts`(REPL main driver가 세션마다 만든다)가 소유한다. `write`·`writeErrorRaw`는 core 세션이 `write`·`writeErrorRaw` 알림을 `{ stream: "stdout" | "stderr", text }`로 넘기는 `output` 콜백을 REPL main driver가 연결한 것이고(`stdout` → `write`, `stderr` → `writeErrorRaw`), `writeOutput`·`writeError`는 core가 아니라 REPL main driver의 RPC 핸들러가 부른다(`01-protocols.md` 1.2, `00-architecture.md` 4.1 core export). 꼬리 추적기 `createOutputTail`(`output-tail`)은 터미널에 의존하지 않는 순수 모듈이라 core `terminal/output-tail.ts`에 있고 `sinks.ts`가 import한다.
+
 | sink | 구현 | 개행 | 색 | 용도 |
 | --- | --- | --- | --- | --- |
 | `writeOutput` | `readline.println(text)` | 강제 `\r\n` | 없음 | 식 값 에코, 시작 배너 |
@@ -20,7 +22,7 @@
   (worker는 텍스트만 넘긴다). 한계: stderr 텍스트 자체의 SGR이 조각 경계를 넘으면 조각 끝 `\x1b[0m`에서 끊긴다.
 - `\r` 진행률: `write`/`writeErrorRaw`가 개행을 강제하지 않으므로 `\r30%` 같은 한 줄 갱신이 그대로 반영된다.
   꼬리 계산은 마지막 `\r` 뒤를 취한다.
-- 모든 sink는 화면에 낸 바이트를 `output-tail`에 먹인다(`println`은 `text + '\n'`을 먹인다).
+- 모든 sink는 화면에 낸 바이트를 `output-tail`(core `terminal/output-tail.ts`)에 먹인다(`println`은 `text + '\n'`을 먹인다).
   `tail()`/`resetTail()`을 함께 노출한다. **sink 세트는 worker(세션)마다 새로 만든다** — 새 세션이 이전
   꼬리를 물려받지 않게.
 - **안내 줄**(`terminal/notice.ts`의 `writeNotice(readline, text, kind)`): 세션 밖에서 main이 찍는 개행으로 끝나는
@@ -35,7 +37,7 @@
   FS 레벨 `setStdout`의 `batched`/`raw` 설정과 **완전히 독립**이다. 스트리밍 문제의 원인은 pyodide 설정이
   아니라 브리지가 `println`(개행 강제)을 거치는 것이었다.
 - 콘솔 리다이렉트 **밖**(프롬프트 대기 중 배경 콜백 출력, asyncio 예외 로그, 패키지 로딩 메시지)은 전역
-  스트림을 탄다. `createSinkWriter(sink)`가 pyodide `Writer`로 바이트를 받아
+  스트림을 탄다. `createSinkWriter(sink)`(core `worker/sink-writer.ts`)가 pyodide `Writer`로 바이트를 받아
   `TextDecoder({ stream: true })`로 조각 경계를 잇고 콘솔 콜백과 **같은 sink**(`write`, `writeErrorRaw`)로
   보낸다. `write`는 받은 바이트 수를 돌려줘야 한다(0을 돌려주면 호출한 쪽이 같은 바이트를 다시 쓴다).
   잘린 상태는 Writer마다 따로 둔다.

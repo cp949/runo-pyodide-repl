@@ -7,18 +7,24 @@
 `readline`(벤더 `Readline`)·`interruptBuffer`·`interruptSender`·Ctrl+C 핸들러는 핸들(`index.ts`) 소유라
 리셋을 넘어 산다. `Terminal`(화면)도 호출자 소유라 마운트 시 1회만 만들어진다. 세션 1개(worker·RPC·
 sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들고 `reset()`이 통째로 교체하는 단위다
-(`00-architecture.md` 4.2).
+(`00-architecture.md` 4.2). RD-020 뒤 `startSession()`은 두 부분을 조립한다. core 세션(`startCoreSession`,
+core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초기화 프레임·RPC(core 핸들러 + driver 핸들러
+합성)·`readInput` 처리·게이트 `alive`·`inputReadsPending`·크래시·종료를 맡고, REPL main driver
+(`createReplMainDriver`, `repl-main-driver.ts`)가 sink·리더·가드·`autoIndent`·`blockHistory`·`tabReader`·
+게이트 `readLinePending`·`cancelSettling`·`reading`·`readLine`/`writeOutput`/`writeError` 핸들러·종료 시 읽기 정리를 맡는다.
 
 `reset()` 순서. 자동 들여쓰기 단위(`lastUsedIndentation`)는 세션 소유(`createAutoIndent`, RD-013 완료)라
-별도 초기화 단계가 없다 — 5번이 새 세션을 만들 때 `session.ts`의 `startSession()`이 `createAutoIndent
+별도 초기화 단계가 없다 — 5번이 새 세션을 만들 때 `startSession()`이 만드는 REPL main driver가 `createAutoIndent
 (readline)`을 다시 불러 새 객체(4칸)가 되기 때문이다:
 
-1. `session.terminate()` — 옛 세션을 끝낸다: (REPL 읽기가 열려 있으면 `blockHistory.discard()`로 대기 중
-   블록 history를 첫 줄까지 버린다 →, RD-014 완료·`06-editing.md` 6.4) `tabReader.readEnded(null)`(`ended
-   =true`·큐 비움을 동기로 확정 — 뒤이은 `rpc.dispose()`의 `complete` 요청 reject가 취소된 세션의 버퍼·
-   커서로 큐를 다시 처리하는 것을 막는다, RD-015 DELTA-04a) → `readline.cancelRead()`(열린 읽기를
-   `ReadCancelledError`로 끝낸다. 화면·history·리스너·`term`은 건드리지 않는다, `06-editing.md` 6.1) →
-   `endSession()`(`alive=false`, `interruptSender.cancel()`) → `rpc.dispose()` → `worker.terminate()`.
+1. `session.terminate()` — 옛 세션을 끝낸다. core 세션(`terminate()`)의 순서는 `ended=true` → REPL main driver의
+   `terminate` 훅 → `endSession()`(`alive=false`, `interruptSender.cancel()`) → worker `error` 리스너 제거 →
+   `rpc.dispose()` → `worker.terminate()`다(`rpc.dispose()`가 `worker.terminate()`보다 앞이어야 한다). 훅의 순서는
+   (REPL 읽기가 열려 있으면 `blockHistory.discard()`로 대기 중 블록 history를 첫 줄까지 버린다 →, RD-014 완료·
+   `06-editing.md` 6.4) `tabReader.readEnded(null)`(`ended=true`·큐 비움을 동기로 확정 — 뒤이은 `rpc.dispose()`의
+   `complete` 요청 reject가 취소된 세션의 버퍼·커서로 큐를 다시 처리하는 것을 막는다, RD-015 DELTA-04a) →
+   `readline.cancelRead()`(열린 읽기를 `ReadCancelledError`로 끝낸다. 화면·history·리스너·`term`은 건드리지
+   않는다, `06-editing.md` 6.1)다.
 2. `Atomics.store(interruptBuffer, SIGNAL, 0)` — interrupt buffer는 세션 사이에 재사용하므로(같은
    `SharedArrayBuffer`) 옛 세션이 못 비운 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를
    죽이지 않는다.
@@ -37,7 +43,7 @@ sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들�
 `terminated`·`load-failed`·`loading`)는 전부 허용한다. `{ topLevelAwait? }` 옵션은 새 프레임에
 실린다. 생략하면 마지막 값을 유지한다(RD-012). 확인 대화상자·디바운스 없음.
 
-세션 소유 vs 핸들 소유(`session.ts`): 세션은 게이트 4종(`alive`·`readLinePending`·`inputReadsPending`·
+세션 소유 vs 핸들 소유(`session.ts`·`repl-main-driver.ts`·core `session/core-session.ts`): 세션은 게이트 4종(`alive`·`readLinePending`·`inputReadsPending`·
 `cancelSettling`)·`reading`·`ended`·sink·리더·가드·`autoIndent`(`lastUsedIndentation`, RD-013)·
 `blockHistory`(기준점 `blockBase`·`pendingBlock`, RD-014)·`tabReader`(`createTabReader`, 세대·큐·왕복 상태
 `requesting`, RD-015)·메일박스·RPC·worker를 소유한다. 리셋마다 전부
@@ -50,8 +56,8 @@ sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들�
 넘어 산다. 리셋 시 미제출 입력·대기 읽기·쌓인 type-ahead 키(`06-editing.md` 6.7)는 버린다(history 미기록, 화면에는 남긴다) — `cancelRead()`가
 벤더 읽기를 화면·history를 건드리지 않고 끝내기 때문이다.
 
-옛 세션의 열린 읽기: `cancelRead()`로 `ReadCancelledError`가 되면 `session.ts`의 `readLine`/`readInput`
-RPC 핸들러가 응답 없이 조용히 끝낸다(영영 안 풀리는 Promise를 돌려줘 RPC가 응답을 보내지 않는다) — 옛
+옛 세션의 열린 읽기: `cancelRead()`로 `ReadCancelledError`가 되면 REPL main driver의 `readLine` 핸들러와 core 세션의
+`readInput` 처리(판정은 driver의 `isReadCancelled`)가 응답 없이 조용히 끝낸다(영영 안 풀리는 Promise를 돌려줘 RPC가 응답을 보내지 않는다) — 옛
 worker는 이미 종료 중이라 응답을 기다리지 않는다. `readInput`은 세션이 `ended`면(TRP-003) 메일박스에
 `fail()`도 쓰지 않는다.
 
@@ -77,12 +83,12 @@ Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 별개 기능이�
 ## 8.4 크래시(RD-010)
 
 worker가 죽거나(전역 `error` 이벤트) 부팅 뒤(REPL 루프)에서 잡히지 않은 예외가 나면(`crashed` 알림,
-`01-protocols.md` 1.2) `session.ts`의 `crash(message)`가 `endSession()`(`alive=false`) →
+`01-protocols.md` 1.2) core 세션(`session/core-session.ts`)의 `crash(message)`가 `endSession()`(`alive=false`) →
 `onStatus("crashed")` → `onCrash?.(message)` 순으로 부른다(`00-architecture.md` 3.4). 둘 중 먼저 온
 신호만 반영한다 — 이미 크래시했거나 `terminate()`됐으면 `crash()`는 아무것도 하지 않는다. 터미널에는
 아무것도 쓰지 않는다(앱의 Alert가 보여준다). worker는 terminate하지 않는다(복구는 8.1의 `reset()`뿐).
 
-`error` 리스너는 `startSession()`이 worker 생성 직후 건다. `session.terminate()`(리셋·dispose 양쪽이
+`error` 리스너는 core 세션이 worker 생성 직후 건다. `session.terminate()`(리셋·dispose 양쪽이
 부른다)에서 뗀다 — 안 떼면 다음 세션이 시작된 뒤 옛 worker가 뒤늦게 죽어도(가비지 컬렉션 전) 리스너가
 남아 있지만, `crash()` 자체가 `ended` 가드로 막으므로 관찰 가능한 차이는 없다(리스너 제거는 누수 방지
 목적).

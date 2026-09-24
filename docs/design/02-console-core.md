@@ -20,7 +20,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
   `echo` 인자(RD-011)가 거짓이면 `repr()`·`builtins._` 갱신을 건너뛰고 `[None, exited, None]`만 돌려준다 —
   여러 줄 분할 재생에서 에코하지 않는 중간 문장에 쓴다(5.2 `runChunk`). 기본값 `True`라 기존 한 줄 경로는
   그대로다.
-- **`runLine(source, options?: { echo?: boolean })`**(`worker/console.ts`의 `createConsole(pyodide, sinks,
+- **`runLine(source, options?: { echo?: boolean })`**(repl `worker/console.ts`의 `createConsole(pyodide, sinks,
   { topLevelAwait })`가 돌려주는 `ReplConsole`, RD-004, `echo` 옵션은 RD-011 추가): `push`와 `await_fut`를 묶은
   한 줄 실행이다. `echo`(기본 `true`)는 그대로 `await_fut(fut, echo)`에 전달된다. 결과 `RunLineResult`는
   `{ kind: 'incomplete' }`, `{ kind: 'syntax-error', formattedError }`, `{ kind: 'complete', echo, exited }`,
@@ -28,9 +28,9 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
   `options.echo === false`이면 `null`이다. `formattedError`는 `fut.formatted_error`(내부 프레임이 잘린 것,
   `e.message`가 아니다)를 아래 정규화만 거친 값이라 끝 개행을 포함하고(`repr` 예외는 `await_fut`가 만든
   트레이스백), 제거는 호출부가 한다. `fut.destroy()`는 `finally`에서 부른다. `await_fut`·`format_syntax_error`·
-  `retrieve_exception` 소스는 `worker/console.ts`에 TS 템플릿 문자열로 인라인돼 있고 별도 namespace에 정의한다
+  `retrieve_exception` 소스는 repl `worker/console.ts`에 TS 템플릿 문자열로 인라인돼 있고 별도 namespace에 정의한다
   (사용자 globals를 오염시키지 않는다). `createConsole`의 순서는 전역 stdout/stderr Writer 등록 → `sys.ps1/ps2`
-  → `PyodideConsole(pyodide.globals)` + 콜백 → TLA 비트 → 헬퍼 namespace다. 취소·안전망·값 에코 표시(5.2)는
+  → `PyodideConsole(pyodide.globals)` + 콜백 → TLA 비트 → 헬퍼 namespace다. 이 중 Writer 등록(`installStdioWriters`)과 `PyodideConsole` 생성 + 콜백(`createCoreConsole(pyodide, sinks, { filename? })`, 기본 `<console>`)은 core `worker/core-console.ts`가 내고, `sys.ps1/ps2`·TLA 비트·헬퍼 namespace는 REPL `createConsole`이 위 순서로 그 사이·뒤에 끼운다(core가 뼈대를 만든 뒤 REPL이 확장하는 구조가 아니다: `sys.ps1/ps2`가 콘솔 생성 앞이라는 순서를 지키려고 core는 두 함수를 따로 낸다). 부팅 시퀀스에서 이 함수를 부르는 것은 core `bootWorker`가 부르는 `WorkerDriverSession.createConsole`이다(`00-architecture.md` 3.1). 취소·안전망·값 에코 표시(5.2)는
   이 위에 `createSubmissionRunner`가 얹고, 여러 줄 분할은 RD-011이 더했다.
 - **`compilerFlags(): number`**(`ReplConsole`, RD-011): `pyconsole._compile.compiler.flags &
   ~INCOMPLETE_INPUT_FLAGS`(문법 오류 정규화가 쓰는 것과 같은 `0x4200` 마스크). `createSubmissionRunner`가 여러
@@ -60,7 +60,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
 - 반환은 `{ prompt, exit, pending? }`. `PS1 = '>>> '`, `PS2 = '... '`. `pending`은 블록 입력 중일 때만
   있고 `repl.pending()` 그대로(콘솔 buffer의 줄들을 `\n`으로 이은 텍스트)다(main의 자동 들여쓰기·Tab 완성이 쓴다).
   `repl`은 `ReplConsole`의 `runLine`·`pending`·`clearPending`·`compilerFlags`만 쓴다. 러너는 콘솔 buffer proxy를
-  직접 만지지 않는다. `deps.splitPaste`(`worker/multiline.ts`의 `loadSplitPaste(pyodide)`, `boot.ts`가 배선,
+  직접 만지지 않는다. `deps.splitPaste`(repl `worker/multiline.ts`의 `loadSplitPaste(pyodide)`, repl `worker/repl-driver.ts`가 배선,
   RD-011)는 `(source, flags) => [error, chunks]`다.
 - **분기 순서**(`run()` 맨 앞부터, RD-011): `line === null`(취소) → `repl.pending() !== undefined`(블록 입력 중
   줄 흘림, 아래) → `/[\r\n]/.test(line)`(여러 줄 분할, 아래) → 그 외 한 줄. 순서가 중요하다 — 취소를 맨 먼저
@@ -128,16 +128,16 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
 - **기본 OFF**. 콘솔은 부모 `Console.__init__`이 `PyCF_ALLOW_TOP_LEVEL_AWAIT`를 항상 켜므로 기본이 ON이고
   생성자로 끌 수 없다(TRP-007). 생성 직후 `pyconsole._compile.compiler.flags == 0x6200`
   (0x2000 TLA | 0x4000 ALLOW_INCOMPLETE_INPUT | 0x200 DONT_IMPLY_DEDENT).
-- `setTopLevelAwait(pyconsole, enabled)`(`worker/top-level-await.ts`)가 **TLA 비트만** 켜고 끈다. 다른 비트는 여러 줄 입력
+- `setTopLevelAwait(pyconsole, enabled)`(repl `worker/top-level-await.ts`)가 **TLA 비트만** 켜고 끈다. 다른 비트는 여러 줄 입력
   판정에 쓰이므로 건드리지 않는다. `_Compile.__call__`이 매 호출 flags를 읽으므로 다음 `push`부터 반영된다.
-- **적용 시점**: worker가 시작할 때 초기화 프레임의 `topLevelAwait`를 **콘솔 생성 직후 한 번만** 적용한다
+- **적용 시점**: worker가 시작할 때 초기화 프레임 `driver` 필드의 `topLevelAwait`(`WorkerDriver.parseOptions`가 검증해 `createSession(options)`로 넘긴다)를 **콘솔 생성 직후 한 번만** 적용한다
   (main에 되묻지 않는다, `01-protocols.md` 4절). 값을 바꾸려면
   worker를 새로 만든다(실행 중 콘솔의 플래그를 바꾸면 다음 `push`가 buffer 전체를 새 플래그로 재컴파일해
   `_IncompleteInputError`가 나고 buffer가 비워진다). `=== true`일 때만 ON으로 취급한다.
 - ON은 컴파일 플래그만 켠다. `asyncio` 선주입·배너 변경 등 `python -m asyncio`의 나머지는 흉내내지 않는다.
   설정은 저장하지 않아 페이지를 다시 열면 OFF다.
 - **main 쪽 연동**(RD-012, `00-architecture.md` 4.1): `createRepl({ topLevelAwait })`와 `reset({ topLevelAwait })`가
-  이 값을 초기화 프레임에 싣는다. `reset()`은 `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면
+  이 값을 초기화 프레임의 `driver` 필드(`{ topLevelAwait }`, REPL main driver의 `options`)에 싣는다. `reset()`은 `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면
   마지막으로 적용한 값을 그대로 유지한다(sticky, 핸들이 보관 — 값을 바꾸면 워커를 새로 만들어야 하므로 위 "적용
   시점" 제약과 같은 이유다). 데모(`ReplView.tsx`)의 top-level await 체크박스는 바뀔 때마다 즉시 무조건
   `reset({ topLevelAwait })`를 부른다(양방향, "스위치 변경 = 세션 리셋"). 터미널·배너에는 표시하지 않는다.
@@ -147,7 +147,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
 - worker 루프는 `result.exit`이면 `sessionTerminated` 알림으로 세션 종료를 main에 알리고(`onTerminated`) 루프를
   `break`한다. 이후 `readLine`을 더 요청하지 않아 실제 인터프리터 종료와 동등해진다. 터미널에는 아무것도 쓰지 않고
   (3.14도 종료 메시지가 없다) worker는 살려 둔다(복구는 세션 리셋). main은 `onStatus('terminated')`만 부르고, 종료 뒤
-  활성 읽기가 없어 키는 화면에 나오지 않는다(Ctrl+L만 즉시 동작하고 나머지는 벤더 type-ahead 버퍼에 쌓이며 다음 읽기가 없어 재생되지 않는다, 리셋의 `cancelRead()`가 비운다 — RD-019, `06-editing.md` 6.7). 루프가 `break`한 뒤 `boot.ts`의 `finally`에서 `stopWatch()`·
+  활성 읽기가 없어 키는 화면에 나오지 않는다(Ctrl+L만 즉시 동작하고 나머지는 벤더 type-ahead 버퍼에 쌓이며 다음 읽기가 없어 재생되지 않는다, 리셋의 `cancelRead()`가 비운다 — RD-019, `06-editing.md` 6.7). 루프가 `break`한 뒤 core `worker/boot.ts`(`bootWorker`)의 `finally`에서 `stopWatch()`·
   `interruptIdle.destroy()`로 감시 타이머와 깨우기 proxy를 정리한다(`03-ctrl-c.md` 2.5).
 - 여러 줄 제출 중 `exit()`가 나면 나머지 문장은 실행하지 않는다.
 
