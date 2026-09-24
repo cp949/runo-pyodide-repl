@@ -13,7 +13,7 @@ import { createConsole, type ReplConsole } from "./console";
 import corpus from "./multiline-corpus.json";
 import { loadSplitPaste, type SplitPaste } from "./multiline";
 import { createSubmissionRunner } from "./submission-runner";
-import { suppressWebLoopReraise } from "./webloop-reraise";
+import { suppressWebLoopReraise } from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 let splitPaste: SplitPaste;

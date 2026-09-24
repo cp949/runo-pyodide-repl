@@ -22,7 +22,7 @@ import {
   setupConsoleRunner,
   teardownConsoleRunner,
 } from "../test/sigint-setup";
-import { SLEEP_SLICE_FILENAME } from "./sleep-slice";
+import { SLEEP_SLICE_FILENAME } from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 

@@ -32,11 +32,13 @@ import {
 import { spawnRole } from "@repo/pyodide-testkit/thread";
 import { createConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
-import { installSigintHandler } from "./sigint-handler";
-import { createSinkWriter } from "./sink-writer";
-import { createStdinCallback } from "./stdin-callback";
+import {
+  createSinkWriter,
+  createStdinCallback,
+  installSigintHandler,
+  suppressWebLoopReraise,
+} from "../test/core-internals";
 import { createSubmissionRunner } from "./submission-runner";
-import { suppressWebLoopReraise } from "./webloop-reraise";
 
 let pyodide: PyodideInterface;
 

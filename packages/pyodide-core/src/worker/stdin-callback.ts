@@ -1,7 +1,7 @@
 /**
  * `pyodide.setStdin({ stdin })`에 넘길 동기 stdin 콜백(04-stdin-input.md 3.1). "`readInput` 알림 → 메일박스 대기"
  * 순서와 "취소 표식 → `KeyboardInterrupt`" 변환을 이 모듈이 소유한다(01-protocols.md 1.3). `pyodide`를 import하지 않고
- * core 프로토콜도 import하지 않는다 — `boot.ts`가 RPC 알림·메일박스 리더·SIGINT 클로저 둘을 주입한다.
+ * `protocol/`도 import하지 않는다 — `boot.ts`가 RPC 알림·메일박스 리더·SIGINT 클로저 둘을 주입한다.
  *
  * 취소 변환은 콜백 안에서 SIGINT를 쓰고 곧바로 소비한다: `signalInterrupt()`(요청 번호 +1 → SIGINT 2) →
  * `checkInterrupt()`(`pyodide.checkInterrupt()`). GIL이 풀린 콜백 안이라 `checkInterrupt()`는 `FS.ErrnoError(EINTR)`를

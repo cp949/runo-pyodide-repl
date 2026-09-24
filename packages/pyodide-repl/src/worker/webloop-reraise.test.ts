@@ -11,7 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, onTestFinished } from "vite
 import { createConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
 import { createSubmissionRunner } from "./submission-runner";
-import { suppressWebLoopReraise } from "./webloop-reraise";
+import { suppressWebLoopReraise } from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 /** 파일 전체가 공유하는 실제 WebLoop. `asyncio.get_event_loop()`는 항상 이 객체를 돌려준다(억제 설치 가드가 그 함수를

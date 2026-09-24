@@ -8,7 +8,7 @@
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { createConsole, type ReplConsole, type RunLineResult } from "./console";
-import { suppressWebLoopReraise } from "./webloop-reraise";
+import { suppressWebLoopReraise } from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 

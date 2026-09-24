@@ -33,7 +33,7 @@ DEV_LOG = os.environ.get("DEV_LOG", os.path.join(tempfile.gettempdir(), "rd-009-
 
 CONTROLS = {
     "1": {
-        "file": "packages/pyodide-repl/src/worker/boot.ts",
+        "file": "packages/pyodide-core/src/worker/boot.ts",
         "find": (
             "    // WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제. "
             "세션당 1회, 실패해도 REPL 동작은 그대로다(경고만 남는다).\n"
@@ -47,7 +47,7 @@ CONTROLS = {
         ],
     },
     "2": {
-        "file": "packages/pyodide-repl/src/worker/sleep-slice.py",
+        "file": "packages/pyodide-core/src/worker/sleep-slice.py",
         "find": (
             "            original_sleep(secs)\n"
             "            poll()\n"
@@ -61,11 +61,11 @@ CONTROLS = {
     "3": {
         # RD-018 DELTA-04 경로 정정(멈추는 지점 3): 문자열은 그대로이나 boot.ts의 이 블록이 들여쓰기 2칸→4칸으로
         # 바뀌었다(호이스팅 관련 리팩토링, 주변 줄 132~133 주석 참고). find·replace를 그 들여쓰기에 맞췄다.
-        "file": "packages/pyodide-repl/src/worker/boot.ts",
+        "file": "packages/pyodide-core/src/worker/boot.ts",
         "find": (
             "    const stopWatch = startInterruptWatch({\n"
             "      interruptIdle,\n"
-            "      atPrompt: () => atPrompt,\n"
+            "      atPrompt: () => session.atPrompt(),\n"
             "      hasPending: () => hasPendingInterrupt(interruptBuffer),\n"
             "      consume: () => consumeInterrupt(interruptBuffer),\n"
             "      discard: () => discardPendingInterrupt(interruptBuffer),\n"

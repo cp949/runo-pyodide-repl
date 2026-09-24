@@ -23,13 +23,13 @@ import { loadSplitPaste } from "../worker/multiline";
 import {
   type InterruptIdle,
   installSigintHandler,
-} from "../worker/sigint-handler";
-import { installSleepSlice } from "../worker/sleep-slice";
+  installSleepSlice,
+  suppressWebLoopReraise,
+} from "./core-internals";
 import {
   createSubmissionRunner,
   type SubmissionRunner,
 } from "../worker/submission-runner";
-import { suppressWebLoopReraise } from "../worker/webloop-reraise";
 import type {
   PresserCommand,
   PresserEvent,

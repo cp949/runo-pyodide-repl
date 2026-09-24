@@ -78,13 +78,13 @@ const { createConsole } = await import(
   new URL("src/worker/console.ts", REPO).href
 );
 const { connectInterrupts } = await import(
-  new URL("src/worker/interrupt-buffer.ts", REPO).href
+  new URL("../pyodide-core/src/worker/interrupt-buffer.ts", REPO).href
 );
 const { createSubmissionRunner, PS1, PS2 } = await import(
   new URL("src/worker/submission-runner.ts", REPO).href
 );
 const { suppressWebLoopReraise } = await import(
-  new URL("src/worker/webloop-reraise.ts", REPO).href
+  new URL("../pyodide-core/src/worker/webloop-reraise.ts", REPO).href
 );
 const {
   createInterruptBuffer,

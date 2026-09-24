@@ -1,0 +1,82 @@
+/**
+ * REPL worker driver(RD-020). core worker 커널(`runWorker`, `@cp949/runo-pyodide-core/worker`)이 공통 부팅
+ * (RPC → loadPyodide → 콘솔 → webloop 억제 → Ctrl+C 연결 → stdin 배선 → `ready` → 감시 타이머)을 맡고, 이 driver는
+ * REPL 전용 부분을 낸다: `complete` RPC 핸들러, 콘솔 확장(`sys.ps1/ps2`·헬퍼·TLA·완성기), 배너·제출 러너·`readLine` 루프.
+ */
+import {
+  discardPendingInterrupt,
+  type ConsoleContext,
+  type PyodideConsoleProxy,
+  type RunContext,
+  type WorkerDriver,
+  type WorkerDriverSession,
+} from "@cp949/runo-pyodide-core/worker";
+import { loadCompleteSource, type CompleteSource } from "./complete-source";
+import { createConsole, type ReplConsole } from "./console";
+import { loadSplitPaste } from "./multiline";
+import { runReplLoop } from "./repl-loop";
+import { createSubmissionRunner } from "./submission-runner";
+
+/** `atPrompt`가 아니거나 `completer`가 아직 없을 때(콘솔 생성 전) `complete` 요청에 돌려주는 빈 응답. */
+function emptyCompletion() {
+  return { completions: [], start: 0 };
+}
+
+function createReplSession(): WorkerDriverSession {
+  // complete 핸들러는 createRpc 생성 시에만 등록할 수 있다(core `protocol/rpc.ts`, 나중 등록 API 없음). 콘솔이 아직 없는
+  // 동안(로드 중)과 프롬프트 대기 중이 아닌 동안(실행 중)은 completer/atPrompt를 클로저로 읽어 빈 응답으로 답한다.
+  let completer: CompleteSource | null = null;
+  let atPrompt = false;
+  let repl: ReplConsole;
+  return {
+    handlers: {
+      complete: (source: string, pending: string | undefined) =>
+        atPrompt && completer ? completer(source, pending) : emptyCompletion(),
+    },
+    createConsole({ pyodide, sinks, frame }: ConsoleContext): PyodideConsoleProxy {
+      repl = createConsole(pyodide, sinks, {
+        topLevelAwait: frame.topLevelAwait,
+      });
+      completer = loadCompleteSource(pyodide, repl.pyconsole);
+      return repl.pyconsole;
+    },
+    async run({ pyodide, rpc, frame }: RunContext): Promise<void> {
+      // sink(println)가 개행을 붙이므로 배너에 개행을 더하지 않는다(TRAP-29).
+      rpc.notify("writeOutput", repl.banner);
+      const splitPaste = loadSplitPaste(pyodide);
+      const runner = createSubmissionRunner(
+        pyodide,
+        repl,
+        {
+          writeOutput: (text) => rpc.notify("writeOutput", text),
+          writeError: (text) => rpc.notify("writeError", text),
+        },
+        { splitPaste },
+      );
+      await runReplLoop({
+        readLine: (prompt, pending) =>
+          rpc.call<string | null>("readLine", prompt, pending, true),
+        setAtPrompt: (value) => {
+          atPrompt = value;
+        },
+        discardPendingInterrupt: () =>
+          discardPendingInterrupt(frame.interruptBuffer),
+        run: (line) => runner.run(line),
+        onTerminated: () => rpc.notify("sessionTerminated"),
+        onError: (error) => {
+          console.error("[repl.worker] 루프 오류", error);
+          rpc.notify("writeError", `repl 내부 오류: ${String(error)}`);
+          try {
+            repl.clearPending();
+          } catch {
+            // 콘솔 상태를 읽을 수 없으면 다음 push가 새 상태를 만든다.
+          }
+        },
+      });
+    },
+    atPrompt: () => atPrompt,
+  };
+}
+
+/** REPL driver. `runWorker({ driver: replDriver })`가 worker 하나에 세션 하나를 만든다. */
+export const replDriver: WorkerDriver = { createSession: createReplSession };

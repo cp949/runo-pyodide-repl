@@ -33,7 +33,7 @@ DEV_LOG = os.environ.get("DEV_LOG", os.path.join(tempfile.gettempdir(), "rd-008-
 
 CONTROLS = {
     "1": {
-        "file": "packages/pyodide-repl/src/worker/stdin-callback.ts",
+        "file": "packages/pyodide-core/src/worker/stdin-callback.ts",
         "find": "    deps.checkInterrupt();\n",
         "replace": "",
         "scripts": [
@@ -42,7 +42,7 @@ CONTROLS = {
         ],
     },
     "2": {
-        "file": "packages/pyodide-repl/src/worker/boot.ts",
+        "file": "packages/pyodide-core/src/worker/boot.ts",
         "find": "        signalInterrupt: () => signalInterrupt(interruptBuffer),",
         "replace": "        signalInterrupt: () => Atomics.store(interruptBuffer, 0, 2),",
         "scripts": [

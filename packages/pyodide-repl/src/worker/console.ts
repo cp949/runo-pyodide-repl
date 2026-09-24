@@ -6,38 +6,28 @@
  */
 import type { PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
-import { createSinkWriter } from "./sink-writer";
-import { setTopLevelAwait, type CompilerFlagsHolder } from "./top-level-await";
+import {
+  createCoreConsole,
+  installStdioWriters,
+  type ConsoleFutureProxy,
+  type ConsoleSinks,
+  type PyodideConsoleProxy,
+} from "@cp949/runo-pyodide-core/worker";
+import { setTopLevelAwait } from "./top-level-await";
 import HELPERS_SOURCE from "./console-helpers.py?raw";
 
-/** 콘솔 콜백과 전역 스트림이 같이 쓰는 sink 둘. worker에서는 RPC `notify` 래퍼다. */
-export interface ConsoleSinks {
-  write(text: string): void;
-  writeErrorRaw(text: string): void;
-}
+// 콘솔 뼈대 타입은 core가 소유한다(`ConsoleSinks`·`PyodideConsoleProxy`·`ConsoleFutureProxy`·`SyntaxCheck`). 이 모듈을 import하던
+// 곳이 바뀌지 않도록 다시 내보낸다.
+export type {
+  ConsoleFutureProxy,
+  ConsoleSinks,
+  PyodideConsoleProxy,
+  SyntaxCheck,
+} from "@cp949/runo-pyodide-core/worker";
 
 export interface ConsoleOptions {
   /** 초기화 프레임의 `topLevelAwait`. 콘솔 생성 직후 한 번만 적용한다. */
   topLevelAwait: boolean;
-}
-
-export type SyntaxCheck = "incomplete" | "syntax-error" | "complete";
-
-export interface ConsoleFutureProxy extends PyProxy {
-  readonly syntax_check: SyntaxCheck;
-  readonly formatted_error: string | undefined;
-}
-
-export interface PyodideConsoleProxy extends PyProxy, CompilerFlagsHolder {
-  stdout_callback: ((text: string) => void) | undefined;
-  stderr_callback: ((text: string) => void) | undefined;
-  push(line: string): ConsoleFutureProxy;
-  /** 접근할 때마다 새 proxy다. 쓴 뒤 `destroy()`한다(02-console-core.md 5.1). */
-  readonly buffer: PyProxy & {
-    readonly length: number;
-    clear(): void;
-    toJs(): string[];
-  };
 }
 
 export type RunLineResult =
@@ -103,24 +93,20 @@ type AwaitFutResult = [
 ];
 
 /**
- * 순서: 전역 stdout/stderr Writer 등록 → `sys.ps1/ps2` → `PyodideConsole(pyodide.globals)` + 콜백 → TLA 비트 →
- * `await_fut` namespace. 동기 함수다. 세션마다 한 번 부른다.
+ * 순서: 전역 stdout/stderr Writer 등록(core `installStdioWriters`) → `sys.ps1/ps2` → `PyodideConsole(pyodide.globals)` + 콜백
+ * (core `createCoreConsole`) → TLA 비트 → `await_fut` namespace. 동기 함수다. 세션마다 한 번 부른다.
  */
 export function createConsole(
   pyodide: PyodideInterface,
   sinks: ConsoleSinks,
   options: ConsoleOptions,
 ): ReplConsole {
-  pyodide.setStdout(createSinkWriter((text) => sinks.write(text)));
-  pyodide.setStderr(createSinkWriter((text) => sinks.writeErrorRaw(text)));
+  installStdioWriters(pyodide, sinks);
   setPrompts(pyodide);
+  const pyconsole = createCoreConsole(pyodide, sinks);
   const consoleModule = pyodide.pyimport("pyodide.console") as PyProxy & {
     BANNER: string;
-    PyodideConsole: (globals: PyProxy) => PyodideConsoleProxy;
   };
-  const pyconsole = consoleModule.PyodideConsole(pyodide.globals);
-  pyconsole.stdout_callback = (text) => sinks.write(text);
-  pyconsole.stderr_callback = (text) => sinks.writeErrorRaw(text);
   setTopLevelAwait(pyconsole, options.topLevelAwait);
   // 별도 namespace(빈 dict)에서 정의해 사용자 globals를 오염시키지 않는다. 함수는 세션 동안 쓰므로 proxy를 유지한다.
   const namespace = pyodide.toPy({}) as PyProxy & {

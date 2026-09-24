@@ -52,7 +52,7 @@ CONTROLS = {
         # RD-018 DELTA-04 경로 정정(멈추는 지점 3): 이 판정 로직은 DELTA-00 무렵 `sigint-handler.ts`에서
         # `sigint-handler.py`(Python 소스, `?raw` import)로 옮겨졌다 — ts는 이제 그 소스를 심는 JS 래퍼만
         # 남았다. find·replace 문자열·들여쓰기는 그대로(같은 한 줄), 파일만 다르다.
-        "file": "packages/pyodide-repl/src/worker/sigint-handler.py",
+        "file": "packages/pyodide-core/src/worker/sigint-handler.py",
         "find": "            if f.f_code.co_filename == user_filename:",
         "replace": "            if True:",
         "scripts": [["measure/burst-matrix.mjs", URL, {"COMBOS": "a", "N": "20"}]],

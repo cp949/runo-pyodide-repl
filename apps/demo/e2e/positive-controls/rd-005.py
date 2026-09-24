@@ -50,7 +50,7 @@ CONTROLS = {
         "scripts": [["carryover-check.mjs", URL]],
     },
     "3": {
-        "file": "packages/pyodide-repl/src/worker/boot.ts",
+        "file": "packages/pyodide-repl/src/worker/repl-driver.ts",
         "find": 'onTerminated: () => rpc.notify("sessionTerminated"),',
         "replace": "onTerminated: () => {},",
         "scripts": [["repl-check.mjs", "normal", URL]],

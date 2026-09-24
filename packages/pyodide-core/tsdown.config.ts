@@ -18,5 +18,8 @@ export default defineConfig({
   entry: ["src/index.ts", "src/worker.ts"],
   format: ["esm"],
   dts: true,
+  // `pyodide`는 타입으로만 쓴다(런타임에는 worker가 CDN에서 불러온다). devDependency라 기본으로는 `.d.mts`에 타입이 통째로
+  // 인라인돼 소비자(repl)의 `pyodide` 타입과 서로 다른 선언이 된다(TS2719). 외부로 남겨 소비자의 `pyodide`를 해석하게 한다.
+  external: ["pyodide", /^pyodide\//],
   plugins: [rawTextPlugin()],
 });

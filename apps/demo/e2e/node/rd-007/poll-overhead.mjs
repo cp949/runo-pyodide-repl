@@ -25,7 +25,7 @@ const { createConsole } = await import(
   new URL("src/worker/console.ts", REPO).href
 );
 const { connectInterrupts } = await import(
-  new URL("src/worker/interrupt-buffer.ts", REPO).href
+  new URL("../pyodide-core/src/worker/interrupt-buffer.ts", REPO).href
 );
 const {
   createInterruptBuffer,

@@ -22,11 +22,13 @@ import {
 } from "../test/sigint-setup";
 import { spawnRole } from "@repo/pyodide-testkit/thread";
 import { createConsole } from "./console";
-import { connectInterrupts } from "./interrupt-buffer";
+import {
+  SLEEP_SLICE_FILENAME,
+  connectInterrupts,
+  suppressWebLoopReraise,
+} from "../test/core-internals";
 import { loadSplitPaste } from "./multiline";
-import { SLEEP_SLICE_FILENAME } from "./sleep-slice";
 import { createSubmissionRunner } from "./submission-runner";
-import { suppressWebLoopReraise } from "./webloop-reraise";
 
 let pyodide: PyodideInterface;
 

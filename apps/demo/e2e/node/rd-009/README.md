@@ -85,13 +85,13 @@ stash` 쓰지 않는다) 폴링이 pyodide 자체의 유휴 틱에만 의존하�
 `loop002` 최대 262ms, 약 13배). 통과/실패 판정 항목이 아니라 근거 기록이다.
 
 ```bash
-# packages/pyodide-repl/src/worker/sleep-slice.py의 `if secs <= SLEEP_SLICE:` 블록에서
+# packages/pyodide-core/src/worker/sleep-slice.py의 `if secs <= SLEEP_SLICE:` 블록에서
 # `poll()` 호출 한 줄만 지운 뒤:
 node --import $H1 --import $H2 apps/demo/e2e/node/rd-009/sleep-stats.mjs \
   --mode jspi --progs loop002,loop001 --n 30
 
 # 결과를 옮긴 뒤 반드시 원복:
-git checkout -- packages/pyodide-repl/src/worker/sleep-slice.py
+git checkout -- packages/pyodide-core/src/worker/sleep-slice.py
 ```
 
 ## 판정의 한계

@@ -26,7 +26,7 @@ import {
   teardownConsoleRunner,
 } from "../test/sigint-setup";
 import { PS1, PS2 } from "./submission-runner";
-import { SIGINT_HANDLER_FILENAME } from "./sigint-handler";
+import { SIGINT_HANDLER_FILENAME } from "../test/core-internals";
 
 let pyodide: PyodideInterface;
 

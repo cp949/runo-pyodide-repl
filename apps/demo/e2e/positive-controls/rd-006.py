@@ -41,7 +41,7 @@ CONTROLS = {
         # deps.wait();\n`)는 stdin-callback.ts가 이후 EOF 처리(deps.signalInterrupt/checkInterrupt)를
         # 더하며 `const line = deps.wait(); if (line !== null) return line;` 구조로 바뀌어 더는 없다(대조
         # 대상·기대 실패 셀은 그대로, requestInput을 wait() 뒤로 미루는 같은 변조를 현재 구조에 맞춰 옮겼다).
-        "file": "packages/pyodide-repl/src/worker/stdin-callback.ts",
+        "file": "packages/pyodide-core/src/worker/stdin-callback.ts",
         "find": "    deps.requestInput(true);\n    const line = deps.wait();\n",
         "replace": "    const line = deps.wait();\n    deps.requestInput(true);\n",
         # worker가 알림 없이 메일박스에서 정지하면 이후 확인이 모두 연쇄로 실패한다. 첫 확인 하나만 본다.
