@@ -1,6 +1,6 @@
 # 겹친 `printAbove` 두 번이 커서를 끝으로 옮긴다(벤더 기존 결함)
 
-Status: deferred
+Status: promoted (RD-022b)
 Origin: RD-022a 벤더 `takeRead` 조사 중 실측. 이번 RD가 만든 결함이 아니다.
 
 ## 현상
@@ -22,3 +22,5 @@ Origin: RD-022a 벤더 `takeRead` 조사 중 실측. 이번 RD가 만든 결함�
 ## Comments
 
 - 2026-09-24 등록 시점 분류: 스텁 터미널에서 실측 재현했지만 실경로에서 닿지 않아 사용자 시나리오가 없다. `deferred`.
+
+- 2026-09-24 재개 조건 충족: RD-022b가 열린 읽기 중 배경 출력을 같은 재그리기 상태(`redrawing`)로 보내므로 Tab `printAbove`와 겹칠 수 있다. 사용자 결정(그릴링 Q8)으로 RD-022b 범위에 넣었다. 완료 기준은 이 이슈 본문 그대로다.

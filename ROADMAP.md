@@ -673,7 +673,7 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 
 ## Phase 4 — 패키지 분리와 새 소비자
 
-[ADR-0006](./docs/adr/0006-pyodide-core-and-plugin-packages.md). 순서: RD-020 → RD-021 → RD-022 → RD-023 → RD-024. RD-022a는 RD-022 뒤, RD-024(`<PythonRepl>`의 `runSource`) 앞이다. RD-025는 독립이다. 배포는 `pnpm pack` tarball(버전 동기)이고, 소비자는 `/work/cp949/runo/runo-pyodide-canvas`·`runo-lab`이다. 저장소는 향후 `runo-pyodide`로 개명한다(시점 미정).
+[ADR-0006](./docs/adr/0006-pyodide-core-and-plugin-packages.md). 순서: RD-020 → RD-021 → RD-022 → RD-023 → RD-024. RD-022a는 RD-022 뒤, RD-024(`<PythonRepl>`의 `runSource`) 앞이다. RD-022b는 RD-022a 뒤이고 RD-024와 독립이다. RD-025는 독립이다. 배포는 `pnpm pack` tarball(버전 동기)이고, 소비자는 `/work/cp949/runo/runo-pyodide-canvas`·`runo-lab`이다. 저장소는 향후 `runo-pyodide`로 개명한다(시점 미정).
 
 ### RD-020 — `pyodide-core` 추출과 `pyodide-repl` 축소(동작 불변)
 
@@ -761,6 +761,16 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 - 사후 리뷰(2026-09-24, 독립 second-opinion 포함): 결함 3건 수정. (1) xterm이 write 처리를 끊어 콜백 사이에 마이크로태스크가 돌면 type-ahead의 Enter로 곧바로 제출된 복원 읽기에서 정착하지 않아, 제출된 명령이 끝날 때까지 resolve가 밀렸다. (2) 정착 콜백이 복원 프롬프트를 그리는 write보다 앞에 큐에 서 있었다. 두 건 모두 `source-bridge.ts`에서 정착을 읽기 상태와 떼고 `write("")`를 한 번 더 기다려 고쳤다(TRP-057). (3) `reset()` 중 `createWorker()`가 던지거나 `dispose()` 정리가 던지면 실행 중이던 `runSource`가 끝나지 않았다. `finally`로 `restarted`·`disposed`를 보장한다. 데모 결과 칸은 늦게 끝난 이전 호출이 덮어쓰지 않게 했다. repl 시험 1060→1064(RED 4건·부분 변이 2건 killed), L1 `e2e:run-source` 12/12 1회. 기록은 작업 폴더 `verify/post-review/`. 새 후속 이슈 07(열린 읽기 위 배경 출력이 `takeRead` 지움을 깬다, 기존 결함)·08(`reset()` 생성 실패 뒤 상태, 계약 결정 필요).
 
 인계: RD-024(`<PythonRepl>`)가 쓸 API는 repl `.`의 `createRepl(options)` 핸들 `runSource(code): Promise<RunResult>`·`busy`와 재수출 `RunRejectedError`·`RunResult`·`RunRejectedReason`이다(`ReplStatus`에 변화 없음, `status` 게터 없음). 호출은 프롬프트가 화면에 보인 뒤에 하는 것이 안전하다(그려지기 전 구간 `busy`, 이슈 04). 확인 도구는 저장소에 있다: `apps/demo/e2e/checks/run-source-check.mjs`(`e2e:run-source`), REPL 화면의 `source`·`run-source`·`source-result` 요소. 실행 로그·변이 검사기(`mutate-safe.mjs`, 스펙 `mutations-delta0{1,2,3,4}.json`, 생성기 `gen-mutations-delta0{2,3,4}.mjs`)·제목·export 대조 결과는 `_works/_completed/20260924-27-rd-022a-repl-run-source/verify/`에 있다. 함정: `docs/traps/TRP-052`~`TRP-056`. 후속 이슈: `.scratch/repl-run-source-followups/issues/`.
+
+### RD-022b — 열린 읽기 위 배경 출력 조율
+
+상태: 계획(2026-09-24) · 이전: RD-022a · 설계: `05-output.md`, `04-stdin-input.md` 3.3, `06-editing.md` 6.1, `02-console-core.md` 5.6.3
+
+프롬프트(`>>> `·`... `·`input()`)가 열린 채 asyncio 배경 task·타이머 콜백의 출력이 오면 sink가 벤더 `Readline` 레이아웃을 거치지 않고 터미널에 바로 써서, 이후 재그리기(`refreshLine`)·`takeRead()`가 엉뚱한 행을 지운다. `>>> pritick` 행이 남고(`runSource` 뒤에도), 개행 없는 출력·감긴 줄 뒤 출력은 Backspace·Enter에 **지워진다**(jsdom 프로브, 이슈 07). 열린 읽기 중 sink 출력을 "입력줄 지우기 → 출력 → 같은 읽기 다시 그리기"로 바꾸고, 개행 없는 조각은 프롬프트 앞 접두로 그린다(prompt-join과 같은 모양). REPL·REPL `input()`·실행창 `input()`이 같은 sink를 쓰므로 함께 고쳐진다. 겹친 `printAbove`의 커서 결함(이슈 02)도 같은 재그리기 상태라 함께 고친다.
+
+시나리오: `>>> pri`까지 친 상태에서 배경 task가 `print("tick")`하면 화면은 `tick` 행 아래 `>>> pri`이고 커서는 `pri` 뒤다. Backspace·Enter·`runSource`를 해도 `tick`은 남고 `>>> pritick` 행은 없다. `print("tick", end="", flush=True)`이면 `tick>>> pri`로 그려지고 이어서 ` tock\n`이 오면 `tick tock` 행 아래 `>>> pri`다.
+
+완료 기준: 벤더·sink·REPL jsdom·runner jsdom 시험(RED + 변이), 새 브라우저 스크립트 `bg-output-check.mjs`와 영향 L1 스크립트 각 1회. L2·L3은 사용자 지시 때만. 계획서 `_works/20260924-28-rd-022b-bg-output-above-read/`.
 
 ### RD-023 — `pyodide-dom-bridge`(coincident DOM 프록시)
 
