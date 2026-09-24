@@ -95,7 +95,7 @@ export interface ReplHandle {
    * 실행하지 못하면 `RunRejectedError`로 reject한다: `disposed`(`dispose()` 뒤), `unavailable`(`not-isolated`·`load-failed`·`crashed`·
    * `terminated`), `busy`(블록 입력 중·Python 실행 중·`input()` 대기 중·다른 `runSource` 진행·대기 중·Tab 왕복 중·프롬프트가 그려지기
    * 전). `code`가 문자열이 아니면 `TypeError`. `loading`(최초·리셋 직후)이면 슬롯을 차지하고 첫 `>>> `에서 실행한다. 대기 중 `reset()`은
-   * 유지하고 `load-failed`는 `unavailable`, 실행 중 `reset()`은 `{ kind: "restarted" }`, 실행 중·대기 중 크래시는 `crashed`, 실행 중·대기
+   * 유지하고(그 리셋의 worker 생성이 실패하면 `crashed`) `load-failed`는 `unavailable`, 실행 중 `reset()`은 `{ kind: "restarted" }`, 실행 중·대기 중 크래시는 `crashed`, 실행 중·대기
    * 중 `dispose()`는 `disposed`다. 이미 정해진 결말을 그리는 도중의 사건은 그 결말을 바꾸지 않는다.
    */
   runSource(code: string): Promise<RunResult>;
@@ -200,8 +200,10 @@ export function createRepl(options: ReplOptions): ReplHandle {
       // `finally`: 정리 중 무엇이 던져도 슬롯에서 뗀 실행은 끝낸다. 옛 worker는 이미 교체됐으므로 `restarted`다.
       try {
         // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
-        // rpc.dispose() → worker.terminate()(session.terminate()).
-        session?.terminate();
+        // rpc.dispose() → worker.terminate()(session.terminate()). 앞 리셋의 worker 생성이 실패해 세션이 없으면 쌓인 type-ahead만
+        // 버린다(`cancelRead()`, 08-session.md 8.1).
+        if (session !== undefined) session.terminate();
+        else readline.cancelRead();
         // 새 worker 생성이 실패해도 끝난 옛 세션을 가리키지 않게 한다(runner `restart()`와 같다).
         session = undefined;
         // 옛 세션이 남겼을 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않게 한다.
@@ -212,7 +214,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
         try {
           spawnSession();
         } catch (error) {
-          // worker를 만들지 못했다(`createWorker`가 던짐). runner `restart()`와 같이 던지지 않고 `loading`을 거치지 않은 채
+          // 세션을 시작하지 못했다(`createWorker` 또는 프레임 전송이 던짐, core 세션이 만든 자원은 정리했다). runner `restart()`와 같이 던지지 않고 `loading`을 거치지 않은 채
           // `crashed` 다음에 `onCrash`로 넘긴다. 대기 중이던 runSource는 `crashed`로 끝난다. 복구는 다시 `reset()`이다.
           emitStatus("crashed");
           if (!disposed) options.onCrash?.(String(error));

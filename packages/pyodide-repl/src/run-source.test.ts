@@ -1054,6 +1054,38 @@ describe("runSource 정착·정리 경계(사후 리뷰)", () => {
     expect(session.handle.busy).toBe(false);
   });
 
+  test("worker 생성 실패 뒤 친 키는 복구 reset()이 버린다(type-ahead)", async () => {
+    const session = startSession();
+    await openPrompt(session);
+    session.createWorkerSpy.mockImplementationOnce(() => {
+      throw new Error("worker 생성 실패");
+    });
+    session.handle.reset();
+    session.fake.type("abc");
+
+    session.handle.reset();
+    await session.ready();
+    const request = await session.request();
+    session.fake.type("\r");
+
+    await expect(request.promise).resolves.toBe("");
+  });
+
+  test("worker 생성 실패의 crashed 콜백 안에서 dispose()하면 onCrash를 부르지 않는다", () => {
+    const session = startSession();
+    session.onStatus.mockImplementation((status: string) => {
+      session.statuses.push(status);
+      if (status === "crashed") session.handle.dispose();
+    });
+    session.createWorkerSpy.mockImplementationOnce(() => {
+      throw new Error("worker 생성 실패");
+    });
+
+    session.handle.reset();
+
+    expect(session.onCrash).not.toHaveBeenCalled();
+  });
+
   test("dispose() 정리 중 worker terminate가 던져도 실행 중이던 runSource는 disposed로 거부한다", async () => {
     const session = startSession();
     const first = await openPrompt(session, "pri");

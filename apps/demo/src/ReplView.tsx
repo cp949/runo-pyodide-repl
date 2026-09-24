@@ -189,8 +189,9 @@ export function ReplView() {
             type="button"
             data-testid="restart"
             onClick={() => {
-              replRef.current?.reset();
+              // 먼저 비운다: 재생성이 또 실패하면 `reset()` 안에서 `onCrash`가 새 메시지를 넣는다.
               setCrashMessage(null);
+              replRef.current?.reset();
             }}
           >
             재시작

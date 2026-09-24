@@ -199,13 +199,25 @@ export function startCoreSession(options: CoreSessionOptions): CoreSession {
     pyodide: { indexURL },
   };
   const rpc: Rpc = createRpc(channel.port1, handlers);
-  const worker = createWorker();
   // worker 스레드 자체가 죽은 경우(crashed 알림이 오지 않는 실패)를 보완한다(01-protocols.md 1.2).
   const onWorkerError = (event: ErrorEvent) => {
     crash(event.message || "worker가 알 수 없는 이유로 종료됨");
   };
-  worker.addEventListener("error", onWorkerError);
-  postInitFrame(worker, frame);
+  let created: Worker | undefined;
+  try {
+    created = createWorker();
+    created.addEventListener("error", onWorkerError);
+    postInitFrame(created, frame);
+  } catch (error) {
+    // 만들다 만 자원을 정리하고 호출자에게 던진다. 남은 worker의 뒤늦은 `error`가 다음 세션의 상태를 `crashed`로 바꾸지 않게
+    // 리스너를 떼고 terminate한다(`ended`가 `crash()`도 막는다).
+    ended = true;
+    created?.removeEventListener("error", onWorkerError);
+    rpc.dispose();
+    created?.terminate();
+    throw error;
+  }
+  const worker = created;
 
   return {
     pythonRunning,

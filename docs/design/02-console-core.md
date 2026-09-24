@@ -188,7 +188,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 | Python 실행 중(명령 실행), `readLine` 요청이 도착했지만 프롬프트가 아직 그려지기 전(write 콜백 전, 수 ms), `input()` 대기 중(프롬프트가 열린 채 worker의 배경 콜백이 `input()`을 불러 stdin 읽기가 대기함), Tab `complete` 왕복 중 | `RunRejectedError("busy")` |
 | 첫 `readLine` 요청 전: `loading`(최초·리셋 직후), `ready` 알림 뒤 배너를 쓰는 구간 | 대기(슬롯 점유). 첫 요청이 오면 읽기를 열지 않고 `{ source }`로 응답해 실행한다. 화면에 그린 것이 없어 꼬리가 남아 있으면 `\r\n`만 쓰고 출력을 시작하며 실행 뒤 `>>> `가 한 번 나온다 |
 | 프롬프트가 그려져 열려 있음(`>>> `, 블록 아님) | 받아들인다: 읽기를 가져가고 실행한다(5.6.3) |
-| 대기 중 `reset()` | 취소하지 않고 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았으므로 `restarted`가 아니다) |
+| 대기 중 `reset()` | 취소하지 않고 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았으므로 `restarted`가 아니다). 그 리셋의 worker 생성이 실패하면 `RunRejectedError("crashed")`(`08-session.md` 8.1) |
 | 대기 중 `load-failed` | `RunRejectedError("unavailable")` |
 | 실행 중(`{ source }`를 보낸 뒤 결말 도착 전) `reset()` | `{ kind: "restarted" }`로 resolve. 새 세션에서 다시 실행하지 않는다 |
 | 실행 중·대기 중 worker 크래시 | `RunRejectedError("crashed")` |

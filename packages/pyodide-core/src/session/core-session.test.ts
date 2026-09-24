@@ -646,3 +646,33 @@ describe("startCoreSession: 종료 수명 주기", () => {
     expect(onCrash).not.toHaveBeenCalled();
   });
 });
+
+describe("startCoreSession: 생성 실패", () => {
+  test("worker를 만든 뒤 프레임 전송이 던지면 worker를 정리하고 던지며, 남은 worker의 뒤늦은 error는 상태를 바꾸지 않는다", async () => {
+    const fakeWorker = createFakeWorker();
+    fakeWorker.postMessage.mockImplementationOnce(() => {
+      throw new Error("DataCloneError");
+    });
+    const onStatus = vi.fn();
+    const onCrash = vi.fn();
+
+    expect(() =>
+      startCoreSession({
+        createWorker: () => fakeWorker.worker,
+        indexURL: "https://example.test/pyodide/",
+        interruptBuffer: createInterruptBuffer(),
+        interruptSender: createFakeSender(),
+        driver: createFakeDriver().driver,
+        output: vi.fn(),
+        onStatus,
+        onCrash,
+      }),
+    ).toThrow("DataCloneError");
+
+    expect(fakeWorker.terminate).toHaveBeenCalledTimes(1);
+    fakeWorker.dispatchLateError("late");
+    await settle();
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(onCrash).not.toHaveBeenCalled();
+  });
+});
