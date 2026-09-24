@@ -18,3 +18,4 @@ Origin: RD-022 확정 10(REPL `spawnSession`은 건드리지 않는다). 내부 
 ## Comments
 
 - 2026-09-24 등록 시점 분류: 제품 결함이 아닌 리팩터링 후보라 재현 시나리오가 없어 `open` 조건을 충족하지 못한다. 기록만 남기는 `deferred`.
+- 2026-09-25 RD-024 관찰: 재개 조건의 "세 번째 소비자(RD-024 React)가 세션 배선을 다시 구현하려 할 때"에 해당하지 않았다. `<PythonRunner>`·`<PythonRepl>`·`usePythonRunner`는 core `createRunner`·terminal `createTerminalRunner`·repl `createRepl`을 위임만 하고 buffer·송신기·`startCoreSession` 배선을 새로 만들지 않는다(`docs/design/15-react.md` 15.1). 그래서 재개하지 않고 `deferred`를 유지한다.

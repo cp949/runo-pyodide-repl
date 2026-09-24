@@ -28,3 +28,5 @@ core `createRunner`는 폴백·`reset()`으로 재생성한 worker에서 첫 int
 - 2026-09-24 등록 시점 분류: 제품 결함 후보로 사용자 시나리오·완료 기준은 있으나 REPL 재현은 미확인이다. 사용자가 후속 이슈로 등록하기로 확정해 `open`으로 둔다(`docs/agents/issue-tracker.md` "등록·분류 기준"의 1회 관찰·원인 불명 `deferred` 규칙보다 사용자 확정이 우선). 착수 첫 단계가 재현 프로브(완료 기준 1)다.
 
 - 2026-09-24 RD-022a 마무리 관찰: 이 결함은 REPL `runSource` 실행에도 해당한다. 실행 중(`{ source }`를 보낸 뒤 결말 도착 전) `reset()`은 결과를 `{ kind: "restarted" }`로 끝내고 옛 worker와 같은 interrupt buffer를 새 세션에 싣기 때문에, 그 직후 첫 Ctrl+C(재현 시나리오 3단계)가 옛 worker에 가로채일 수 있다. RD-022a는 이 이슈를 범위에서 제외했다(확정 14). 브라우저 확인 `run-source-check.mjs` S08은 `restarted` 뒤 REPL 명령만 돌리고 Ctrl+C 셀이 없어 이 경로에 닿지 않았고, 재현은 확인하지 않았다. 완료 기준 4의 문서 수정 대상에 `docs/design/02-console-core.md` 5.6.7("interrupt buffer 재사용")이 추가된다. 분류는 그대로 `open`.
+
+- 2026-09-25 RD-024 관찰: `<PythonRepl>`(`@cp949/runo-pyodide-react`)의 handle `reset(options?)`는 살아 있는 `createRepl` 핸들의 `reset()`을 그대로 부르는 위임뿐이고 세션·interrupt buffer 배선을 갖지 않는다. 그래서 이 이슈의 결함은 컴포넌트를 거쳐도 같은 조건에서 그대로이고(재현 여부는 여전히 미확인), 수정은 repl 패키지만 고치면 컴포넌트에 전파된다. 분류는 그대로 `open`.

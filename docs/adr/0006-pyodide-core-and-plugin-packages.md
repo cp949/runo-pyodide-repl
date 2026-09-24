@@ -42,3 +42,17 @@ RD-022가 실행 driver와 `pyodide-terminal`을 만들며 위 결정을 다음�
 - **runner의 interrupt buffer는 worker마다 새로 만든다**: 옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채기 때문이다. REPL은 아직 재사용한다(`docs/design/14-runner.md` 14.3.5).
 
 규칙 본문은 `docs/design/14-runner.md`.
+
+## 갱신(RD-024, 2026-09-25)
+
+RD-024가 `pyodide-react`를 만들고 demo를 옮기며 위 표의 `pyodide-react` 행을 다음과 같이 구체화했다. 패키지 분리 자체는 바뀌지 않았다. 규칙 본문은 `docs/design/15-react.md`.
+
+- **패키지·진입점**: `@cp949/runo-pyodide-react`(private, 버전 동기), 진입점 `.` 하나(서브패스 없음)에 `PythonRunner`·`PythonRepl`·`usePythonRunner`와 타입, `RunRejectedError` 재수출. 컴포넌트가 xterm `Terminal` 생성·`FitAddon`·dispose 순서·StrictMode 이중 마운트를 처리한다.
+- **의존**: core·terminal·repl은 `workspace:*`, `@xterm/addon-fit`은 직접 의존(`0.11.0` 고정, 소비자에게 fit을 따로 설치시키지 않는다). peer는 `react`·`react-dom`(`^19.0.0`)·`@xterm/xterm`(`^6.0.0`). `xterm.css`는 패키지가 import하지 않고 소비자가 import한다. coincident·reflected-ffi 비의존을 시험(`src/package-boundary.test.ts`)·`check-dist`·`smoke:pack`이 강제한다.
+- **컴포넌트는 하위 API를 그대로 위임한다**: `PythonRunner`는 terminal `createTerminalRunner`, `PythonRepl`은 repl `createRepl`의 옵션·핸들을 통과시키고 새 동작을 만들지 않는다. terminal 핸들에 없는 `interrupt`·`busy`는 `PythonRunner`가 노출하지 않는다(terminal 핸들에 게터를 더하는 것은 별도 항목). 이 RD는 REPL의 세션·송신기 배선을 바꾸지 않았다(`.scratch/run-driver-terminal-followups/issues/` 01·02는 그대로).
+- **props 변경**: 콜백은 latest-ref(인라인 람다여도 재마운트 없음), 생성 옵션은 마운트 때만 읽고(바꾸려면 `key`), `copyOnSelect`만 반응형이다. 개발 중 경고는 없다.
+- **handle 수명**: handle은 컴포넌트 수명 내내 같은 객체이고 "지금 살아 있는 하위 핸들"로 위임한다. 핸들이 없는 구간의 규칙(`run`·`runSource`는 `disposed` reject, `stop()`은 `"idle"`, `busy`는 `false`, 나머지 no-op)은 `15-react.md` 15.3.
+- **StrictMode**: worker 2개 생성·1개 terminate(살아 있는 것 1개). 첫 worker의 pyodide 로드 낭비를 수용한다(`08-session.md` 8.2와 같은 판단). 기각한 대안: 생성을 지연해 낭비를 없애는 것(2026-09-25 그릴링 확정).
+- **`usePythonRunner`**: xterm 없이 core `createRunner`를 감싸는 저수준 hook이다(`{ status, run, stop, reset, interrupt, busy }`). `<PythonRunner>`는 이 hook을 쓰지 않고 terminal 실행창을 쓴다. 수명·latest-ref 로직만 내부 공용 hook을 공유한다.
+- **fit**: `fit?: boolean`(기본 `true`), 컨테이너 `ResizeObserver` + rAF 합침. demo 기본 화면은 `fit={false}`(80×24)라 기존 브라우저 기준선이 바뀌지 않고 `?fit=1`에서만 fit이다.
+- **미결·범위 밖**: iframecall 어댑터(앱 계층), `Terminal` 노출, dom-bridge와 React의 결합(RD-023 뒤).

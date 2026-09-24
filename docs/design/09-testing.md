@@ -353,6 +353,9 @@ C15f `import os; os.pa` 속성 폴백)을 더했다. 모듈 목록은 178개라 
 RD-016 실측 중앙값 26.2ms·최대 33.4ms, 같은 실행 `a.` 중앙값 28.7ms·최대 34.0ms). 이로써 지연 측정 3종이 모두 코드에 있다. 확인은 L1
 `ONLY=C5,C9,C12,C15` 20/20·`pageerror` 0이고 전체 76개(C1~C15) 재실행은 하지 않았다(L2 미실행). 양성 대조 1건: 게이트를 상시 거짓으로 변조 → C15d 실패.
 
+
+RD-024는 새 브라우저 스크립트 2종을 `apps/demo/e2e/checks/`에 두고 `run.mjs` `SETS`(dev 전용)·`package.json`(`e2e:react-strictmode`·`e2e:react-fit`)·`BASELINE.md` 행에 배선했다. 둘 다 dev 서버(5173, `<StrictMode>`)에 대해 화면 두 개(REPL `/`·실행창 `?view=runner`)를 각각 새 브라우저로 열고 결과 파일을 화면별(`-repl-dev`·`-runner-dev`)로 나눠 쓴다. `react-strictmode-check.mjs`(10셀)는 StrictMode 이중 마운트의 worker 수를 페이지 안 `Worker` 계측(`new`·`terminate` 호출)과 Playwright `worker`·`close` 이벤트 두 근거로 판정하고(생성 직후 terminate된 첫 worker는 Playwright 이벤트에 보이지 않는다, `docs/traps/TRP-061`), `.xterm` 1개·콘솔 warning(`DisposableStore` 포함) 0을 본다(경고 0 확인일 뿐 정리 순서 회귀는 검출하지 못한다. 순서 방어는 L0 몫, `docs/traps/TRP-064`). `react-fit-check.mjs`(12셀)는 `?fit=1`에서 창 크기를 바꿔 `cols`가 바뀌는지와 그 뒤 입력(REPL 유휴 `print(1+1)`, 실행창 `input()` 대기)을 본다. `cols`는 데모가 `Terminal`을 노출하지 않아 DOM 기하(`.xterm-screen` 너비 ÷ 셀 너비)와 `x` 400자 출력의 줄바꿈 폭 두 값이 같아야 통과한다. 두 스크립트의 판정 함수는 순수 함수 `apps/demo/e2e/react-judge.mjs`로 분리해 `react-judge.test.mjs`(vitest, 데모 `pnpm test`)가 가짜 입력으로 양성 대조한다(28개). 판정은 모두 폴링이고 고정 대기·절대 ms 상한이 없다(9.7). 브라우저 양성 대조 1건: `useCoreHandle` cleanup의 `handle.dispose()`를 지우면 `ONLY=REPL-S01`이 `살아 있는 worker 2개 (… new 2회·terminate 0회, 기대 1개)`로 실패한다. 규칙은 `15-react.md` 15.6, 15.10.
+
 ## 9.7 시간을 쓰는 판정 (2026-09-24 사용자 확정)
 
 장비 성능이 달라도 판정 결과가 같아야 한다. 시간 값은 아래 규칙 안에서만 판정에 쓴다. 새로 쓰거나 고치는
@@ -391,7 +394,7 @@ e2e 스크립트에 적용한다. 기존 고정 대기(2026-09-24 기준 `checks
 
 | 검사 | 대상 | 실행 | 위치 |
 | --- | --- | --- | --- |
-| 의존 트리 시험 | 설치된 `node_modules`의 의존 트리 | `pnpm test`(vitest) | core·terminal·repl `src/package-boundary.test.ts`, 도우미 `@repo/pyodide-testkit/package-boundary` |
+| 의존 트리 시험 | 설치된 `node_modules`의 의존 트리 | `pnpm test`(vitest) | core·terminal·repl·react `src/package-boundary.test.ts`, 도우미 `@repo/pyodide-testkit/package-boundary` |
 | `dist` 문자열 검사 | 빌드 산출물 파일 내용 | `pnpm check-dist`, 루트 `pnpm test`가 함께 실행 | `scripts/check-dist.mjs`, 패키지 `check-dist` 스크립트 |
 | tarball 스모크 | `pnpm pack` tarball을 저장소 밖에 설치한 결과 | `pnpm smoke:pack`(L0 수동) | `scripts/pack-smoke.mjs` |
 
@@ -399,13 +402,13 @@ e2e 스크립트에 적용한다. 기존 고정 대기(2026-09-24 기준 `checks
 
 - 도우미 `packages/pyodide-testkit/src/package-boundary.ts`: `collectInstalledDependencyNames(packageDir)`가 `package.json`에서 시작해 `dependencies`·`peerDependencies`·`optionalDependencies`를 설치된 `node_modules`(심볼릭 링크는 실제 경로)로 끝까지 따라가 이름 집합을 낸다. 작업공간 내부 패키지와 외부 패키지의 전이 의존을 모두 포함한다. `devDependencies`는 소비자에게 가지 않으므로 따라가지 않는다. `findForbiddenDependencies(names)`가 `FORBIDDEN_RUNTIME_DEPENDENCIES`(`coincident`·`reflected-ffi`)와 겹치는 이름을 낸다.
 - `dependencies` 항목을 해석하지 못하면 던진다(부분 트리로 통과해 금지 이름이 가려지는 것을 막는다). 설치되지 않을 수 있는 peer·optional은 `unresolved`에 적고 넘어간다. 그러므로 `pnpm install` 없이 시험을 돌리면 `의존 …을(를) 해석하지 못했다`로 실패한다.
-- core 시험: 트리에 금지 이름이 없고, `@cp949/runo-xterm-readline`이 없다. terminal 시험(RD-022): 금지 이름이 없고, 트리에 `@cp949/runo-pyodide-core`·`@cp949/runo-xterm-readline`·`string-width`·`@xterm/xterm`이 있으며, `@cp949/runo-pyodide-repl`이 없다(repl → terminal 단방향). repl 시험: 금지 이름이 없고, 트리에 `@cp949/runo-pyodide-core`·`@cp949/runo-xterm-readline`·`string-width`·`@xterm/xterm`이 있다(아무것도 따라가지 못해 빈 집합으로 항상 통과하는 것을 막는 대조).
+- core 시험: 트리에 금지 이름이 없고, `@cp949/runo-xterm-readline`이 없다. terminal 시험(RD-022): 금지 이름이 없고, 트리에 `@cp949/runo-pyodide-core`·`@cp949/runo-xterm-readline`·`string-width`·`@xterm/xterm`이 있으며, `@cp949/runo-pyodide-repl`이 없다(repl → terminal 단방향). repl 시험: 금지 이름이 없고, 트리에 `@cp949/runo-pyodide-core`·`@cp949/runo-xterm-readline`·`string-width`·`@xterm/xterm`이 있다(아무것도 따라가지 못해 빈 집합으로 항상 통과하는 것을 막는 대조). react 시험(RD-024): 금지 이름이 없고, 트리에 `@cp949/runo-pyodide-core`·`-terminal`·`-repl`·`@cp949/runo-xterm-readline`·`string-width`·`@xterm/addon-fit`·`@xterm/xterm`·`react`·`react-dom`이 있다. 변이로 확인했다: react `dependencies`에 `coincident`를 넣으면 이 시험이 실패한다.
 - 도우미 자체는 testkit `package-boundary.test.ts`가 가짜 해석기·임시 `node_modules`로 시험한다. 이 도우미는 `node:fs`를 쓰므로 시험 파일 상단에 `// @vitest-environment node`를 둔다.
 
 ### 9.8.2 `dist` 문자열 검사
 
 - `node scripts/check-dist.mjs <dist 폴더>...`: 폴더 아래 모든 파일(`.map` 포함)에 `coincident`·`reflected-ffi`가 없는지 본다(대소문자 무시). `.mjs`에는 `pyodide` 런타임 import(`from "pyodide`·`from "pyodide/…`·`import("pyodide`·`import "pyodide`)가 없는지도 본다(RD-021, ADR-0007: worker는 CDN에서 불러오고 core는 `pyodide/package.json`의 `version` 문자열만 인라인한다). Python 코드 문자열(`from pyodide.ffi import`)·`pyodide-lock` 같은 다른 이름·`.d.mts`의 타입 import는 걸리지 않는다. 폴더가 없거나, 파일이 하나도 없거나, 인자가 없으면 통과하지 않고 실패한다(빌드 전에 돌린 것을 통과로 착각하지 않게). 실패는 `check-dist 실패: …`를 표준 오류에 내고 종료 코드 1이다.
-- xterm-readline·core·terminal·repl의 `package.json`에 `"check-dist": "node ../../scripts/check-dist.mjs dist"`가 있다.
+- xterm-readline·core·terminal·repl·react의 `package.json`에 `"check-dist": "node ../../scripts/check-dist.mjs dist"`가 있다.
 - turbo 태스크 `check-dist`는 `dependsOn: ["build"]`, `cache: false`다. 루트 `pnpm test`는 `turbo run test check-dist`이고 `pnpm check-dist`로 단독 실행할 수 있다. `check-dist`는 vitest가 아니라 turbo 태스크라 시험 수에 잡히지 않는다.
 - 시험 안이 아니라 별도 태스크인 이유: turbo `test`는 `^build`(의존 패키지의 빌드)에만 의존하고 자기 패키지의 `build`에는 의존하지 않는다. 시험이 자기 `dist`를 읽으면 빌드 전에는 실패하고 빌드 뒤에는 낡은 산출물을 볼 수 있다. `test`가 `build`에 의존하게 바꾸면 demo(vite)까지 매번 빌드된다. `cache: false`는 `dist`가 `.gitignore` 대상이라 turbo 입력 해시에 들지 않아, 캐시가 켜져 있으면 변조가 가려지기 때문이다.
 - 스크립트 자체는 testkit `check-dist-script.test.ts`(자식 프로세스로 실행, 9건)가 시험한다. 실패 케이스는 종료 코드 1만 단언하면 스크립트가 없어도(`MODULE_NOT_FOUND`) 통과하므로 표식 `check-dist 실패`를 함께 단언한다.
@@ -414,15 +417,15 @@ e2e 스크립트에 적용한다. 기존 고정 대기(2026-09-24 기준 `checks
 
 - `pnpm build && node scripts/pack-smoke.mjs`. 기본 파이프라인(`pnpm test`·turbo)에는 넣지 않는다. L0 범위의 수동 검사이고 레지스트리 접근(네트워크)이 필요하다(`@xterm/xterm`·`string-width`·`typescript`·`pyodide`·`@types/*` 설치, `--prefer-offline`이라 pnpm 저장소에 있으면 다시 받지 않는다). `dist`가 없으면 스크립트가 실패한다.
 - 절차 5단계:
-  1. xterm-readline·core·terminal·repl을 `pnpm pack`하고 tarball 안 `package.json`의 `dependencies`·`peerDependencies`·`optionalDependencies`에 `workspace:`가, 모든 필드에 `catalog:`가 남지 않았는지 확인한다(RD-021). core에는 `peerDependencies.pyodide`(`^` 범위)와 `peerDependenciesMeta.pyodide.optional: true`가 있고 repl에는 `pyodide` peer가 없어야 한다.
-  2. 저장소 밖 임시 소비자 프로젝트에 네 tarball(`file:`)과 `@xterm/xterm`·`pyodide`를 설치한다.
-  3. node ESM `import`로 진입점 7개(`@cp949/runo-xterm-readline`, `@cp949/runo-pyodide-core`, `@cp949/runo-pyodide-core/worker`, `@cp949/runo-pyodide-terminal`, `@cp949/runo-pyodide-terminal/internal`, `@cp949/runo-pyodide-repl`, `@cp949/runo-pyodide-repl/worker`)의 대표 export가 기대한 타입인지 본다. core는 `PYODIDE_VERSION`(catalog 버전과 같은 문자열)·`DEFAULT_PYODIDE_INDEX_URL`(`https://cdn.jsdelivr.net/pyodide/v<버전>/full/`)도 단언한다.
-  4. `tsc --noEmit`을 `skipLibCheck: false`로 돌려 배포된 `.d.mts`의 타입 해석까지 검사한다.
+  1. xterm-readline·core·terminal·repl·react를 `pnpm pack`하고 tarball 안 `package.json`의 `dependencies`·`peerDependencies`·`optionalDependencies`에 `workspace:`가, 모든 필드에 `catalog:`가 남지 않았는지 확인한다(RD-021). core에는 `peerDependencies.pyodide`(`^` 범위)와 `peerDependenciesMeta.pyodide.optional: true`가 있고 repl에는 `pyodide` peer가 없어야 한다.
+  2. 저장소 밖 임시 소비자 프로젝트에 다섯 tarball(`file:`)과 `@xterm/xterm`·`react`·`react-dom`·`@types/react`·`pyodide`를 설치한다(react 패키지는 `react`·`react-dom`·`@xterm/xterm`을 peer로만 선언한다. 소비자 버전은 react 패키지 `devDependencies`가 원천).
+  3. node ESM `import`로 진입점 8개(`@cp949/runo-xterm-readline`, `@cp949/runo-pyodide-core`, `@cp949/runo-pyodide-core/worker`, `@cp949/runo-pyodide-terminal`, `@cp949/runo-pyodide-terminal/internal`, `@cp949/runo-pyodide-repl`, `@cp949/runo-pyodide-repl/worker`, `@cp949/runo-pyodide-react`)의 대표 export가 기대한 타입인지 본다. react는 `PythonRepl`·`PythonRunner`·`usePythonRunner`·`RunRejectedError`가 `function`이어야 한다. 이 import가 번들 없는 Node ESM에서 `@xterm/xterm`을 평가하므로 `docs/traps/TRP-063`의 이름 import 실패를 잡는 유일한 검사다. core는 `PYODIDE_VERSION`(catalog 버전과 같은 문자열)·`DEFAULT_PYODIDE_INDEX_URL`(`https://cdn.jsdelivr.net/pyodide/v<버전>/full/`)도 단언한다.
+  4. `tsc --noEmit`을 `skipLibCheck: false`로 돌려 배포된 `.d.mts`의 타입 해석까지 검사한다. react는 `PythonRunnerProps`·`PythonReplProps`에 실제 props 객체(`terminalOptions: { cols, rows, cursorBlink }`·`fit`·`topLevelAwait`)를 대입하고 필수 `createWorker` 누락이 `@ts-expect-error`로 잡히는지, `PythonReplHandle.runSource` 호출이 해석되는지 본다(any로 무너지지 않는지).
   5. 설치된 트리(lockfile·`node_modules` 이름·설치된 `dist` 문자열)에 `coincident`·`reflected-ffi`가 없는지 본다(`dist` 문자열은 9.8.2의 `check-dist.mjs`를 재사용한다).
 - 확인된 사실:
   - `pnpm pack`은 `dependencies`의 `workspace:*`를 실제 버전(현재 `0.0.0`)으로, `devDependencies`의 `catalog:`를 catalog 버전으로 바꿔 쓴다. 스모크가 1단계에서 매번 단언한다(pnpm 11.25.0 실측).
   - `"private": true`인 패키지도 pack 된다. tarball 안 `package.json`에도 `private: true`가 남지만 설치에는 영향이 없다. tarball 파일은 `dist/**`·`package.json`(xterm-readline은 `LICENSE-MIT`·`README.md` 포함)이다.
-- 내부 패키지를 tarball로 고정하는 메커니즘: 소비자 폴더에 `pnpm-workspace.yaml`을 두고 `overrides:`(내부 패키지 4개 → `file:` tarball)를 적은 뒤 `pnpm install --prefer-offline`을 `--ignore-workspace` 없이 실행한다. pnpm 11.25.0에서 `package.json`의 `pnpm.overrides`는 읽히지 않고(`The "pnpm" field in package.json is no longer read by pnpm`), `--ignore-workspace`는 `pnpm-workspace.yaml`의 `overrides`도 무시한다. 둘 다 내부 패키지가 레지스트리로 조회돼 `ERR_PNPM_FETCH_404`가 난다. 소비자 `package.json`의 `packageManager`를 저장소 루트 값(pnpm 11.25.0)으로 고정해야 전역 pnpm 10이 쓰이지 않는다(pnpm 10은 `pnpm.overrides`를 읽는다). 소비자가 pnpm 10 이하이면 다른 메커니즘이 필요하다.
+- 내부 패키지를 tarball로 고정하는 메커니즘: 소비자 폴더에 `pnpm-workspace.yaml`을 두고 `overrides:`(내부 패키지 5개 → `file:` tarball)를 적은 뒤 `pnpm install --prefer-offline`을 `--ignore-workspace` 없이 실행한다. pnpm 11.25.0에서 `package.json`의 `pnpm.overrides`는 읽히지 않고(`The "pnpm" field in package.json is no longer read by pnpm`), `--ignore-workspace`는 `pnpm-workspace.yaml`의 `overrides`도 무시한다. 둘 다 내부 패키지가 레지스트리로 조회돼 `ERR_PNPM_FETCH_404`가 난다. 소비자 `package.json`의 `packageManager`를 저장소 루트 값(pnpm 11.25.0)으로 고정해야 전역 pnpm 10이 쓰이지 않는다(pnpm 10은 `pnpm.overrides`를 읽는다). 소비자가 pnpm 10 이하이면 다른 메커니즘이 필요하다.
 - 소비자 요구사항(스모크 소비자가 충족하는 것):
   - core `./worker` 타입(`dist/worker.d.mts`)이 `pyodide`·`pyodide/ffi` 타입을 import한다. core는 `pyodide`를 optional peer(`^314.0.7`)로 선언하고(배포 `dependencies`가 아니다, RD-021) tsdown `deps.neverBundle`로 타입을 인라인하지 않는다. 그래서 core 타입을 직접 쓰는 소비자는 같은 minor의 `pyodide`를 직접 설치해야 한다(`packages/pyodide-core/README.md`). repl은 core 타입을 `dist/*.d.mts`에서 import하지 않으므로(`@xterm/xterm`만) repl만 쓰는 소비자는 영향이 없다.
   - `skipLibCheck: false`이면 pyodide 자체 타입이 `lib`에 `ESNext`(`Symbol.dispose`)를, `@types/node`와 `@types/emscripten`(전역 `FS`)을 요구한다. TypeScript 6은 `@types/*`를 자동 포함하지 않으므로 소비자 tsconfig에 `types: ["node", "emscripten"]`를 적는다. 저장소 내부 `tsc`는 `skipLibCheck: true`라 이 요구가 가려져 있다. 스모크가 `false`를 쓰는 이유는 `true`이면 `pyodide` 미해석도 가려지기 때문이다.

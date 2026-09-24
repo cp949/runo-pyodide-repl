@@ -9,7 +9,7 @@
 | worker 실행 driver | core `./worker`의 `runDriver`(`worker/run-driver.ts` + `run-driver.py`) | RPC `runCode(source)`를 받아 새 globals에서 실행하고 결말(`RunOutcome`)을 돌려준다 |
 | main 실행 핸들 | core `.`의 `createRunner`(`session/runner.ts`) | worker 생성·재생성, interrupt buffer·송신기, core 세션, 상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`, `InputProvider` 호출 |
 | xterm 실행창 | terminal `.`의 `createTerminalRunner`(`src/terminal-runner.ts`) | `createRunner`를 호출자 소유 `Terminal`에 붙인다: sink 출력, `input()` 한 줄 읽기, Ctrl+C, 선택 복사 |
-| 데모 | `apps/demo`의 `?view=runner`(`RunnerView.tsx`, `runner.worker.ts`) | plain 요소로 실행창 조작·결과를 노출한다(14.6) |
+| 데모 | `apps/demo`의 `?view=runner`(`RunnerView.tsx`, `runner.worker.ts`) | plain 요소로 실행창 조작·결과를 노출한다(14.6). RD-024부터 `RunnerView`는 `createTerminalRunner`를 직접 부르지 않고 `<PythonRunner>`(`@cp949/runo-pyodide-react`, `15-react.md`)를 쓴다 |
 
 `createRunner`는 xterm·React를 모른다. canvas 같은 소비자는 `onOutput`·`InputProvider`만 채워 쓴다. 앱의 worker 파일과 main 사용은 다음과 같다(`worker.format`은 REPL과 같은 이유로 `'es'`, `00-architecture.md` 4.1).
 
@@ -218,7 +218,7 @@ runner를 먼저 끝낸다(열린 읽기의 `signal`이 abort돼 `cancelRead()`�
 
 ## 14.6 데모와 검증
 
-- `apps/demo`의 `?view=runner`가 `RunnerView`를 렌더링한다(쿼리 없으면 REPL). plain 요소: `textarea`(`data-testid="code"`), 버튼 `run`·`stop`·`reset`·`clear`, `status`, 마지막 결과 `result`(JSON 텍스트, 거부는 `{"rejected":"<reason>"}`), 선택 복사 결과 `copy-result`, `terminal`. 새 실행을 시작하면 이전 결과를 지운다. 페이지당 xterm은 1개다(`lib.mjs` 셀렉터 `.xterm-rows > div`·`[data-testid="status"]`가 그대로 통한다). `createTerminalRunner`는 effect 안에서 만들고 cleanup에서 `dispose()`한다(StrictMode 이중 마운트에서 worker가 남지 않는다).
+- `apps/demo`의 `?view=runner`가 `RunnerView`를 렌더링한다(쿼리 없으면 REPL). plain 요소: `textarea`(`data-testid="code"`), 버튼 `run`·`stop`·`reset`·`clear`, `status`, 마지막 결과 `result`(JSON 텍스트, 거부는 `{"rejected":"<reason>"}`), 선택 복사 결과 `copy-result`, `terminal`. 새 실행을 시작하면 이전 결과를 지운다. 페이지당 xterm은 1개다(`lib.mjs` 셀렉터 `.xterm-rows > div`·`[data-testid="status"]`가 그대로 통한다). `createTerminalRunner`는 effect 안에서 만들고 cleanup에서 `dispose()`한다(StrictMode 이중 마운트에서 worker가 남지 않는다). RD-024부터 이 수명은 `<PythonRunner>` 컴포넌트가 맡고 `RunnerView`는 handle(`run`·`stop`·`reset`·`clear`·`focus`)만 부른다.
 - 브라우저: `pnpm --filter demo e2e:runner-check`(normal 고정, 초기 3 + R01~R13 = 16셀), 비격리는 `pnpm --filter demo exec node e2e/checks/runner-check.mjs not-isolated http://localhost:4174`(N01~N05, 5셀). 기대 개수와 판정은 `apps/demo/e2e/BASELINE.md`. 실행창 화면에서 결과 칸(React 상태)은 xterm 화면 행보다 먼저 갱신될 수 있고 `result`는 마지막 값만 갖는다(`docs/traps/TRP-048`·`TRP-050`).
 - node 시험: core `worker/run-driver-pyodide.test.ts`(실제 pyodide, 가설 8항목 + 분류·stdin·재진입), `run-driver-classify.test.ts`(실제 pyodide + 가짜 콘솔, 분기 전수), `run-driver.test.ts`(가짜 pyodide, 옵션·세션·export), `session/runner.test.ts`(가짜 worker·가짜 타이머), `session/runner-pyodide.test.ts`(실제 pyodide worker 스레드, `input()` 왕복·`stop()`·폴백·`reset()`·옛 worker 지연 종료 시뮬레이션). terminal `terminal-runner.test.ts`(jsdom + 가짜 core). 벤더 `type-ahead.test.ts`(`typeAhead` 옵션).
 - 경계: terminal `package-boundary.test.ts`, `pnpm check-dist`(terminal 포함), `pnpm smoke:pack`(terminal tarball, `09-testing.md` 9.8).

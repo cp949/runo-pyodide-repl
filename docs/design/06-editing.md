@@ -201,7 +201,7 @@
   preview 4/4 반복)에서 낡은 값이 관찰된 적이 없어 `setTimeout(0)` 우회는 필요하지 않았다(설계 단계에 남겨 둔
   대비책이었을 뿐, 실장에는 없다). `onSelectionChange`는 드래그 중 이동마다 발화해 복사 트리거로 쓰지
   않는다. `createRepl` 시점에 `terminal.element`가 없으면(`open()` 전) 자동 복사를 걸지 않는다 — 데모는
-  `open()` 뒤에 부른다(`ReplView.tsx`). 터치·키보드 선택(`selectAll` API)은 범위 밖.
+  `open()` 뒤에 부른다(RD-024부터 `<PythonRepl>`이 `terminal.open()` 뒤에 `createRepl`을 부른다). 터치·키보드 선택(`selectAll` API)은 범위 밖.
 - 정책 객체 `createSelectionCopy(terminal, { copyOnSelect, onCopy, writeText })`는 `onKeyEvent(event)`·
   `setCopyOnSelect(on)`·`dispose()`를 노출한다. `writeText`는 시험용 주입(기본 `navigator.clipboard.writeText`).
   판정은 순수 함수(`decideKey({ ctrlKey, altKey, metaKey, key, type }, hasSelection) → "copy" | "pass"`)로 분리해

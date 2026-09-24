@@ -18,3 +18,4 @@ RD-023 이후 패키지 공개 방침(npm 배포 여부·`./internal` 노출 범
 ## Comments
 
 - 2026-09-24 등록 시점 분류: 소비자에게 보이는 결함이 관찰되지 않았고(스모크 통과) 방침 결정이 선행돼야 해 `deferred`.
+- 2026-09-25 RD-024 관찰: `pnpm smoke:pack`에 react tarball을 더한 뒤(5개 tarball, 소비자 `tsc --noEmit` `skipLibCheck: false`) 통과했다(2026-09-25 마지막 통합, 진입점 import 8개·설치 트리에 coincident·reflected-ffi 없음). repl `dist/index.d.mts`는 여전히 `CopyResult`를 `@cp949/runo-pyodide-terminal/internal`에서 import한다(react `dist/index.d.mts`는 terminal `.`에서 import). 소비자가 결함으로 관찰한 것은 없어 `deferred` 유지.

@@ -5,15 +5,17 @@
 - [pyodide-core](./packages/pyodide-core/CONTEXT.md): 공통 부분. 프로토콜(RPC·메일박스·interrupt buffer·초기화 프레임), worker 커널(`runWorker`), main 세션(`startCoreSession`)과 driver 경계의 용어, 실행 driver(`runDriver`)·runner(`createRunner`)·`InputProvider`. UI·xterm·coincident 비의존, private(RD-020·RD-022, [ADR-0006](./docs/adr/0006-pyodide-core-and-plugin-packages.md)).
 - [pyodide-terminal](./packages/pyodide-terminal/CONTEXT.md): xterm 실행창(`createTerminalRunner`)과 repl이 공유하는 xterm 결합 부품 5종(`./internal`). 실행창·읽기 밖 입력·Ctrl+C 분기·abort 정리의 용어. core의 용어는 core `CONTEXT.md`를 따른다. coincident 비의존, private(RD-022).
 - [pyodide-repl](./packages/pyodide-repl/CONTEXT.md): REPL driver와 REPL 프런트. main 쪽(터미널·읽기·인터럽트 송신 연결)과 worker 쪽(콘솔 확장·제출 러너·REPL 루프)의 용어, 호스트가 REPL 세션에 코드를 실행시키는 `runSource`(슬롯·루프 명령·정착, RD-022a). core의 용어는 core `CONTEXT.md`를 따른다.
+- [pyodide-react](./packages/pyodide-react/CONTEXT.md): React 컴포넌트·hook(`PythonRunner`·`PythonRepl`·`usePythonRunner`)이 core·terminal·repl을 React 수명에 붙이는 패키지(RD-024). handle 위임·생성 옵션·latest-ref·fit·StrictMode의 용어. main·worker·읽기·인터럽트 용어는 repl, runner·실행창은 terminal, driver·core 세션은 core `CONTEXT.md`를 따른다. coincident 비의존, private([ADR-0006](./docs/adr/0006-pyodide-core-and-plugin-packages.md)).
 - xterm-readline (`packages/xterm-readline`): 벤더링한 줄 편집기. 용어는 원본(`Readline`, `History`, `State`, `Tty`, `InputType`)을 그대로 쓰고 별도 `CONTEXT.md`를 두지 않는다.
 - pyodide-testkit (`packages/pyodide-testkit`): 시험 전용 도우미(`spawnRole` 하니스·가짜 터미널·패키지 경계 도우미). private이고 pack 대상이 아니며 고유 용어가 없어 별도 `CONTEXT.md`를 두지 않는다.
-- demo (`apps/demo`): 데모 셸. 고유 용어가 없고 pyodide-repl·pyodide-terminal의 용어를 그대로 쓴다. `?view=runner`가 실행창 화면이다.
+- demo (`apps/demo`): 데모 셸. 고유 용어가 없고 pyodide-repl·pyodide-terminal·pyodide-react의 용어를 그대로 쓴다. `?view=runner`가 실행창 화면이고 `?fit=1`이 fit을 켠다(RD-024).
 
 ## Relationships
 
-- **demo → pyodide-repl**: `createRepl()`을 호출하고 `ReplHandle`·상태 콜백만 다룬다. 프로토콜과 터미널 내부에 접근하지 않는다.
-- **demo → pyodide-terminal**: `?view=runner`에서 `createTerminalRunner()`를 호출하고 `TerminalRunnerHandle`·상태 콜백만 다룬다(`./internal`을 쓰지 않는다).
+- **demo → pyodide-react**: `<PythonRepl>`·`<PythonRunner>`를 렌더링하고 `PythonReplHandle`·`PythonRunnerHandle`·상태 콜백만 다룬다. xterm `Terminal`·`createRepl`·`createTerminalRunner`를 직접 만들지 않는다(RD-024).
+- **demo → pyodide-repl**: `repl.worker.ts`가 `./worker`의 `runReplWorker`만 import한다.
 - **demo → pyodide-core**: `runner.worker.ts`가 `./worker`의 `runWorker`·`runDriver`만 import한다. 그 밖에 core를 직접 import하지 않는다.
+- **pyodide-react → pyodide-repl·pyodide-terminal·pyodide-core**: `PythonRepl`은 repl `createRepl`, `PythonRunner`는 terminal `createTerminalRunner`, `usePythonRunner`는 core `createRunner`의 옵션·핸들을 위임한다. terminal `./internal`을 쓰지 않는다. repl·terminal·core는 react를 import하지 않는다(단방향).
 - **pyodide-repl → pyodide-core**: core의 프로토콜·`startCoreSession`·`runWorker`와 driver 경계(`MainDriver`·`WorkerDriver`)를 쓰고, REPL 전용 부분을 driver로 채운다. `runSource`는 core `./worker`의 공용 실행 함수(`loadExecInConsole`·`toRunOutcome`)와 `RunRejectedError`·`RunResult`(repl `.`가 다시 내보낸다)를 쓴다. core는 repl을 import하지 않는다(의존 방향 repl → core).
 - **pyodide-terminal → pyodide-core**: `createRunner`·`RunRejectedError`·`createOutputTail`과 타입을 쓴다. core는 terminal을 import하지 않는다.
 - **pyodide-repl → pyodide-terminal**: `./internal`의 공통 부품 5종(sinks·rewind-tail·stdin-reader·notice·selection-copy)을 쓴다. 두 패키지는 lockstep이고 `./internal`은 안정성을 보장하지 않는다. terminal은 repl을 import하지 않는다(단방향).
