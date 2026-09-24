@@ -677,7 +677,7 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 
 ### RD-020 — `pyodide-core` 추출과 `pyodide-repl` 축소(동작 불변)
 
-상태: 대기 · 이전: 없음 · 설계: `00-architecture.md` 4절, ADR-0006, `01-protocols.md` 5절(초기화)
+상태: 완료(2026-09-24) · 이전: 없음 · 설계: `00-architecture.md` 4절, ADR-0006, `01-protocols.md` 5절(초기화)
 
 `packages/pyodide-core`(`@cp949/runo-pyodide-core`)에 프로토콜·`output-tail`·worker 커널(`PyodideConsole(globals, filename)` 뼈대, stdout/stderr, webloop 재보고 억제, sleep 조각, SIGINT, stdin 배선)·main 세션(worker 생성, RPC, 메일박스 writer, interrupt sender)을 옮기고, `pyodide-repl`은 REPL driver(`sys.ps1/ps2`·헬퍼·TLA·배너·제출 러너·여러 줄 분할·완성)와 REPL 프런트만 남긴다. `pyodide-repl` 공개 API(`createRepl`, `./worker`의 `runReplWorker`)는 그대로다. 공용 시험 도우미는 비공개 `packages/pyodide-testkit`(`@repo/pyodide-testkit`)로 뺀다.
 
@@ -686,10 +686,19 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 완료 기준:
 - 연결 지점: RPC 핸들러는 main·worker 모두 생성 시 core + driver 핸들러를 합성하고 이름 충돌은 생성 시 예외. "Python 실행 중" = `alive && inputReadsPending === 0 && !driver.isIdle()`(REPL `isIdle` = `readLinePending || cancelSettling`). core 출력은 stdout/stderr 원문 `{ stream, text }`, `writeOutput`·`writeError`는 REPL driver 핸들러. 초기화 프레임 `{ kind: "init", rpcPort, interruptBuffer, stdinCtrl, stdinData, pyodide: { indexURL }, driver }`(`topLevelAwait`는 `driver` 안). `runWorker({ driver })`만 구현(`plugins`는 RD-023).
 - worker init 수신은 모듈 본문 동기 등록 + `!Array.isArray(data) && data.kind === "init"`만 받고 제거(첫 메시지 무조건 소비 금지). 단위 시험: 배열 메시지가 먼저 와도 init을 받는다, 늦은 등록 변이는 실패한다.
-- 시험 제목 목록이 이동 전후 같다(diff 0). 모듈 시험은 모듈과 함께 이동.
-- coincident 비의존: core·repl 의존 트리에 `coincident`·`reflected-ffi` 없음(단위 시험), 두 패키지 `dist/`에 `coincident` 문자열 없음, tarball 스모크(xterm-readline·core·repl pack → 임시 폴더 `file:` + `pnpm.overrides` 설치 → import·타입 해석 → `node_modules`에 coincident 없음).
+- 시험 제목 목록은 `dev` 대비 삭제 0, 추가는 이번 RD의 신규 시험만(패키지 경계를 넘은 경로 변화 허용). 모듈 시험은 모듈과 함께 이동.
+- coincident 비의존: core·repl 의존 트리에 `coincident`·`reflected-ffi` 없음(단위 시험), 두 패키지 `dist/`에 `coincident` 문자열 없음, tarball 스모크(xterm-readline·core·repl pack → 임시 폴더 `file:` 설치, 내부 패키지 고정은 소비자 `pnpm-workspace.yaml`의 `overrides`(pnpm 11.25.0은 `package.json`의 `pnpm.overrides`를 읽지 않는다) → import·타입 해석 → `node_modules`에 coincident 없음).
 - L1(마지막 DELTA 1회씩): `e2e:repl-check`(normal)·`e2e:ctrl-c`·`e2e:stdin-input`·`e2e:prompt-cancel`. L2 전체 `e2e:baseline` 병합 직전 1회(2026-09-24 사용자 사전 승인) — 결과가 RD-018·019 기준선과 같다. 시간 측정 관련 deferred 셀은 판정에서 제외한다.
 - 문서: `00-architecture.md` 4절 재작성, `CONTEXT-MAP.md`에 core 컨텍스트, 02~08은 경로만 갱신.
+
+결과: `packages/pyodide-core`(`@cp949/runo-pyodide-core`)에 프로토콜·`output-tail`·worker 커널(`runWorker({ driver })`, 콘솔 뼈대·인터럽트·stdin·sleep 조각·webloop 억제)·main 세션(`startCoreSession`)을 옮겼고, 비공개 `packages/pyodide-testkit`(`@repo/pyodide-testkit`)을 두었다. `pyodide-repl`은 REPL driver(`repl-driver.ts`·`repl-main-driver.ts`)와 REPL 프런트만 남고 공개 API(`createRepl`, `./worker`의 `runReplWorker`)는 그대로다. 초기화 프레임에 `driver` 필드가 생겼고(`topLevelAwait`는 그 안), RPC 핸들러는 core + driver 생성 시 합성(이름 충돌은 생성 시 예외), worker init은 필터 수신이다. 패키지 경계 검사(의존 트리 시험·`scripts/check-dist.mjs`·`pnpm smoke:pack`)를 더했다.
+- L0: `pnpm check-types`·`lint`·`test`·`build` 각 `--force` 1회 통과. 실행한 시험 **1435**(core 199·repl 1034·testkit 39·xterm-readline 160·demo 3, 이동 전 1348 → +87 = 신규 시험). `pnpm smoke:pack` 통과.
+- 시험 제목(`vitest list`): `dev` 대비 **삭제 0**, 추가 70(전부 신규 시험), 경로만 바뀐 152건. repl `dist/index.d.mts`·`dist/worker.d.mts` export 이름 diff 0. `packages/*/dist`의 `coincident` 0.
+- L1 4종 각 1회 `BASELINE.md`와 같다: `repl-check`(normal) 15/15·`ctrl-c` 10/10·`stdin-input` 19/19·`prompt-cancel` 23/23.
+- L2 `e2e:baseline` 1회(사전 승인): 33파일 **499/499**, 실패 0, `pageErrors` 0(등록된 forced pageerror 3건만). 시간 측정 deferred 셀은 실패하지 않아 무시한 셀 0.
+- 예외·미확인: 오류 로그 접두어 `[worker]`(초기화 실패)·`[session] stdin 응답 실패`와 worker init 필터의 오류 경로(배열 무시·`kind` 불일치)는 브라우저 셀이 없다(단위 시험만, `.scratch/core-extraction-followups/issues/02-*.md`, deferred). core `stdin-callback.ts`의 `[repl.worker]` 접두어가 남았다(`01-*.md`, deferred). 양성 대조 `rd-005~009.py`의 브라우저 실행은 L3라 하지 않았다(`find` 15/15 일치만 확인). L2는 1회라 간헐 실패 재현성은 보지 않았다. 완료 조건 문구 두 곳을 사용자 확정(2026-09-24)으로 정정했다 — tarball 스모크의 overrides 위치(위), 제목 diff "0" → "삭제 0, 추가는 신규 시험만".
+
+인계: 시험 확인 도구는 저장소에 있다 — `scripts/check-dist.mjs`, `scripts/pack-smoke.mjs`(`pnpm smoke:pack`, 소비자 폴더는 `SMOKE_TMPDIR`, 실패 시 보존·`KEEP=1`), `packages/pyodide-testkit/src/package-boundary.ts`. 실행 로그·변이 검사기(`mutate-safe.mjs`)·제목 추출 스크립트(`titles-extract.sh`)는 `_works/_completed/20260924-24-rd-020-core-extraction/verify/`에 있다. RD-021: core `./worker` 타입(`worker.d.mts`)이 `pyodide`(+ `@types/node`·`@types/emscripten`)를 외부 import하는데 core는 `pyodide`를 배포 의존으로 선언하지 않는다 — 소비자가 직접 설치해야 하며 `peerDependencies`(optional) 추가 여부와 소비자 요구사항 문서화를 RD-021이 정한다(스모크는 현재 소비자에 직접 설치, 위 `@types/*` 범위는 저장소 매니페스트가 아닌 스크립트 상수). 함정: `docs/traps/TRP-033`~`TRP-037`.
 
 ### RD-021 — pyodide 버전 원천 통합과 호환 탐지
 
@@ -699,7 +708,7 @@ pyodide 버전 원천을 devDependency `"pyodide"` 하나로 두고 코드는 `p
 
 시나리오: 소비자가 `indexURL`로 다른 pyodide 버전을 로드하면 콘솔에 버전 불일치 경고가 한 번 나오고 REPL은 계속 동작한다.
 
-완료 기준: 버전 리터럴 `314.0.7`이 `package.json` 밖 코드·시험에 0건. `dist`가 `pyodide`를 런타임 import하지 않는다. 저하 지점별 속성 제거(문구 변조) 단위 시험이 `degraded` 항목과 해당 기능 꺼짐을 확인하고, interrupt 공개 API 부재 시 시작 거부 시험, `versionMismatch` 참/거짓 시험, 탐지 분기 제거 변이 시 실패. 업그레이드 절차(patch·minor, 판단 자료를 만들고 멈춘다, 재측정은 사용자 결정)를 `13-version-upgrade.md`에 적는다. L0만.
+완료 기준: 버전 리터럴 `314.0.7`이 `package.json` 밖 코드·시험에 0건. `dist`가 `pyodide`를 런타임 import하지 않는다. 저하 지점별 속성 제거(문구 변조) 단위 시험이 `degraded` 항목과 해당 기능 꺼짐을 확인하고, interrupt 공개 API 부재 시 시작 거부 시험, `versionMismatch` 참/거짓 시험, 탐지 분기 제거 변이 시 실패. 업그레이드 절차(patch·minor, 판단 자료를 만들고 멈춘다, 재측정은 사용자 결정)를 `13-version-upgrade.md`에 적는다. L0만. RD-020 인계(core `peerDependencies`(optional)·core 타입 소비자의 `pyodide` 요구사항)를 함께 정한다.
 
 ### RD-022 — 실행 driver와 `pyodide-terminal` 실행창
 
