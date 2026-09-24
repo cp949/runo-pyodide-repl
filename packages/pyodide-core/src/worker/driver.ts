@@ -1,7 +1,7 @@
 /**
  * worker 커널(`runWorker`)과 driver의 경계. 커널은 RPC 생성 → pyodide 로드(interrupt 공개 API 확인) → (driver 콘솔) → (driver probe) → webloop 억제 → Ctrl+C 연결 →
  * stdin 배선 → `ready` → (driver 실행) → 감시 타이머 순서를 소유하고, driver는 콘솔 확장과 세션 제어 흐름만 낸다.
- * 이 모양은 REPL이 쓰는 것만 담는다(RD-020, 실행 driver는 RD-022). 공개 API로 문서화하기 전의 내부 계약이다.
+ * 이 모양은 REPL(`replDriver`, RD-020)과 실행 driver(`runDriver`, RD-022)가 쓰는 것만 담는다. 공개 API로 문서화하기 전의 내부 계약이다.
  */
 import type { PyodideInterface } from "pyodide";
 import type { InitFrame } from "../protocol/init-frame";
