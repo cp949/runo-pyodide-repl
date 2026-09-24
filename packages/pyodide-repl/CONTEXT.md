@@ -50,6 +50,12 @@ REPL 읽기가 활성인 동안 도착한 stdin 읽기를 그 REPL 읽기가 끝
 직전 출력에서 마지막 개행 뒤(그 안에서 마지막 `\r` 뒤)에 남은 텍스트. 읽기의 프롬프트로 다시 그려진다.
 _Avoid_: 잔여 출력, 부분 줄
 
+**접두**(열린 읽기의 프롬프트 앞 접두):
+프롬프트가 그려진 뒤(열린 읽기 중) 온 배경 출력의 미종결 부분. 꼬리와 같은 규칙으로 계산하지만(`\r`로 끝나면 마지막으로 보이는 `\r` 구간) 꼬리 추적기에 넣지 않고 벤더
+`Readline`이 읽기마다 보관해(`abovePrefix()`) 프롬프트 앞에 그린다(`tick>>> pri`). 읽기가 끝나면 그 행째 화면에 남는다. 정의는
+`docs/design/05-output.md` 4.4.
+_Avoid_: 꼬리(읽기 시작 전 출력의 미종결 부분만 꼬리라 부른다)
+
 **pending**:
 블록 입력 중 이미 제출된 `... ` 줄들을 개행으로 이은 텍스트. 자동 들여쓰기·Tab 완성·블록 히스토리가 쓴다.
 _Avoid_: 버퍼(콘솔 내부 `buffer`와 혼동)
@@ -163,6 +169,7 @@ Tab 리더가 `readOptions(pending)`마다 1 증가시키는 카운터. `complet
 **`printAbove`**:
 벤더 `Readline.printAbove(text: string): Promise<void>`. 활성 입력줄 위에 `text`를 찍고 같은 읽기로
 다시 그린다(State 재생성 없음). 활성 읽기가 없으면 `println`과 같다. 재그리기가 끝난 뒤에만 resolve한다.
+배경 출력(`printAboveRaw`)의 재그리기를 기다리는 중이면 그 재그리기에 합류하고, 접두를 비운다(`docs/design/06-editing.md` 6.1).
 _Avoid_: `println`(세션 밖 출력, 재그리기 없음)
 
 **`complete_source`**:

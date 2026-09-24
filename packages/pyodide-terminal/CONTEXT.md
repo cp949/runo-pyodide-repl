@@ -38,7 +38,7 @@ _Avoid_: 사전 검증
 _Avoid_: 공개 API, 유틸
 
 **sink**:
-main이 터미널에 쓰는 함수 4종(`writeOutput`·`writeError`·`write`·`writeErrorRaw`)과 꼬리 추적(`tail`·`resetTail`). 실행창은 stdout을 `write`, stderr를 `writeErrorRaw`로 그린다. 정의는 `05-output.md`.
+main이 터미널에 쓰는 함수 4종(`writeOutput`·`writeError`·`write`·`writeErrorRaw`)과 꼬리 추적(`tail`·`resetTail`), 열린 읽기의 접두를 꼬리로 옮기는 `moveAbovePrefixToTail`(REPL read-guard 전용). 실행창은 stdout을 `write`, stderr를 `writeErrorRaw`로 그린다. 열린 읽기 중에는 4종 모두 벤더 `printAboveRaw`로 입력줄 위에 쓰고 꼬리를 건드리지 않는다(`splitAboveRead`). 정의는 `05-output.md`(열린 읽기는 4.4).
 
 **입력 리더(`createInputReader`)**:
 직전 출력의 꼬리를 프롬프트로 그 자리에 다시 그려(`rewindTail` 뒤) 한 줄을 읽는 부품. `read(cancelable, signal?)`. `signal`은 꼬리 정리(flush) 대기 뒤 abort 여부를 다시 확인하는 데만 쓴다. REPL 읽기(`repl-reader`, `>>> ` 합성)와 다르다.

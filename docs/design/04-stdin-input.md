@@ -45,7 +45,9 @@
 - 겹침 거절(열린 읽기 위에 `readLine` 요청이 또 오면 `Error("이미 읽는 중")`)은 `createRepl`이 가드 **바깥**에서 검사한다. 거절된 promise를 가드가 활성 읽기로 추적하면 진짜 활성 REPL 읽기를 잃어 stdin 읽기가 앞당겨진다. 순서: `reading` 검사 → `guard.readLine(prompt)` → `.finally(reading = false)`.
 - stdin 읽기가 실패(reject)하면 `createRepl`의 `readInput` 핸들러가 `disposed`가 아닐 때만 `mailbox.fail(String(error))`로 worker를 깨워 Python `OSError`로 드러낸다. `disposed`면 쓰지 않는다: worker는 이미 `terminate()`됐고 `fail()`의 `untilIdle`이 영영 안 풀릴 수 있다. `Readline.dispose()`가 대기 중인 읽기를 reject하므로 dispose 때는 항상 이 분기다.
 - 제네릭(`L`·`I`)은 REPL 읽기 결과를 `string | null`로 넓혀도 가드 코드를 바꾸지 않으려는 것이다(RD-008에서 실제로 그렇게 넓혔고 가드는 인자 전달만 늘었다). 인자는 `readLine(prompt, pending, cancelable)`·`readInput(cancelable)`이다(RD-013 완료: `pending`을 `ReadGuardDeps.readLine`·`ReadGuard.readLine`에 넣어 리더까지 그대로 통과시킨다 — stdin 읽기(`readInput`)는 여전히 `pending`을 받지 않는다).
-- 화면(브라우저 확인): 활성 REPL 읽기 중 배경 `bg> `는 프롬프트 행 뒤에 붙고(`>>> bg>`), REPL 줄 Enter 뒤 그 행은 `>>> x = 41`로 다시 그려지며 다음 행에서 stdin 읽기가 `bg> `로 시작해 `bg> hello`가 남는다.
+- **미루는 순간의 접두 인계**(RD-022b): 선택 의존 `inputDeferred?(): void`를 활성 REPL 읽기가 있을 때 `readInput` 도착 즉시(동기, `await` 앞) 한 번 부른다. 활성 여부는 `replOpen`이다: 각 `readLine`이 세우고, 그 읽기의 끝 처리가 `replRead === settled`일 때만 내린다(끝난 옛 읽기가 뒤에 열린 새 읽기의 표시를 내리지 않게). REPL main driver는 `inputDeferred: () => sinks.moveAbovePrefixToTail()`로 연결한다. 이유: 배경 `input("bg> ")`이 먼저 쓴 `bg> `는 열린 REPL 읽기 위 출력이라 꼬리가 아니라 REPL 줄의 접두가 된다(`05-output.md` 4.4). 미뤄진 stdin 읽기가 프롬프트를 잃지 않게 REPL 줄이 끝나기 전에 넘겨받는다. 동기여야 하는 이유: REPL 줄 Enter 뒤에는 벤더 활성 읽기가 없어 `abovePrefix()`가 `""`다. `moveAbovePrefixToTail()`은 `readline.abovePrefix()`가 비어 있지 않을 때만 `printAboveRaw("", "")`(접두 없이 다시 그림) → 꼬리 `reset()` → `feed(접두)`이고, 접두가 없으면(열린 읽기가 없을 때 포함) 무동작이다. 꼬리를 이어 먹이지 않고 바꾸는 이유: 열린 읽기의 행에는 접두 뒤 프롬프트뿐이고, 그리기 전 창에 꼬리에 들어간 조각은 프롬프트 그리기(`\r\x1b[J`)가 이미 지웠다.
+- 화면(브라우저 확인, RD-022b 뒤): 활성 REPL 읽기 중 배경 `bg> `는 REPL 줄 앞 접두로 그려졌다가(`bg> >>> x = 41`) 이어 도착한 `readInput` 알림에서 떼어진다 — 화면은 `>>> x = 41`, 꼬리는 `bg> `. REPL 줄 Enter 뒤 다음 행에서 stdin 읽기가 `bg> `로 시작해 `bg> hello`가 남는다(`[">>> x = 41", "bg> hello"]`, repl `terminal/read-guard.test.ts` "배경 input()의 프롬프트는 REPL 줄에서 떼어져 …"). 두 쓰기 사이의 `bg> >>> …` 상태는 xterm DOM 렌더 프레임에 나타나지 않을 수 있어 브라우저 스크립트 `bg-input-guard-probe.mjs`는 화면 행 대신 main의 `readInput` 알림 처리를 기다린다(`apps/demo/e2e/lib.mjs` `installRpcTap`·`rpcNoticeCount`). RD-022b 전에는 `bg> `가 프롬프트 행 뒤에 붙었다(`>>> bg>`).
+- **경합: 두 알림 사이의 Enter**(RD-022b 리뷰, jsdom 재현): worker는 `write("bg> ")`와 `readInput` 알림을 같은 포트로 연달아 보낸다. 둘 사이(다음 메시지 태스크 한 번)에 REPL 줄 Enter가 처리되면 읽기가 끝나 `abovePrefix()`가 `""`이고 `inputDeferred`가 옮길 접두가 없다. 접두 `bg> `는 확정된 행(`bg> >>> x = 41`)에만 남고 꼬리는 비어 있어(열린 읽기 출력은 꼬리에 먹이지 않는다) stdin 읽기가 프롬프트 없이 열린다: 화면 `["bg> >>> x = 41", "hello"]`, 경합 없는 경로는 `[">>> x = 41", "bg> hello"]`. 고치지 않았다(`.scratch/repl-run-source-followups/issues/12-*.md` `deferred`). RD-022b 전에는 sink가 읽기 중 출력도 꼬리에 먹여 이 경합에서도 `bg> `가 stdin 프롬프트가 됐다(코드 읽기).
 
 ## 3.3 프롬프트 꼬리(output-tail) 렌더링
 - 꼬리 = 직전 출력의 **마지막 `\n` 뒤이면서 그 안에서 마지막 `\r` 뒤** 텍스트. 꼬리가 없으면 프롬프트 없이
@@ -56,6 +58,17 @@
   SGR 외 제어(`\b`, CSI 이동/지우기, OSC)는 걸러내지 않고 통과시킨다.
 - 꼬리 초기화 시점: println 계열 sink(`writeOutput`/`writeError`), 텍스트 안 `\n`, 읽기 시작(REPL·stdin),
   새 worker. 읽기는 Enter뿐 아니라 **취소(Ctrl+C)로도 `\r\n`을 내고 끝나므로** 취소 뒤에도 꼬리가 남지 않는다.
+- **열린 읽기 중 출력은 꼬리가 아니라 벤더 접두**(RD-022b, `05-output.md` 4.4): 프롬프트가 그려진 뒤 온 출력은 꼬리 추적기에 먹이지
+  않는다. 개행 없이 끝난 부분은 같은 꼬리 규칙(`splitAboveRead`가 `createOutputTail`을 그대로 쓴다)으로 계산해 벤더가 프롬프트 앞
+  접두로 보관하고(`\r`로 끝나 꼬리 규칙이 빈 값을 내는 조각은 마지막으로 보이는 `\r` 구간을 접두로 한다, `05-output.md` 4.4)(`Readline.abovePrefix()`), 읽기가 끝나면 그 행째 화면에 남으므로 다음 읽기의 꼬리가 되지 않는다. 예외 둘:
+  `runSource`의 `takeRead()`는 접두를 지우므로 브리지가 다시 쓰고(그 쓰기는 읽기 밖 경로라 꼬리에 들어간다, `02-console-core.md`
+  5.6.3), 미뤄지는 stdin 읽기는 REPL 줄의 접두를 꼬리로 넘겨받는다(3.2 `inputDeferred`). 근거: 확정 7("읽기 중 출력은 꼬리에 먹이지
+  않는다")을 지키면 배경 `input("bg> ")`의 `bg> `가 REPL 줄 접두로만 남아 미뤄진 stdin 읽기가 프롬프트 없이 열린다. 꼬리 규칙을
+  바꾸지 않고(Enter·취소 뒤 접두를 꼬리로 옮기면 `tick>>> ` 행 뒤 다음 프롬프트에 `tick`이 중복된다) 인계가 필요한 한 경로에서만
+  옮긴다(2026-09-24 사용자 확정).
+- **붙박이 프롬프트**: 읽기가 시작되면 벤더에 넘긴 프롬프트 문자열 전체(REPL `꼬리\x1b[0m>>> `, stdin 경로의 꼬리 `x: `)가 그 읽기의
+  고정 프롬프트다. 읽는 동안 온 출력은 그 앞 접두로만 붙고 프롬프트 자체를 바꾸지 않는다(`input("x: ")` 중 `tick\n` → `tick` 행 아래
+  `x: 입력`). `input()` 읽기 중에는 worker가 멈춰 있어 worker 출력으로는 이 경우가 생기지 않는다(`05-output.md` 4.4 "적용 범위").
 - 폭 초과 처리(`rewindTail`, `packages/pyodide-terminal/src/rewind-tail.ts`): 꼬리가 터미널 폭을 넘으면 `read()` 앞에 `\x1b[nA`로 첫 행까지 커서를
   올린다(TRP-016). 행 수는 `term.write('', cb)`로 flush를 기다린 뒤 화면 버퍼에서 커서 행(`baseY + cursorY`)부터 `isWrapped`를
   위로 세어 구하고, `cursorY`를 넘어 스크롤백으로는 올리지 않는다. **짧은 꼬리(`길이 × 2 < cols`)는 flush 없이 건너뛴다.**

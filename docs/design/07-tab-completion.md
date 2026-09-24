@@ -64,6 +64,18 @@
   벤더 큐를 우회해 옮겨진 커서로 계산하는 것을 막는다, DELTA-04a). 콜백을 기다리는 동안 도착한 키는 벤더
   `queued`에 원본 문자열째 쌓였다가 콜백에서 순서대로 재생된다(붙여넣기 덩어리도 하나로, `readPaste`
   경로를 그대로 탐). 사이에 다른 키가 끼면(재그리기가 끝난 뒤 도착한 키) 첫 Tab 규칙으로 돌아간다.
+- 배경 출력과의 겹침(RD-022b, `06-editing.md` 6.1): 위 순서는 재그리기를 기다리지 않을 때다. 배경 출력(`printAboveRaw`)의
+  재그리기를 기다리는 중에 목록이 오면 `moveCursorToEnd()`·앞 `\r\n` 없이 목록을 쓰고 그 재그리기에 합류하며, 프로미스는 합친
+  재그리기가 끝난 뒤 resolve한다. 목록은 배경 출력의 프롬프트 앞 접두를 비운다(옛 입력행에 남는다, `10-parity-deviations.md` 편차 55).
+  완성 **삽입**(`applyResume` → `editInsert`)이 배경 출력 재그리기 콜백 전에 오면 벤더는 그리지 않고 저장 커서 자리의 버퍼에 넣은 뒤
+  저장 커서를 삽입 뒤로 옮기고, 콜백이 그 커서로 다시 그린다(RD-022b 리뷰 반영. 이전에는 콜백이 커서를 삽입 전으로 되돌려
+  `imp` → Tab → ` os`가 `imp osort`로 제출됐다). 경합 판정(`getCursor() === snap.pos`)은 `printAboveRaw`가 논리 커서를 옮기지 않아
+  그대로 통과한다. 시험: repl `run-source.test.ts` "Tab 완성 응답과 배경 출력 재그리기의 겹침".
+  알려진 경계: 재그리기 대기 중 친 키는 벤더 `queued`에 있어 버퍼에 아직 없으므로 경합 판정(`getLine()`·`getCursor()` 비교)에 보이지
+  않는다. `>>> imp` → Tab(완성 왕복 중) → 배경 출력 → `x` → 완성 응답 → 재그리기 콜백 순서면 완성이 먼저 버퍼에 들어가고 `x`가 콜백에서
+  뒤에 재생돼 `importx`가 제출된다(배경 출력이 없으면 버퍼가 달라져 완성을 버리고 `impx`). Enter면 `import`(기대 `imp`). 창은
+  `printAboveRaw`와 그 write 콜백 사이 한 번이다. jsdom 재현(second-opinion 2차 SO2-R1), 브라우저 미관찰,
+  `.scratch/repl-run-source-followups/issues/16-*.md` `deferred`.
 
 ## 7.4 인덱스 변환
 - Python `start`는 **코드포인트 인덱스**, `xterm-readline`의 `pos`는 **UTF-16**이다.

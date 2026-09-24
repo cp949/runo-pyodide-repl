@@ -14,12 +14,12 @@
    - `02-console-core.md` PyodideConsole·제출 실행·top-level await·종료, `runSource`(5.6)
    - `03-ctrl-c.md` SIGINT 프로토콜(요청 번호·ack·재전송, Python 핸들러, 감시 타이머, sleep 조각)
    - `04-stdin-input.md` `input()` 읽기·취소·read-guard·프롬프트 꼬리
-   - `05-output.md` sink 4종·전역 스트림·배너
+   - `05-output.md` sink 4종·전역 스트림·배너·열린 읽기 위 배경 출력(4.4)
    - `06-editing.md` 벤더링 xterm-readline(`takeRead`·`prefillCursor` 포함)·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사·읽기 없는 구간의 키 버퍼링
    - `07-tab-completion.md` Tab 완성
    - `08-session.md` 리셋·이중 마운트·종료 후 상태
    - `14-runner.md` 실행 driver(`runDriver`)·`createRunner`(상태 8종·결과·`stop()`)·`InputProvider`·xterm 실행창(`createTerminalRunner`). REPL이 아니라 `python main.py` 기준이다
-4. **검증과 한계**: `09-testing.md`(패키지 경계 검사 9.8 포함), `10-parity-deviations.md`(3.14 편차 53건 등록: 해소 22·28·32와 동등 항목 23 포함, 범위 밖은 별도), `11-known-traps.md`(함정 33건), `13-version-upgrade.md`(pyodide 버전 원천·업그레이드 절차·호환 탐지 등급표, [ADR-0007](docs/adr/0007-pyodide-single-version-policy.md))
+4. **검증과 한계**: `09-testing.md`(패키지 경계 검사 9.8 포함), `10-parity-deviations.md`(3.14 편차 55건 등록: 해소 22·28·32와 동등 항목 23 포함, 범위 밖은 별도), `11-known-traps.md`(함정 33건), `13-version-upgrade.md`(pyodide 버전 원천·업그레이드 절차·호환 탐지 등급표, [ADR-0007](docs/adr/0007-pyodide-single-version-policy.md))
 5. **이전 구현 참조**: `12-previous-implementation.md`(이전 RD 인벤토리·모듈 지도)
 
 ## 결정된 스택

@@ -290,11 +290,12 @@ packages/pyodide-repl/src/                      (REPL driver + REPL 프런트)
     multiline-corpus.json  split_paste 코퍼스 27개(이름·소스, node + 실제 pyodide 차등 검증) ← 09 9.1
     top-level-await.ts     setTopLevelAwait                           ← 02 5.4
     complete-source.ts     완성 후처리·ZipStdlibModuleCompleter(`complete-source.py`)   ← 07 7.5
-  test/                    시험 전용: sigint-setup.ts(REPL 콘솔 통합 조립), core-internals.ts(core 소스 상대 경로 re-export), vt-screen.ts(화면 행을 해석하는 시험용 가상 화면, `runSource` 시험)   ← 09 시험 배치(9.1 앞)
+  test/                    시험 전용: sigint-setup.ts(REPL 콘솔 통합 조립), core-internals.ts(core 소스 상대 경로 re-export)   ← 09 시험 배치(9.1 앞)
 
 packages/pyodide-testkit/src/                   (시험 전용, exports가 소스를 직접 가리킨다)
   thread.ts                spawnRole: worker_threads 역할 하니스
   fake-terminal.ts         가짜 xterm Terminal
+  vt-screen.ts             시험용 가상 화면 `VtScreen`(CUU·CUD·CUF·CUB·ED·EL·`\r`·`\n` 해석, SGR 무시)·`attachVtScreen(fake, vt)`(가짜 터미널 write를 화면에 반영). repl `run-source.test.ts`·`read-guard.test.ts`, terminal `sinks.test.ts`·`terminal-runner.test.ts`가 쓴다
   package-boundary.ts      의존 트리 수집 도우미   ← 09 9.8
   ts-resolve-hook.mjs      worker_threads 역할의 확장자 없는 상대 import 해석 훅
 ```
@@ -332,7 +333,7 @@ RD-001에서 클린 체크아웃(`dist` 없음)으로 재현한 결과다.
 - `check-types`는 `^build`에 의존한다. 앱이 패키지 타입을 `dist/*.d.mts`에서 읽으므로 d.ts가 먼저 있어야 한다. 이전 값(`^check-types`)은 클린 상태에서 `TS2307: Cannot find module '@cp949/runo-pyodide-repl/worker'`로 실패했다. `customConditions`로 소스를 읽게 하면 앱의 컴파일러 옵션(`noUncheckedIndexedAccess`)이 벤더링한 xterm-readline 소스를 검사하므로 쓰지 않는다.
 - `pnpm preview`는 `build`에 의존한다.
 - 패키지 의존 순서(RD-020, RD-022): `pyodide-repl`이 `pyodide-core`·`pyodide-terminal`에, terminal이 core·xterm-readline에 `workspace:*`로 의존하므로 turbo `^build`가 core → terminal → repl 순으로 빌드한다. repl의 `check-types`·`test`도 core `dist`(`./dist/*.d.mts`·`./dist/*.mjs`)를 읽는다(vitest·tsc에는 `development` 조건이 없다). demo는 dev에서 `development` 조건으로 core 소스를 직접 읽고 build·preview에서는 repl `dist`가 core를 외부 import로 남기므로 vite 워커 번들링이 `node_modules`의 core를 해석한다.
-- `pyodide-testkit`은 빌드하지 않는다. `exports`가 `./src/*.ts`(`./thread`·`./fake-terminal`·`./package-boundary`)와 `./ts-resolve-hook.mjs`를 직접 가리키고 소비자가 vitest·tsc뿐이다. `private`이고 pack 대상이 아니다.
+- `pyodide-testkit`은 빌드하지 않는다. `exports`가 `./src/*.ts`(`./thread`·`./fake-terminal`·`./vt-screen`·`./package-boundary`)와 `./ts-resolve-hook.mjs`를 직접 가리키고 소비자가 vitest·tsc뿐이다. `private`이고 pack 대상이 아니다.
 - `check-dist` 태스크(RD-020, RD-021, RD-022): `dependsOn: ["build"]`, `cache: false`. xterm-readline·core·terminal·repl의 `dist`에 `coincident`·`reflected-ffi` 문자열이 없는지, `.mjs`에 `pyodide` 런타임 import(`from "pyodide`·`import("pyodide`)가 없는지 검사한다(`scripts/check-dist.mjs`). 루트 `pnpm test`는 `turbo run test check-dist`라 시험과 함께 돌고 `pnpm check-dist`로 단독 실행할 수 있다. turbo `test`가 자기 패키지 `build`에 의존하지 않아 `dist` 검사를 시험 안에 둘 수 없다(`09-testing.md` 9.8.2).
 - core는 `pyodide`를 `devDependencies`(`"catalog:"`, 원천은 `pnpm-workspace.yaml` catalog, ADR-0007)로 두고 optional peer(`^314.0.7`)로도 선언한다. `tsdown.config.ts`의 `deps.neverBundle`(`pyodide`, `pyodide/*`에서 `pyodide/package.json` 제외)로 `.d.mts`에 pyodide 타입을 인라인하지 않고, `deps.alwaysBundle: ["pyodide/package.json"]`로 `PYODIDE_VERSION`용 `version` 문자열만 `dist`에 인라인한다(런타임 `pyodide` import 없음). core `./worker` 타입을 쓰는 소비자는 `pyodide`(+`@types/node`·`@types/emscripten`)를 설치해야 한다(`packages/pyodide-core/README.md`, `packages/pyodide-core/CONTEXT.md`, `09-testing.md` 9.8.3, `13-version-upgrade.md` 13.7). repl만 쓰는 소비자는 영향이 없다.
 - tarball 스모크: 루트 `pnpm smoke:pack`(`pnpm build && node scripts/pack-smoke.mjs`)이 xterm-readline·core·terminal·repl을 pack해 저장소 밖에 설치·`import`·`tsc`로 확인한다. 기본 파이프라인에는 넣지 않는다(`09-testing.md` 9.8.3).

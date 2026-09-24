@@ -1,4 +1,4 @@
-# 출력: sink 4종·전역 스트림·배너
+# 출력: sink 4종·전역 스트림·배너·열린 읽기 위 출력
 
 > 이 문서의 규칙·상수는 이전 구현(`/work/cp949/pyodide-samples/apps/repl`, 읽기 전용 참고)이 CPython 3.14.4 pty 실측과 브라우저 회귀로 확정한 것이다. 새 구현은 통신 계층만 바꾸고(`docs/design/00-architecture.md`, `01-protocols.md`) 이 규칙은 그대로 지킨다. 절 끝의 "참고:" 경로는 이전 구현의 근거 위치다.
 
@@ -22,9 +22,11 @@ sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL ma
   (worker는 텍스트만 넘긴다). 한계: stderr 텍스트 자체의 SGR이 조각 경계를 넘으면 조각 끝 `\x1b[0m`에서 끊긴다.
 - `\r` 진행률: `write`/`writeErrorRaw`가 개행을 강제하지 않으므로 `\r30%` 같은 한 줄 갱신이 그대로 반영된다.
   꼬리 계산은 마지막 `\r` 뒤를 취한다.
-- 모든 sink는 화면에 낸 바이트를 `output-tail`(core `terminal/output-tail.ts`)에 먹인다(`println`은 `text + '\n'`을 먹인다).
-  `tail()`/`resetTail()`을 함께 노출한다. **sink 세트는 worker(세션)마다 새로 만든다** — 새 세션이 이전
-  꼬리를 물려받지 않게.
+- 모든 sink는 열린 읽기 밖에서 화면에 낸 바이트를 `output-tail`(core `terminal/output-tail.ts`)에 먹인다(`println`은 `text + '\n'`을 먹인다).
+  열린 읽기 중 출력은 먹이지 않고 벤더 `printAboveRaw`로 보낸다(4.4). `tail()`/`resetTail()`을 함께 노출한다. **sink 세트는
+  worker(세션)마다 새로 만든다** — 새 세션이 이전 꼬리를 물려받지 않게.
+- 위 표의 "구현" 열(`readline.print`/`println`)은 읽기 밖 경로다. 4종 모두 내부의 `print`/`println` 두 함수를 거치고, 그 두 함수가
+  `readline.isReading()`으로 4.4 경로와 갈린다.
 - **안내 줄**(`packages/pyodide-terminal/src/notice.ts`의 `writeNotice(readline, text, kind)`): 세션 밖에서 main이 찍는 개행으로 끝나는
   한 줄이다. 비격리 경고는 노랑(`warning`, `\x1b[33m…\x1b[0m`), RD-010의 리셋 안내는 청록(`info`, `\x1b[36m`)이다.
   sink 세트가 아니므로 꼬리에 먹이지 않는다. 끝 개행 없는 텍스트를 받아 `println`으로 개행을 붙이고 부분 줄은 내지
@@ -40,7 +42,7 @@ sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL ma
   스트림을 탄다. `createSinkWriter(sink)`(core `worker/sink-writer.ts`)가 pyodide `Writer`로 바이트를 받아
   `TextDecoder({ stream: true })`로 조각 경계를 잇고 콘솔 콜백과 **같은 sink**(`write`, `writeErrorRaw`)로
   보낸다. `write`는 받은 바이트 수를 돌려줘야 한다(0을 돌려주면 호출한 쪽이 같은 바이트를 다시 쓴다).
-  잘린 상태는 Writer마다 따로 둔다.
+  잘린 상태는 Writer마다 따로 둔다. 프롬프트가 열린 채 온 배경 출력의 화면 규칙은 4.4다.
 - Python 쪽 stdout 버퍼는 건드리지 않는다: `flush=True` 없는 `print(..., end='')`는 CPython처럼 개행·flush
   까지 보이지 않는다.
 - 전역 스트림은 `isatty()`가 False여도 pyodide 기본으로 `line_buffering=True`, `write_through=False`다(node 프로브,
@@ -56,6 +58,86 @@ sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL ma
   "copyright", "credits" or "license" for more information.`(pyodide 314.0.7, 2행).
 - worker 시작 시 `sys.ps1 = ">>> "`, `sys.ps2 = "... "`를 직접 설정한다(pyodide 기본은 `None`이라
   `hasattr(sys, 'ps1')`로 REPL을 판정하는 코드가 어긋난다).
+
+## 4.4 열린 읽기 위 출력(RD-022b)
+
+열린 읽기 = 벤더 `Readline`에 활성 읽기가 있는 상태(`Readline.isReading() === true`): 프롬프트가 그려진 REPL `>>> `·`... ` 읽기,
+REPL `input()` 읽기, 실행창 `input()` 읽기. `printAbove`·`printAboveRaw` 재그리기를 기다리는 동안도 포함한다. `read()`를 부른 뒤
+벤더 write 콜백이 프롬프트를 그리기 전(그리기 전 창)은 포함하지 않는다.
+
+- **경로**: sink의 `print`/`println`(4.1의 4종이 모두 거친다)은 `readline.isReading()`이면
+  `readline.printAboveRaw(lines, prefix)`를 부른다. `{ lines, prefix }`는 `splitAboveRead(앞 원문, text)`이고 앞 원문은
+  `readline.abovePrefix()`다(예외: 아래 "`\r`로 끝난 조각"의 `resume`). `println`은 `text + "\n"`을 넘긴다. 프로미스는 기다리지 않는다(`void`). 읽기 밖이면 4.1 경로(꼬리 공급 + `readline.print`/`println`)
+  그대로다. 빈 조각은 `write`·`writeErrorRaw`가 먼저 거른다.
+- **분리**(`splitAboveRead(prefix, text): { lines, prefix, resume? }`, `packages/pyodide-terminal/src/sinks.ts`, `./internal`로 나간다):
+  `full = prefix + text`. `lines`는 `full`의 마지막 `\n`까지(포함, 없으면 `""`)다. 새 접두는 새 `createOutputTail()`에 `full`을
+  먹인 `value()`다 — 꼬리 규칙(`04-stdin-input.md` 3.3: 마지막 `\n` 뒤, 그 안에서 마지막 `\r` 뒤, 줄 경계를 넘어 열린 SGR을 앞에
+  이어 붙임)을 새로 구현하지 않고 그대로 쓴다. 벤더가 앞 접두를 화면에서 지우므로 앞 접두는 `lines` 앞에 이어 쓴다: 접두 `tick` +
+  ` tock\n` → `lines = "tick tock\n"`, 새 접두 `""`. `\r50%`는 새 접두 `50%`(제자리 갱신)다(앞 접두 `tick`도 `50%`로 바뀐다 — 터미널
+  겹쳐 쓰기라면 `50%k`지만 읽기 시작 꼬리와 같은 꼬리 규칙을 따른다). 완성 행 안의 `\r`은 터미널이 겹쳐 쓴다(`abc\rX\n` → `Xbc` 행).
+  `\n` → `\r\n` 정규화는 벤더 `write`가 한다.
+  - **`\r`로 끝난 조각**(RD-022b 리뷰 반영, 사용자 확정): `print(f"{p}%", end="\r")`처럼 마지막 행의 마지막 `\r` 뒤에 보이는 글자가
+    없으면(SGR만 있어도) 꼬리 규칙은 빈 접두를 내 조각이 사라지고 뒤따르는 `\n`도 빈 행만 남겼다. 이때 새 접두는 그 행에서
+    **마지막으로 보이는 `\r` 구간**까지 먹인 꼬리 값이고(`100%\r` → `100%`, `10%\r20%\r` → `20%`, `\x1b[31m100%\r\x1b[0m` →
+    `\x1b[31m100%`), `splitAboveRead`는 그 구간 뒤(`\r`부터)를 붙인 원문을 `resume`으로 준다(`100%\r`). sink는 `resume`과 그때 넘긴
+    접두를 보관하고, 다음 조각 때 벤더 접두가 그 값 그대로면 `abovePrefix()` 대신 `resume`을 앞 원문으로 쓴다(Tab 목록·새 읽기가 접두를
+    비웠으면 버린다). 보관할 때 `\r`부터의 나머지(`\r`·SGR뿐)는 연속 `\r`을 하나로, SGR을 꼬리 추적기 순효과(`\x1b[0m` + 열린 SGR,
+    `MAX_ACTIVE_SGR` 상한)로 줄인다 — 보이지 않는 조각(`\r`, `\x1b[0m`)이 이어져도 보관 원문이 자라지 않는다. 그래서 다음 조각은 행 머리부터 계산된다: `20%\r` → 접두 `20%`(`10%20%`로 이어 붙지 않음), `\n` →
+    `lines = "100%\r\n"` → `100%` 행이 남는다(읽기 밖에서 같은 입력을 쓴 것과 같은 행). 보이는 구간이 하나도 없으면(`\r`뿐) 꼬리 규칙
+    그대로(접두 `""`)다. `\r` 뒤 SGR이 아닌 제어 시퀀스(`\x1b[K` 등)는 글자로 보고 꼬리 규칙 그대로다(아래 경계의 제어 문자 한계).
+  - 열린 프롬프트 화면: `100%\r` 뒤에는 보관한 접두를 프롬프트 앞에 그린다(`100%>>> pri`). 실제 터미널이라면 커서가 행 머리라
+    프롬프트가 `100%`를 덮어쓰겠지만, 벤더는 접두를 프롬프트 앞 글자로만 그리므로(`\r`을 접두에 넣지 않는다, 6.1 `setPromptPrefix`)
+    진행률 값을 보이게 둔다. `\r`의 효과(행 머리)는 다음 조각의 계산에만 반영된다.
+- **화면**(벤더 동작은 `06-editing.md` 6.1): 입력줄(프롬프트 첫 행부터 입력 마지막 행까지, 접두 포함)을 지우고 그 자리에
+  `lines`를 쓴 뒤, 접두를 프롬프트 앞에 붙여 같은 읽기(버퍼·커서)를 그 아래에 다시 그린다. 흔적 행을 남기지 않는다.
+  - `>>> pri` + `tick\n` → `tick` / `>>> pri`(커서 `pri` 뒤, 줄 중간 커서도 보존).
+  - `print("tick", end="", flush=True)` → `tick>>> pri`. 이어 ` tock\n` → `tick tock` / `>>> pri`.
+  - 비어 있지 않은 접두와 프롬프트 사이에는 `\x1b[0m`이 들어간다(접두의 색이 프롬프트로 새지 않는다, `repl-reader`의 꼬리 규칙과 같다).
+- **붙박이 프롬프트**: 벤더에 넘긴 프롬프트 문자열 전체가 접두 뒤에 그대로 붙는다 — 읽기 시작 꼬리가 합성된 `a\x1b[0m>>> `,
+  `input("x: ")`의 `x: `. `input("x: ")` 중 `tick\n` → `tick` / `x: 입력`. 읽기 시작 꼬리와 배경 미종결 조각이 함께 있으면
+  `ta>>> pri`처럼 시간 순서가 뒤집혀 보인다(`10-parity-deviations.md` 편차 54).
+- **꼬리 추적기에 먹이지 않는다**: 열린 읽기의 출력은 벤더(`State`)가 보관하는 접두로만 관리한다. 새 `read()`는 접두 없이 시작한다.
+  - Enter·Ctrl+C 취소: 접두는 그 행(`tick>>> pri`)과 함께 화면에 남고 다음 읽기의 꼬리는 비어 있다(다음 프롬프트는 `>>> `, `tick>>> `
+    중복 없음).
+  - `takeRead()`(REPL `runSource`): 벤더가 접두째 지우므로 브리지가 `abovePrefix()`를 먼저 읽어 다시 쓴다(`02-console-core.md` 5.6.3).
+  - `reset()`의 `cancelRead()`: 화면을 건드리지 않는다(행이 그대로 남는다). 예외: 배경 출력 재그리기 콜백 전(입력줄이 지워지고 아직
+    다시 그려지지 않은 창)에 오면 그 재그리기가 무효가 되어 입력줄도 아직 그리지 않은 접두도 화면에 없다(jsdom 재현: `> abc` →
+    `printAboveRaw("", "tick")` 콜백 전 `cancelRead()` → 화면 `""`. 실행창 abort의 `cancelRead()`도 같다.
+    `.scratch/repl-run-source-followups/issues/13-*.md` `deferred`).
+  - 미뤄진 stdin 읽기: 활성 REPL 읽기 중 배경 `input("bg> ")`의 `bg> `는 REPL 줄의 접두가 되므로, read-guard가 stdin 읽기를 미루는
+    순간 그 접두를 꼬리로 옮겨 stdin 읽기의 프롬프트로 쓴다(`TerminalSinks.moveAbovePrefixToTail()`, `04-stdin-input.md` 3.2·3.3).
+- **Tab 후보 목록**: 접두가 있는 채 `printAbove`가 불리면 옛 입력행(`tick>>> pri`)이 목록 위에 남으므로 새 입력행은 접두 없이 그린다.
+  그 뒤 이어지는 조각은 별도 행이 된다(편차 55).
+- **적용 범위 — 사실과 가정**:
+  - 사실: REPL `>>> `·`... ` 읽기 중에는 worker가 유휴이고 asyncio가 돌아(편차 1) asyncio task·`call_later` 콜백·전역 stdout/stderr
+    출력이 실제로 온다. 브라우저 `apps/demo/e2e/checks/bg-output-check.mjs`(`e2e:bg-output`) B01~B03·B05~B07과
+    `stdin-input-check.mjs` `TICK` 절이 이 경로다.
+  - 사실: REPL·실행창 `input()` 읽기 중에는 worker가 stdin 메일박스 `Atomics.wait`에 멈춰 있어(`04-stdin-input.md` 3.1) WebLoop
+    콜백·JS 이벤트가 돌지 않고, `input()` 앞에 낸 출력은 같은 포트 순서상 `readInput` 알림보다 먼저 도착해 꼬리(프롬프트)가 된다.
+    그래서 "`input()` 읽기 위 배경 출력"은 **현재 제품에서 worker 출력으로는 발생하지 않는다**. 공용 sink 경로라 함께 조율되며,
+    이 경로의 계약은 main 쪽 쓰기(RPC 핸들러 → sink → 벤더)에 대한 것이다. 시험은 main에 출력을 직접 넣는다: terminal
+    `terminal-runner.test.ts` "input() 대기 중 배경 출력(RD-022b)", repl `run-source.test.ts` "REPL input('x: ') 대기 중 …", 브라우저
+    B04는 main 포트에 가짜 `write` RPC 알림을 합성한다(`apps/demo/e2e/lib.mjs` `installRpcTap`·`injectRpcNotice`, 실제 알림과 같은
+    `onmessage` 핸들러를 지난다).
+  - 가정(확인 안 함): 이 경로가 실제로 쓰일 곳은 앞으로 생길 main 출처 출력이나 비차단 stdin(JSPI 등)이다. 지금은 없다.
+- **경계**:
+  - 그리기 전 창: `read()` 뒤 벤더 write 콜백 전(`isReading() === false`)에 온 출력은 읽기 밖 경로로 가고, 개행 없는 조각은 곧 그려지는
+    프롬프트의 `\r\x1b[J`에 지워진다. 고치지 않는다(`.scratch/repl-run-source-followups/issues/09-*.md`, `deferred`).
+  - `lines`가 `\n`으로 끝나지 않으면 다음 재그리기가 그 행을 덮는다. 벤더는 검사하지 않고 `splitAboveRead`가 보장한다.
+  - sink는 `printAboveRaw` 프로미스를 기다리지 않는다. 재그리기 대기 중 공개 편집 API(`editInsert` 등)는 리뷰 반영에서 고쳤다: 한 행
+    입력에서도 Tab 완성 삽입이 콜백 전에 오면 커서가 삽입 전으로 되돌아가 이어 친 글자가 어긋나는 것이 jsdom으로 재현됐고(`imp osort`,
+    기대 `import os`), 이제 버퍼만 고치고 콜백이 편집 뒤 커서로 그린다(`06-editing.md` 6.1). 재그리기 대기 중 리사이즈는 여전히
+    입력줄을 먼저 그려 감긴 입력의 첫 행이 흔적으로 남는다(jsdom 재현, `.scratch/repl-run-source-followups/issues/10-*.md` `deferred`).
+  - 출력으로 커지는 접두: 개행 없는 조각이 쌓여 접두+프롬프트+입력이 화면 행 수를 넘으면 읽는 동안 접두 윗행이 화면·스크롤백에 없다
+    (다음 완성 행이 전부 다시 써 최종 유실은 없다). 조각마다 접두 전체를 지우고 다시 써 쓰기량이 조각 수에 대해 초선형이다(jsdom 관찰
+    N=100 → 8879 B, N=400 → 97677 B). `.scratch/repl-run-source-followups/issues/14-*.md` `deferred`.
+  - 접두 안의 SGR 아닌 제어 문자: 꼬리 규칙이 본문에 남기고 벤더 폭 계산이 모르는 BS·BEL·OSC는 커서 열을 어긋나게 하거나(BS 스피너
+    `|\b/`) 편집 재그리기마다 다시 나간다(BEL). 읽기 시작 꼬리에도 있던 한계다. `.scratch/repl-run-source-followups/issues/15-*.md`
+    `deferred`.
+- **시험**: 벤더 `print-above-raw.test.ts`, terminal `sinks.test.ts`("열린 읽기 …" describe 5개, `\r`로 끝나는 조각 포함)·
+  `terminal-runner.test.ts`, repl `run-source.test.ts`("열린 읽기 위 배경 출력" describe 2개, "Tab 완성 응답과 배경 출력 재그리기의 겹침")·
+  `terminal/read-guard.test.ts`(`inputDeferred`), 브라우저 `e2e:bg-output`(B01~B07, B07이 `\r`로 끝나는 진행률 조각,
+  `apps/demo/e2e/BASELINE.md`).
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/05-output-streaming.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/{terminal-sinks,sink-writer,output-tail}.ts`

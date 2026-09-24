@@ -201,7 +201,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 ### 5.6.3 화면 규칙
 
 - 받아들이면 벤더 `Readline.takeRead()`로 열린 읽기를 제출·history 없이 끝내고 그 읽기의 프롬프트·입력 행(줄이 감겼거나 여러 행이어도 전부)을 화면에서 지운다. 커서는 프롬프트 첫 행 열 0에 놓이고 출력은 그 자리부터 시작한다. 텍스트·커서는 보존한다.
-- 꼬리가 붙은 프롬프트(`a>>> pri`, 직전 출력이 미종결 줄로 끝남): 벤더는 꼬리까지 프롬프트로 보고 함께 지우므로 main이 지운 꼬리를 다시 쓴다: `${꼬리}\x1b[0m\r\n`(꼬리가 열어 둔 SGR을 닫고 새 행에서 출력을 시작, `14-runner.md` 14.5.4 행 머리 규칙). 꼬리가 없으면 아무것도 쓰지 않는다.
+- 꼬리가 붙은 프롬프트(`a>>> pri`, 직전 출력이 미종결 줄로 끝남)와 배경 출력 접두(`tick>>> pri`, 열린 읽기 중 온 미종결 조각, `05-output.md` 4.4): 벤더는 둘 다 프롬프트로 보고 함께 지우므로 main(`terminal/source-bridge.ts` `send()`)이 지운 것을 화면 순서(접두 → 꼬리 → 프롬프트)대로 다시 쓴다. 형식은 `접두\x1b[0m꼬리\x1b[0m\r\n`이다: 비어 있지 않은 조각만 `\x1b[0m`으로 잇고 끝에 `\x1b[0m\r\n`을 붙인다(접두만 있으면 `tick\x1b[0m\r\n`, 꼬리만 있으면 `a\x1b[0m\r\n`, 둘 다 비면 쓰지 않는다). 조각 사이 `\x1b[0m`은 벤더가 그린 프롬프트(`접두\x1b[0m꼬리\x1b[0m>>> `, `State.setPromptPrefix`·`repl-reader`)와 같은 색 경계다 — 없으면 접두가 연 색(빨강 stderr 조각)이 꼬리로 번진다. 끝의 `\x1b[0m\r\n`은 꼬리가 열어 둔 SGR을 닫고 새 행에서 출력을 시작한다(`14-runner.md` 14.5.4 행 머리 규칙). 접두는 `takeRead()`가 읽기를 끝내면 읽을 수 없으므로 `takeRead()` **직전에** `readline.abovePrefix()`로 읽는다(배경 출력의 재그리기를 기다리는 중이면 아직 그리지 않은 값이고, 그때 `takeRead()`는 지울 것이 없다, `06-editing.md` 6.1 경계 (b)). 열린 읽기가 끝난 뒤의 쓰기라 sink의 읽기 밖 경로(꼬리 공급)로 간다. 화면: `>>> pri` 위 배경 `tick\n` 뒤 `runSource("print(1)")` → `tick` / `1` / `>>> pri`, 개행 없는 `tick`이면 같은 모양(접두가 한 행으로 남는다), 접두 + 꼬리면 `ta` / `1` / `>>> pri`(편차 54의 화면 순서 그대로). `>>> pritick`·옛 `>>> pri` 흔적 행은 없다.
 - 출력이 끝나면 worker가 결말을 실어 다음 `readLine` 요청을 보낸다. REPL reader가 평소처럼 꼬리(출력이 미종결이면 그 꼬리, prompt-join 규칙 `04-stdin-input.md` 3.3) + `>>> `로 읽기를 열되 보존한 텍스트를 `prefill`, 커서를 `prefillCursor`로 넘긴다. 이 복원은 자동 들여쓰기 프리필(6.3)보다 우선하고, 보존한 텍스트가 빈 문자열이면 복원하지 않는다. 결과는 `>>> pri`(커서 위치 유지)가 출력 아래에 다시 그려진다. 입력 줄 에코 행(`>>> x = 1`)은 생기지 않는다.
 
 ### 5.6.4 정착 시점
@@ -222,9 +222,9 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 - **뷰포트보다 큰 입력**: 입력이 화면 행 수를 넘어 위쪽 행이 스크롤백으로 넘어간 상태에서 `runSource`를 부르면 그 행은 지워지지 않는다(스크롤백은 ANSI 시퀀스로 지울 수 없다). "스크롤백에 흔적이 남지 않는다"(5.6.3)는 입력이 뷰포트 안일 때만 성립한다. 화면에 남은 행만 지운다.
 - **프롬프트가 그려지기 전 구간**은 `busy`다(5.6.2). 명령 출력 직후 곧바로 호출하는 소비자는 드물게 `busy`를 받는다. 호출은 프롬프트가 화면에 보인 뒤에 하는 것이 안전하다(입력 타이밍 규칙, `docs/traps/TRP-005`와 같은 취지).
 - **interrupt buffer 재사용**: `reset()`은 옛 worker와 같은 interrupt buffer를 새 세션에 싣는다(`08-session.md` 8.1 2번). 실행 중(`runSource` 포함) `reset()` 직후 첫 Ctrl+C가 아직 종료되지 않은 옛 worker에 가로채일 수 있다(`14-runner.md` 14.3.5, `docs/traps/TRP-049`). REPL에서 재현은 확인하지 않았고 RD-022a는 고치지 않았다(`.scratch/run-driver-terminal-followups/issues/01-*.md`). 브라우저 확인 S08은 `restarted` 뒤 REPL 명령만 돌리고 Ctrl+C 셀이 없어 이 경로에 닿지 않았다.
-- `printAbove` 재그리기 중의 `takeRead()`는 옛 입력줄을 지우지 못한다(`06-editing.md` 6.1). Tab `complete` 왕복 중은 `busy`로 거부하므로 실경로에서 닿지 않는다.
+- Tab `printAbove` 재그리기 중의 `takeRead()`는 옛 입력줄을 지우지 못한다(`06-editing.md` 6.1). Tab `complete` 왕복 중은 `busy`로 거부하므로 실경로에서 닿지 않는다. 배경 출력(`printAboveRaw`)의 재그리기를 기다리는 중이면 입력줄이 이미 지워져 있어 받아들여도 흔적이 없다(repl `run-source.test.ts` "재그리기 콜백 전에 runSource하면 …").
 - 꼬리 다시 쓰기는 꼬리가 `\r`로 덮어쓴 텍스트를 가진 경우 화면과 꼬리 추적기(마지막 `\r` 뒤만 보관)가 어긋날 수 있다. 관찰한 적은 없다.
-- **열린 읽기 위의 배경 출력**: 프롬프트가 열린 채 배경 task의 출력(`>>> pri` 뒤 `tick\n`)이 오면 벤더 레이아웃이 모르는 커서 이동이라 `takeRead()`가 프롬프트 행을 찾지 못하고 `>>> pritick` 행이 남는다. 뿌리는 열린 읽기 위 출력의 조율 부재(기존 결함)이고 평소 편집 재그리기도 같은 식으로 어긋난다(`.scratch/repl-run-source-followups/issues/07-*.md`).
+- **그리기 전 창의 배경 출력**: `readLine` 요청으로 main이 `readline.read()`를 부른 뒤 벤더 write 콜백이 프롬프트를 그리기 전(수 ms)에 온 개행 없는 배경 조각은 열린 읽기 위 출력 경로(`05-output.md` 4.4)를 타지 않고, 곧 그려지는 프롬프트의 `\r\x1b[J`에 지워진다. 이 구간의 `runSource`는 `busy`라 5.6.3 복원과는 무관하다. 고치지 않았다(`.scratch/repl-run-source-followups/issues/09-*.md`, `deferred`).
 - 브라우저 셀이 없는 경로: 뷰포트 초과 입력, `loading` 중 호출, Tab 왕복 중 호출, 크래시 중 호출, 리셋 뒤 Ctrl+C. 앞의 넷은 jsdom·node 시험이 고정한다.
 
 ### 5.6.8 시험과 확인
@@ -232,8 +232,8 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 - core: `worker/run-driver-exec-in-console.test.ts`(실제 pyodide + 실제 `PyodideConsole`, globals·stdin 불변·`console.filename`·exec 의미·TLA 인자).
 - 벤더: `take-read.test.ts`(지움·커서·history·type-ahead·`prefillCursor`, jsdom + `VTerm`).
 - repl worker: `worker/run-source.test.ts`(실제 pyodide: globals 공유, `_` 불변, `<console>` 트레이스백, `sys.exit(3)`, `exit()` 뒤 stdin, SIGINT·정지한 `await` 중단, TLA 켬·끔, `input()`), `worker/repl-loop.test.ts`(가짜 deps: 호출 순서·결말 운반·`onTerminated` 미호출), `worker/boot.test.ts`(실제 `MessageChannel`에서 결말이 네 번째 인자로 도착), `worker/repl-driver-source-runner.test.ts`.
-- repl main: `run-source.test.ts`(jsdom + 실제 `Readline` + 가짜 worker + `test/vt-screen.ts`: 시나리오·거부 표·`busy`·정착 시점·꼬리·커서·생애 사건).
-- 브라우저: `apps/demo`의 REPL 화면 plain 요소 `source`(textarea)·`run-source`(버튼)·`source-result`(JSON 텍스트, 거부는 `{"rejected":"<reason>"}`)와 `pnpm --filter demo e2e:run-source`(S01~S10, `apps/demo/e2e/BASELINE.md`).
+- repl main: `run-source.test.ts`(jsdom + 실제 `Readline` + 가짜 worker + `@repo/pyodide-testkit/vt-screen`의 `VtScreen`: 시나리오·거부 표·`busy`·정착 시점·꼬리·커서·생애 사건, 열린 읽기 위 배경 출력 뒤 `runSource`·접두 복원 바이트). `VtScreen`은 SGR을 무시하므로 색 경계는 쓰기 바이트로 단정한다(`docs/traps/TRP-060`).
+- 브라우저: `apps/demo`의 REPL 화면 plain 요소 `source`(textarea)·`run-source`(버튼)·`source-result`(JSON 텍스트, 거부는 `{"rejected":"<reason>"}`)와 `pnpm --filter demo e2e:run-source`(S01~S10, `apps/demo/e2e/BASELINE.md`). 배경 출력 뒤 `runSource`는 `e2e:bg-output` B05(`B05T` / `5` / `>>> pri`).
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/01-console-core.md`,
 이전 구현 설계 문서 `07-multiline-submit.md`, `08-top-level-await.md`,

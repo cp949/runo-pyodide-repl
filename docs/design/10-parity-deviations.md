@@ -9,7 +9,7 @@
 1. **프롬프트 대기 중 asyncio 콜백이 돈다**(RD-021). 3.14 기본 REPL은 돌 루프가 없고 `python -m asyncio`는 돈다 → `python -m asyncio` 쪽으로 정렬한 의도적 선택.
 2. **배경 콜백이 CPU를 잡으면 프롬프트에서 Ctrl+C가 2회 필요**하다. 첫 번째는 읽기 취소, 두 번째가 SIGINT.
 3. **배경 콜백의 `input()`은 REPL 줄을 Enter한 뒤에야 시작**한다(REPL 읽기 활성 중 stdin 읽기를 미루는 가드).
-4. 배경 콜백의 출력은 프롬프트 행(`>>> `) 뒤에 이어 붙어 나온다(입력 중이던 줄과의 표시 어긋남은 범위 밖).
+4. **프롬프트가 열린 채 온 배경 출력은 입력줄 위에 나오고 입력줄은 그 아래에 다시 그려진다**(RD-022b 개정). 3.14 기본 REPL은 프롬프트 대기 중 배경 콜백이 돌지 않아(편차 1) 대응 동작이 없다. asyncio task·`call_later` 콜백·전역 stdout/stderr 출력이 오면 입력줄(프롬프트 첫 행부터 입력 마지막 행까지)을 지우고 출력을 쓴 뒤 같은 읽기(버퍼·커서)를 그 아래에 다시 그린다: `>>> pri` + `tick\n` → `tick` / `>>> pri`. 개행 없이 끝난 조각은 프롬프트 앞 접두로 그리고(`tick>>> pri`, `\r`은 제자리 갱신 `50%>>> pri`), 다음 출력이 그 행을 이어 쓴다(` tock\n` → `tick tock` / `>>> pri`). `\r`로 끝나는 진행률 조각(`print(f"{p}%", end="\r")`)은 마지막으로 보이는 값을 접두로 보관하고(`100%>>> pri` — 실제 터미널이라면 커서가 행 머리라 프롬프트가 덮어쓴다) 다음 조각은 행 머리부터 계산하며, 이어지는 `\n`이 `100%` 행을 남긴다(RD-022b 리뷰 반영, 이전에는 조각과 행이 사라졌다). 접두 안의 `\r` 갱신은 겹쳐 쓰기가 아니라 꼬리 규칙이라 긴 값 뒤 짧은 값은 뒷글자가 남지 않는다(`tick` 뒤 `\r50%` → `50%`, 터미널은 `50%k`). Enter·취소 뒤 접두는 그 행과 함께 남고 다음 프롬프트는 `>>> `다(`05-output.md` 4.4). 브라우저 `bg-output-check.mjs` B01~B07. **`python -m asyncio`(3.14)가 같은 상황에서 그리는 모양은 측정하지 않았다**(편차 1의 정렬 기준이지만 이 화면 규칙은 3.14와 대조한 것이 아니다). 개정 전(RD-021~RD-022a)에는 출력이 프롬프트 행 뒤에 이어 붙어(`>>> pritick`) 뒤이은 편집 재그리기·`runSource`가 엉뚱한 행을 지웠고 개행 없는 조각은 Backspace·Enter에 지워졌다. 편차 54·55는 이 규칙의 세부 차이다. `input()` 읽기 위 배경 출력은 worker가 `input()` 동안 멈춰 있어 현재 worker 출력으로는 생기지 않는다(`05-output.md` 4.4 "적용 범위").
 
 버퍼링:
 
@@ -156,6 +156,11 @@ stdin 읽기의 끝:
 51. **`sys.modules`와 인터프리터 상태가 run 사이에 유지된다.** run마다 새로 만드는 것은 `__main__` 이름공간(`console.globals`)뿐이다(시험이 확인: 이전 run의 변수는 `NameError`, `import`한 표준 모듈은 `sys.modules`에 남고 `pyodide.globals`는 오염되지 않는다). 같은 인터프리터를 재사용하므로 모듈 전역 상태·`sys` 속성·`builtins` 수정 같은 인터프리터 수준 변경도 다음 run에 이어질 수 있다(구조에서 오는 결과이고 항목별로는 확인하지 않았다). CPython은 run마다 인터프리터가 새로다. 초기화는 `reset()`이다.
 52. **`input()` 밖에서 친 키·붙여넣기를 버린다.** 3.14 tty는 실행 중 입력을 큐에 쌓아 다음 읽기가 받고 REPL도 그것을 따른다(편차 32·45~49). 실행창은 벤더 `Readline`을 `typeAhead: false`로 만들어 읽기 밖 입력(키·붙여넣기·IME 조합 결과·Shift+Enter)을 쌓지 않고 버린다. Ctrl+C·Ctrl+L 단독 입력만 읽기 밖에서도 처리한다. `input()` 프롬프트를 그리는 `read()`의 write 콜백이 오기 전(수 ms)에 친 키도 버려진다. 사양이다(실행창은 `input()` 중에만 입력을 받는다, ADR-0006, `14-runner.md` 14.5.2).
 53. **`import`가 가리키는 pyodide 배포 패키지가 첫 실행에서 자동으로 로드된다.** `PyodideConsole.runcode`가 실행 전에 `loadPackagesFromImports(source)`를 불러 `import numpy` 같은 줄이 네트워크로 패키지를 내려받은 뒤 성공한다(로드 중 상태는 `running`). CPython은 설치돼 있지 않으면 `ModuleNotFoundError`다. REPL도 같은 `PyodideConsole.runcode`를 거치므로 같은 동작일 것으로 보이나 REPL에서는 확인하지 않았다(편차 20은 Tab 후보만 다룬다).
+
+열린 읽기 위 배경 출력(RD-022b, 편차 4의 세부). 아래 두 건은 3.14와 나란히 측정하지 않았다(3.14 기본 REPL에는 대응 경로가 없고 `python -m asyncio`는 미측정).
+
+54. **읽기 시작 꼬리와 배경 미종결 조각이 함께 있으면 시간 순서가 뒤집혀 보인다.** 읽기를 시작할 때 벤더에 넘긴 프롬프트 문자열 전체(꼬리가 합성된 `a\x1b[0m>>> `)가 붙박이이고 배경 조각은 그 앞 접두로만 붙으므로, `print("a", end="")` 뒤 프롬프트에서 배경 `t`(개행 없음)가 오면 출력 순서(`a` → `t`)와 달리 `ta>>> pri`로 그려진다. 완성 행이면 순서가 맞다(`tick` / `a>>> pri`). `runSource`는 화면 순서 그대로 `ta`를 행으로 남긴다(`02-console-core.md` 5.6.3). 시험: repl `run-source.test.ts` "접두와 읽기 시작 꼬리가 함께 있으면(ta>>> pri, 순서 뒤집힘 편차) …"(동기·비동기 write 두 모드). 브라우저 셀 없음.
+55. **Tab 후보 목록 뒤에 이어진 배경 조각은 앞 조각에 이어 쓰이지 않고 별도 행이 된다.** 접두가 있는 채 Tab 목록(`printAbove`)이 그려지면 옛 입력행(`tick>>> pri`)이 목록 위에 남고 새 입력행은 접두 없이 그린다. 그 뒤 ` tock\n`이 오면 `tick tock`이 아니라 ` tock` 행이 된다. 배경 출력의 재그리기를 기다리는 중(아직 다시 그리기 전) Tab 목록이 오면 그려지지 않은 접두를 먼저 자기 행으로 쓰고 목록을 빈 행 없이 이어 쓴다(`t1` / `tick` / 목록 / `>>> pri`, `06-editing.md` 6.1). 시험: 벤더 `print-above-raw.test.ts` "Tab printAbove와 접두". 브라우저 셀 없음.
 
 top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 한 줄로 끝나고 `except KeyboardInterrupt`로는 잡히지 않는 것(우리 구현은 콘솔 task를 취소하고 표지 예외 `IdleInterrupt`를 한 줄로 표시한다. `except asyncio.CancelledError`는 잡고 `finally`는 돈다)은 **편차로 등록하지 않는다**. 대기 중 Ctrl+C를 task 취소로 처리하고 한 줄만 내는 것은 3.14의 `python -m asyncio`와 같은 동작이고, 우리 TLA 옵션의 기준이 기본 REPL이 아니라 `python -m asyncio`이기 때문이다(편차 1과 같은 정렬). 2절 "범위 밖"에도 넣지 않는다 — 재현하지 않기로 한 차이가 아니라 차이가 아니다.
 
