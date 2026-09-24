@@ -41,6 +41,13 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 6. `onStatus("loading")`을 동기로 발행한다. 이후 새 worker의 `ready`/`loadFailed` 알림이
    `ready`/`load-failed`를 재발행한다.
 
+5번에서 `createWorker()`가 던지면(잘못된 URL, `SecurityError`) `reset()`은 던지지 않는다. 핸들의 세션을 비우고
+6번 대신 `onStatus("crashed")` → `onCrash?.(String(error))` 순으로 부른다(`dispose()` 뒤면 `onCrash` 생략). core
+`createRunner.reset()`의 `restart()`와 같은 계약이다(`14-runner.md`). 그 뒤 `busy`는 `false`, `runSource()`는 `unavailable`로
+거부하고 복구는 다시 `reset()`이다. 소비자가 `onCrash` 안에서 동기로 `reset()`을 부르면 생성이 계속 실패할 때 재귀한다 —
+데모(`ReplView`)는 `onCrash`에서 메시지만 저장하고 재시작은 버튼으로 한다. 이 계약은 이슈 08(2026-09-24)에서 바꿨다.
+이전(RD-010~RD-022a)에는 `reset()`이 그 예외를 호출자에게 던지고 상태를 옛 값으로 남겼다.
+
 `dispose()` 뒤 `reset()`은 no-op. `!isolated`(worker가 없다)에서도 no-op. 그 외 상태(`ready`·
 `terminated`·`load-failed`·`loading`)는 전부 허용한다. `{ topLevelAwait? }` 옵션은 새 프레임에
 실린다. 생략하면 마지막 값을 유지한다(RD-012). 확인 대화상자·디바운스 없음.
@@ -63,7 +70,7 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 worker는 이미 종료 중이라 응답을 기다리지 않는다. `readInput`은 세션이 `ended`면(TRP-003) 메일박스에
 `fail()`도 쓰지 않는다.
 
-`runSource`(RD-022a, `02-console-core.md` 5.6)의 슬롯은 핸들 소유라 리셋을 넘어 산다. 세션 순서에서 슬롯을 비우는 시점은 `onStatus` 콜백 앞이고 결과는 콜백 뒤에 낸다(`docs/traps/TRP-051`). 리셋은 실행 중(`{ source }`를 보낸 뒤 결말 도착 전)이면 `restarted`로 resolve하고 대기 중(첫 프롬프트 전)이면 유지해 새 세션의 첫 `>>> `에서 실행한다. 크래시(8.4)는 실행 중·대기 중 모두 `crashed`, `dispose()`는 `disposed`로 거부하고, 결말이 이미 도착한 슬롯은 그 결말로 resolve한다. 대기 중 `load-failed`는 `unavailable`이다.
+`runSource`(RD-022a, `02-console-core.md` 5.6)의 슬롯은 핸들 소유라 리셋을 넘어 산다. 세션 순서에서 슬롯을 비우는 시점은 `onStatus` 콜백 앞이고 결과는 콜백 뒤에 낸다(`docs/traps/TRP-051`). 리셋은 실행 중(`{ source }`를 보낸 뒤 결말 도착 전)이면 `restarted`로 resolve하고 대기 중(첫 프롬프트 전)이면 유지해 새 세션의 첫 `>>> `에서 실행한다. 리셋 중 worker 생성이 실패하면 실행 중은 `restarted`, 대기 중은 `crashed`다(`crashed` 발행이 대기 슬롯을 끝낸다). 크래시(8.4)는 실행 중·대기 중 모두 `crashed`, `dispose()`는 `disposed`로 거부하고, 결말이 이미 도착한 슬롯은 그 결말로 resolve한다. 대기 중 `load-failed`는 `unavailable`이다.
 
 Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 별개 기능이다. Ctrl+L은 벤더 동작 그대로이고 코어는
 손대지 않는다(`10-parity-deviations.md`).

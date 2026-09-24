@@ -1,6 +1,6 @@
 # `reset()` 중 worker 생성이 실패하면 REPL 상태가 옛 값으로 남는다
 
-Status: deferred
+Status: done
 Origin: RD-022a 사후 리뷰(2026-09-24). 결과 promise 유실은 이번에 고쳤고 남은 상태 문제만 기록한다.
 
 ## 현상
@@ -20,3 +20,8 @@ runner처럼 `crashed` + `onCrash`로 바꿀지. 바꾸면 `reset()`이 던지�
 ## 완료 기준
 
 선택한 계약이 `08-session.md` 8.1과 `ReplHandle.reset` 주석에 있고, 생성 실패 뒤 `status`·`busy`·`runSource` 거부 사유를 고정하는 jsdom 시험이 있다.
+
+## Comments
+
+- 2026-09-24 사용자 결정: runner처럼 `crashed` + `onCrash`(계약 변경). 데모 `ReplView`는 `onCrash: setCrashMessage`라 `onCrash` 안 동기 `reset()` 재귀가 없다(재시작은 버튼).
+- 2026-09-24 종결(`Status: done`). `resetSession`이 옛 세션 terminate 뒤 `session = undefined`, `spawnSession()`이 던지면 `emitStatus("crashed")` → `onCrash(String(error))`(`dispose()` 뒤 생략) 후 반환. 실행 중 `runSource`는 `finally`에서 `restarted`, 대기 중은 `crashed`. 문서: `08-session.md` 8.1(계약·재귀 경고·이전 동작), `00-architecture.md` 크래시 줄, `ReplHandle.reset`·`ReplOptions.onCrash` 주석, `02-console-core.md` 5.6.7에서 항목 삭제. 시험 `packages/pyodide-repl/src/run-source.test.ts` 4건(던지지 않음·`crashed`→`onCrash` 순서·`busy=false`·`unavailable` / 대기 중 `crashed` / 재`reset()` 복구 / `crashed` 콜백 안 `reset()` 뒤 새 세션 유지·`onCrash` 1회): 수정 전 4건 RED, 수정 뒤 GREEN. L0 `pnpm test --concurrency=1` 15/15 tasks, `pnpm lint` 통과. 브라우저 L1 없음(생성 실패는 데모에서 재현 경로가 없다).

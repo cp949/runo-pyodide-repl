@@ -136,6 +136,7 @@ function startSession(options: SessionOptions = {}) {
   const onStatus = vi.fn((status: string) => {
     statuses.push(status);
   });
+  const onCrash = vi.fn<(message: string) => void>();
   const createWorkerSpy = vi.fn(() => {
     const fakeWorker = createFakeWorker();
     workers.push(fakeWorker);
@@ -145,6 +146,7 @@ function startSession(options: SessionOptions = {}) {
     terminal: fake.term,
     createWorker: createWorkerSpy,
     onStatus,
+    onCrash,
   });
   handles.push(handle);
 
@@ -175,6 +177,7 @@ function startSession(options: SessionOptions = {}) {
     workers,
     statuses,
     onStatus,
+    onCrash,
     createWorkerSpy,
     get rpc() {
       return rpcAt(workers.length - 1);
@@ -975,19 +978,80 @@ describe("runSource 정착·정리 경계(사후 리뷰)", () => {
     expect(screenAtSettle).toBe("1\n>>> pri");
   });
 
-  test("reset() 중 새 worker 생성이 던져도 실행 중이던 runSource는 restarted로 끝난다", async () => {
+  test("reset() 중 새 worker 생성이 던지면 reset()은 던지지 않고 crashed·onCrash로 넘기며 실행 중이던 runSource는 restarted로 끝난다", async () => {
     const session = startSession();
     const first = await openPrompt(session, "pri");
     const run = runQuietly(session, "while True: pass");
     await first.promise;
+    const order: string[] = [];
+    session.onStatus.mockImplementation((status: string) => {
+      session.statuses.push(status);
+      order.push(`status:${status}`);
+    });
+    session.onCrash.mockImplementation((message: string) => {
+      order.push(`crash:${message}`);
+    });
     session.createWorkerSpy.mockImplementationOnce(() => {
       throw new Error("worker 생성 실패");
     });
 
-    // 생성 실패는 기존대로 `reset()` 호출자에게 던진다.
-    expect(() => session.handle.reset()).toThrow("worker 생성 실패");
+    expect(() => session.handle.reset()).not.toThrow();
 
+    // runner `restart()`와 같다: `loading`을 거치지 않고 `crashed` 다음에 `onCrash`.
+    expect(order).toEqual(["status:crashed", "crash:Error: worker 생성 실패"]);
     await expect(run).resolves.toEqual({ kind: "restarted" });
+    expect(session.handle.busy).toBe(false);
+    await expect(session.handle.runSource("print(1)")).rejects.toMatchObject({
+      reason: "unavailable",
+    });
+  });
+
+  test("대기 중 runSource는 reset() 중 worker 생성 실패에 crashed로 거부한다", async () => {
+    const session = startSession();
+    const run = session.handle.runSource("print(1)");
+    session.createWorkerSpy.mockImplementationOnce(() => {
+      throw new Error("worker 생성 실패");
+    });
+
+    session.handle.reset();
+
+    await expect(run).rejects.toMatchObject({ reason: "crashed" });
+    expect(session.handle.busy).toBe(false);
+  });
+
+  test("worker 생성 실패 뒤 reset()은 새 세션을 만들어 복구한다", async () => {
+    const session = startSession();
+    await session.ready();
+    session.createWorkerSpy.mockImplementationOnce(() => {
+      throw new Error("worker 생성 실패");
+    });
+    session.handle.reset();
+
+    session.handle.reset();
+
+    expect(session.createWorkerSpy).toHaveBeenCalledTimes(3);
+    expect(session.workers).toHaveLength(2);
+    expect(session.lastStatus()).toBe("loading");
+    await session.ready();
+    expect(session.lastStatus()).toBe("ready");
+  });
+
+  test("worker 생성 실패의 crashed 콜백 안에서 reset()하면 새 세션이 남고 onCrash는 한 번 불린다", () => {
+    const session = startSession();
+    session.onStatus.mockImplementation((status: string) => {
+      session.statuses.push(status);
+      if (status === "crashed") session.handle.reset();
+    });
+    session.createWorkerSpy.mockImplementationOnce(() => {
+      throw new Error("worker 생성 실패");
+    });
+
+    session.handle.reset();
+
+    expect(session.statuses.slice(-2)).toEqual(["crashed", "loading"]);
+    expect(session.workers).toHaveLength(2);
+    expect(session.onCrash).toHaveBeenCalledTimes(1);
+    expect(session.handle.busy).toBe(false);
   });
 
   test("dispose() 정리 중 worker terminate가 던져도 실행 중이던 runSource는 disposed로 거부한다", async () => {

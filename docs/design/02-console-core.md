@@ -225,7 +225,6 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 - `printAbove` 재그리기 중의 `takeRead()`는 옛 입력줄을 지우지 못한다(`06-editing.md` 6.1). Tab `complete` 왕복 중은 `busy`로 거부하므로 실경로에서 닿지 않는다.
 - 꼬리 다시 쓰기는 꼬리가 `\r`로 덮어쓴 텍스트를 가진 경우 화면과 꼬리 추적기(마지막 `\r` 뒤만 보관)가 어긋날 수 있다. 관찰한 적은 없다.
 - **열린 읽기 위의 배경 출력**: 프롬프트가 열린 채 배경 task의 출력(`>>> pri` 뒤 `tick\n`)이 오면 벤더 레이아웃이 모르는 커서 이동이라 `takeRead()`가 프롬프트 행을 찾지 못하고 `>>> pritick` 행이 남는다. 뿌리는 열린 읽기 위 출력의 조율 부재(기존 결함)이고 평소 편집 재그리기도 같은 식으로 어긋난다(`.scratch/repl-run-source-followups/issues/07-*.md`).
-- **`reset()` 중 worker 생성 실패**: 새 `createWorker()`가 던지면 `reset()`은 기존대로 그 예외를 던지고, 실행 중이던 `runSource`는 `restarted`로 끝난다(`dispose()` 정리 중 예외도 `disposed`로 끝난다). 그 뒤 상태는 옛 값으로 남고 옛 세션을 가리켜 `runSource`는 `busy`로 거부된다. runner처럼 `crashed`로 넘길지는 미정이다(`.scratch/repl-run-source-followups/issues/08-*.md`).
 - 브라우저 셀이 없는 경로: 뷰포트 초과 입력, `loading` 중 호출, Tab 왕복 중 호출, 크래시 중 호출, 리셋 뒤 Ctrl+C. 앞의 넷은 jsdom·node 시험이 고정한다.
 
 ### 5.6.8 시험과 확인

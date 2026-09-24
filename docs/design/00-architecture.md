@@ -89,8 +89,8 @@ main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미
   interrupt buffer는 세션 간 **재사용**(ack·요청 번호가 이어진다), 메일박스·sink 세트는 worker마다 **새로**
   만든다. 실행 driver의 `createRunner`는 다르다: buffer·송신기도 worker마다 새로 만든다(옛 worker가 `terminate()` 뒤에도
   Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채기 때문, `14-runner.md` 14.3.5).
-- worker `error` 이벤트·부팅 예외 → `crashed` 상태 + `onCrash(message)` → 앱이 재시작 버튼을 띄운다(RD-010,
-  `08-session.md`).
+- worker `error` 이벤트·부팅 예외·`reset()` 중 worker 생성 실패 → `crashed` 상태 + `onCrash(message)` → 앱이 재시작 버튼을
+  띄운다(RD-010, `08-session.md` 8.1·8.4).
 - `exit()`/`quit()`/`SystemExit` → `sessionTerminated` 알림 → 앱이 안내를 띄우고, 복구 경로는 리셋뿐이다.
 
 ## 4. 패키지 구조와 공개 인터페이스

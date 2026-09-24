@@ -57,7 +57,7 @@ export interface ReplOptions {
   pyodide?: { indexURL?: string };
   /** 상태가 바뀔 때 부른다. `loading`은 `createRepl`이 반환하기 전에 동기로 온다. */
   onStatus?: (status: ReplStatus) => void;
-  /** worker `error` 이벤트 또는 `crashed` 알림(첫 신호만) 뒤 `onStatus("crashed")` 다음에 부른다(RD-010). */
+  /** worker `error` 이벤트 또는 `crashed` 알림(첫 신호만) 뒤, 또는 `reset()` 중 worker 생성 실패 뒤 `onStatus("crashed")` 다음에 부른다(RD-010). */
   onCrash?: (message: string) => void;
   /** 기본 `false`. `=== true`일 때만 켠다. 바꾸려면 `reset({ topLevelAwait })`(RD-012, `02-console-core.md` 5.4). */
   topLevelAwait?: boolean;
@@ -78,7 +78,8 @@ export interface ReplHandle {
    * 뜬다. `dispose()` 뒤·`!isolated`면 no-op. 그 외 상태(`ready`·`terminated`·`crashed`·`load-failed`·`loading`)는
    * 전부 허용한다. 동기이며 안에서 `loading`을 동기로 발행하고 이후 새 worker의 `ready`/`load-failed`가 재발행한다.
    * `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면 마지막으로 적용한 값을 유지한다(RD-012).
-   * 확인 대화상자·디바운스 없음.
+   * 확인 대화상자·디바운스 없음. 새 worker 생성(`createWorker`)이 던지면 던지지 않고 `loading` 대신 `crashed` → `onCrash`로
+   * 넘긴다(`createRunner.reset()`과 같다). 복구는 다시 `reset()`이다 — `onCrash` 안에서 동기로 부르면 생성이 계속 실패할 때 재귀한다.
    */
   reset(options?: { topLevelAwait?: boolean }): void;
   /** `globalThis.crossOriginIsolated === true`. 거짓이면 worker가 없다. */
@@ -196,17 +197,27 @@ export function createRepl(options: ReplOptions): ReplHandle {
       // 실행 중이던 runSource는 `restarted`로 끝난다. 대기 중인 것은 유지해 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았다).
       // 슬롯은 콜백이 불리기 전에 비운다(TRP-051). 이미 결말이 도착한 것은 그 결말로 끝난다(`endRun`).
       const run = slot.waiting ? undefined : slot.take();
-      // `finally`: 새 worker 생성(`createWorker`)이 던져도 슬롯에서 뗀 실행은 끝낸다. 옛 worker는 이미 교체됐으므로 `restarted`다.
+      // `finally`: 정리 중 무엇이 던져도 슬롯에서 뗀 실행은 끝낸다. 옛 worker는 이미 교체됐으므로 `restarted`다.
       try {
         // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
         // rpc.dispose() → worker.terminate()(session.terminate()).
         session?.terminate();
+        // 새 worker 생성이 실패해도 끝난 옛 세션을 가리키지 않게 한다(runner `restart()`와 같다).
+        session = undefined;
         // 옛 세션이 남겼을 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않게 한다.
         Atomics.store(interruptBuffer, SIGNAL, 0);
         // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006).
         if (options.terminal.buffer.active.cursorX !== 0) readline.write("\r\n");
         writeNotice(readline, RESET_NOTICE, "info");
-        spawnSession();
+        try {
+          spawnSession();
+        } catch (error) {
+          // worker를 만들지 못했다(`createWorker`가 던짐). runner `restart()`와 같이 던지지 않고 `loading`을 거치지 않은 채
+          // `crashed` 다음에 `onCrash`로 넘긴다. 대기 중이던 runSource는 `crashed`로 끝난다. 복구는 다시 `reset()`이다.
+          emitStatus("crashed");
+          if (!disposed) options.onCrash?.(String(error));
+          return;
+        }
         emitStatus("loading");
       } finally {
         if (run !== undefined) endRun(run, "restarted");
