@@ -17,6 +17,7 @@ import {
   type RpcHandlers,
 } from "@cp949/runo-pyodide-core";
 import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
+import { VtScreen } from "@repo/pyodide-testkit/vt-screen";
 import {
   RunRejectedError,
   createRepl,
@@ -24,7 +25,6 @@ import {
   type RunResult,
 } from "./index";
 import type { ReadLineOutcome, ReadLineReply } from "./repl-protocol";
-import { VtScreen } from "./test/vt-screen";
 import type { SourceCompletion } from "./worker/complete-source";
 
 type Observed<T> =
@@ -1098,5 +1098,346 @@ describe("runSource 정착·정리 경계(사후 리뷰)", () => {
     expect(() => session.handle.dispose()).toThrow("terminate 실패");
 
     await expect(run).rejects.toMatchObject({ reason: "disposed" });
+  });
+});
+
+/**
+ * 열린 읽기 위 배경 출력(RD-022b). 프롬프트가 열린 채 worker가 출력(asyncio task·`call_later` 콜백)을 알리면 sink가 입력줄을 지우고
+ * 출력을 쓴 뒤 같은 읽기를 그 아래에 다시 그린다(개행 없는 나머지는 프롬프트 앞 접두). `runSource`의 `takeRead()`는 접두째 지우므로
+ * 브리지가 `접두 + 읽기 시작 꼬리`를 다시 쓴다. 비동기 모드는 재그리기가 write 콜백을 기다리므로 출력 뒤 `pump()`로 그린다.
+ */
+describe.each([
+  { mode: "동기", asyncWrite: false },
+  { mode: "비동기", asyncWrite: true },
+])("열린 읽기 위 배경 출력($mode 모드)", ({ asyncWrite }) => {
+  /** worker가 배경 출력을 알리고 재그리기까지 끝낸다. */
+  const background = async (session: Session, text: string) => {
+    await session.output(text);
+    await session.pump();
+  };
+
+  /** 열린 읽기를 `runSource`로 가져가고 화면 준비(지우기·접두 복원)가 끝날 때까지 기다린다. */
+  const take = async (session: Session, first: Request, code = "print(1)") => {
+    runQuietly(session, code);
+    await expect(first.promise).resolves.toEqual({ source: code });
+    await session.pump();
+  };
+
+  test("H4 배경 출력 행이 온 뒤 runSource하면 >>> pritick 흔적 없이 tick 행을 남기고 출력 뒤 >>> pri를 복원한다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session, "pri");
+    await background(session, "tick\n");
+    expect(session.vt.screen()).toBe("tick\n>>> pri");
+
+    await take(session, first);
+    expect(session.vt.screen()).toBe("tick");
+    expect(session.vt.cursor()).toEqual([1, 0]);
+
+    await session.output("1\n");
+    await session.request(">>> ", undefined, OK);
+    expect(session.vt.screen()).toBe("tick\n1\n>>> pri");
+  });
+
+  test("개행 없는 배경 출력은 프롬프트 앞 접두(tick>>> pri)가 되고, runSource는 접두를 행으로 남기고 출력 뒤 >>> pri를 복원한다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session, "pri");
+    await background(session, "tick");
+    expect(session.vt.screen()).toBe("tick>>> pri");
+
+    await take(session, first);
+    expect(session.vt.screen()).toBe("tick");
+    expect(session.vt.cursor()).toEqual([1, 0]);
+
+    await session.output("1\n");
+    await session.request(">>> ", undefined, OK);
+    expect(session.vt.screen()).toBe("tick\n1\n>>> pri");
+  });
+
+  test("읽기 시작 꼬리가 붙은 프롬프트(a>>> pri) 위 배경 출력 행은 그 위에 쓰이고, runSource는 꼬리 a를 행으로 남긴다", async () => {
+    const session = startSession({ asyncWrite });
+    await session.ready();
+    await session.output("a");
+    const first = await session.request();
+    session.fake.type("pri");
+    await background(session, "tick\n");
+    expect(session.vt.screen()).toBe("tick\na>>> pri");
+
+    await take(session, first);
+    expect(session.vt.screen()).toBe("tick\na");
+    expect(session.vt.cursor()).toEqual([2, 0]);
+
+    await session.output("2\n");
+    await session.request(">>> ", undefined, OK);
+    expect(session.vt.screen()).toBe("tick\na\n2\n>>> pri");
+  });
+
+  test("접두와 읽기 시작 꼬리가 함께 있으면(ta>>> pri, 순서 뒤집힘 편차) runSource는 화면 순서 그대로 ta를 행으로 남긴다", async () => {
+    const session = startSession({ asyncWrite });
+    await session.ready();
+    await session.output("a");
+    const first = await session.request();
+    session.fake.type("pri");
+    await background(session, "t");
+    expect(session.vt.screen()).toBe("ta>>> pri");
+
+    await take(session, first);
+    expect(session.vt.screen()).toBe("ta");
+
+    await session.output("1\n");
+    await session.request(">>> ", undefined, OK);
+    expect(session.vt.screen()).toBe("ta\n1\n>>> pri");
+  });
+
+  test("색이 열린 접두를 복원할 때는 벤더가 그린 대로 접두 뒤에서 색을 닫고 꼬리를 잇는다", async () => {
+    const session = startSession({ asyncWrite });
+    await session.ready();
+    await session.output("a");
+    const first = await session.request();
+    session.fake.type("pri");
+    await background(session, "\x1b[31mt");
+    expect(session.vt.screen()).toBe("ta>>> pri");
+    const writtenBefore = session.fake.written.length;
+
+    await take(session, first);
+
+    // 화면에서는 접두 `t`(빨강)와 꼬리 `a` 사이에 `\x1b[0m`이 있었다(`State.setPromptPrefix`). 꼬리가 빨강을 물려받지 않는다.
+    expect(session.fake.written.slice(writtenBefore).join("")).toContain(
+      "\x1b[31mt\x1b[0ma\x1b[0m\r\n",
+    );
+    expect(session.vt.screen()).toBe("ta");
+  });
+
+  test("프로브 P1: 배경 출력 행 아래 입력줄은 하나이고 입력·Backspace·runSource 뒤에도 tick 행이 남는다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session, "pri");
+    await background(session, "tick\n");
+    expect(session.vt.screen()).toBe("tick\n>>> pri");
+
+    session.fake.type("a");
+    await session.pump();
+    expect(session.vt.screen()).toBe("tick\n>>> pria");
+    session.fake.type("\x7f\x7f");
+    await session.pump();
+    expect(session.vt.screen()).toBe("tick\n>>> pr");
+
+    await take(session, first);
+    expect(session.vt.screen()).toBe("tick");
+  });
+
+  test("프로브 P2: 개행 없는 배경 출력 접두는 입력·Backspace 뒤에도 사라지지 않고 runSource 뒤에도 남는다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session, "pri");
+    await background(session, "tick");
+    expect(session.vt.screen()).toBe("tick>>> pri");
+
+    session.fake.type("a");
+    await session.pump();
+    expect(session.vt.screen()).toBe("tick>>> pria");
+    session.fake.type("\x7f\x7f");
+    await session.pump();
+    expect(session.vt.screen()).toBe("tick>>> pr");
+
+    await take(session, first);
+    expect(session.vt.screen()).toBe("tick");
+  });
+
+  test("프로브 P4: 감긴 입력줄 위 배경 출력은 감긴 두 행을 모두 지우고 그 아래에 다시 그리며 Backspace 뒤 흔적 행이 없다", async () => {
+    const session = startSession({ asyncWrite, cols: 40 });
+    const first = await openPrompt(session, "x".repeat(50));
+    expect(session.vt.screen()).toBe(`>>> ${"x".repeat(36)}\n${"x".repeat(14)}`);
+    await background(session, "tick\n");
+    expect(session.vt.screen()).toBe(`tick\n>>> ${"x".repeat(36)}\n${"x".repeat(14)}`);
+
+    session.fake.type("a");
+    await session.pump();
+    session.fake.type("\x7f\x7f");
+    await session.pump();
+    expect(session.vt.screen()).toBe(`tick\n>>> ${"x".repeat(36)}\n${"x".repeat(13)}`);
+
+    await take(session, first);
+    expect(session.vt.screen()).toBe("tick");
+  });
+
+  test("프로브 P5: 블록 ... 입력줄 위 배경 출력은 앞 >>> 행을 두고 ... 행만 지워 그 아래에 다시 그린다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session);
+    await submit(session, first, "if 1:");
+    await session.request("... ", "if 1:");
+    session.fake.type("pri");
+    await session.pump();
+    const block = must(session.vt.lines()[1]);
+    expect(block).toBe("...     pri");
+
+    await background(session, "tick\n");
+    expect(session.vt.screen()).toBe(`>>> if 1:\ntick\n${block}`);
+    session.fake.type("a");
+    await session.pump();
+    expect(session.vt.screen()).toBe(`>>> if 1:\ntick\n${block}a`);
+  });
+
+  test("프로브 P7: 개행 없는 배경 출력 뒤 Enter하면 tick>>> pri 행이 남고 이어진 출력·다음 프롬프트는 그 아래에 온다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session, "pri");
+    await background(session, "tick");
+
+    session.fake.type("\r");
+    await expect(first.promise).resolves.toBe("pri");
+    await session.output("out\n");
+    await session.request();
+
+    expect(session.vt.screen()).toBe("tick>>> pri\nout\n>>>");
+  });
+
+  test("개행 없는 배경 출력 뒤 Enter하면 다음 프롬프트는 꼬리 없이 >>> 로 그린다(tick>>> 중복 없음)", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session, "pri");
+    await background(session, "tick");
+
+    session.fake.type("\r");
+    await expect(first.promise).resolves.toBe("pri");
+    const second = await session.request();
+    session.fake.type("x");
+
+    expect(session.vt.screen()).toBe("tick>>> pri\n>>> x");
+    session.fake.type("\r");
+    await expect(second.promise).resolves.toBe("x");
+  });
+
+  test("커서가 입력 중간(p|ri)일 때 배경 출력이 와도 커서 열이 보존되고 이어 친 글자가 그 자리에 들어간다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session, "pri");
+    session.fake.type("\x1b[D\x1b[D");
+    await background(session, "tick\n");
+
+    expect(session.vt.screen()).toBe("tick\n>>> pri");
+    expect(session.vt.cursor()).toEqual([1, 5]);
+    session.fake.type("X\r");
+    await expect(first.promise).resolves.toBe("pXri");
+  });
+
+  test("REPL input('x: ') 대기 중 배경 출력 행은 x: 입력줄 위에 쓰이고, 이어 친 입력이 input()에 전달된다", async () => {
+    const session = startSession({ asyncWrite });
+    const first = await openPrompt(session);
+    await submit(session, first, "input('x: ')");
+    await session.output("x: ");
+    const before = session.flushCount();
+    session.rpc.notify("readInput", true);
+    await waitFor(() => session.flushCount() > before);
+    await session.pump();
+    session.fake.type("ab");
+    expect(session.vt.screen()).toBe(">>> input('x: ')\nx: ab");
+
+    await background(session, "tick\n");
+    expect(session.vt.screen()).toBe(">>> input('x: ')\ntick\nx: ab");
+    expect(session.vt.cursor()).toEqual([2, 5]);
+
+    session.fake.type("c\r");
+    await waitFor(() => session.mailboxText() === "abc");
+    expect(session.vt.screen()).toBe(">>> input('x: ')\ntick\nx: abc");
+  });
+});
+
+describe("열린 읽기 위 배경 출력(write 콜백 순서 경계)", () => {
+  test("재그리기 콜백 전에 runSource하면 아직 그리지 않은 접두 tick을 행으로 남기고 출력 뒤 >>> pri를 복원한다", async () => {
+    const session = startSession({ asyncWrite: true });
+    const first = await openPrompt(session, "pri");
+    // 재그리기 콜백을 배출하지 않는다: 입력줄은 지워졌고 접두 `tick`은 아직 그려지지 않았다.
+    await session.output("tick");
+    expect(session.vt.screen()).toBe("");
+
+    runQuietly(session, "print(1)");
+    await expect(first.promise).resolves.toEqual({ source: "print(1)" });
+    await session.pump();
+    expect(session.vt.screen()).toBe("tick");
+    expect(session.vt.cursor()).toEqual([1, 0]);
+
+    await session.output("1\n");
+    await session.request(">>> ", undefined, OK);
+    expect(session.vt.screen()).toBe("tick\n1\n>>> pri");
+  });
+
+  test("짧은 간격으로 연속 도착한 배경 조각은 순서대로 쓰이고 입력줄은 하나, 마지막 접두가 적용된다(write를 차례로 처리)", async () => {
+    const session = startSession({ asyncWrite: true });
+    const first = await openPrompt(session, "pri");
+    const drain = serialWrites(session);
+    /** 차례 처리 큐와 미뤄 둔 write 콜백을 번갈아 비운다(콜백이 새 write를 낸다). */
+    const drainAll = async () => {
+      for (let round = 0; round < 3; round += 1) {
+        await settle();
+        await drain();
+        await session.pump();
+      }
+    };
+    session.rpc.notify("write", "t1\n");
+    session.rpc.notify("write", "t2");
+    session.rpc.notify("write", " t3\nt4");
+    await drainAll();
+
+    expect(session.vt.screen()).toBe("t1\nt2 t3\nt4>>> pri");
+    expect(session.vt.cursor()).toEqual([2, 9]);
+
+    session.fake.type("x");
+    await drainAll();
+    expect(session.vt.screen()).toBe("t1\nt2 t3\nt4>>> prix");
+
+    runQuietly(session, "print(1)");
+    await expect(first.promise).resolves.toEqual({ source: "print(1)" });
+    await drainAll();
+    expect(session.vt.screen()).toBe("t1\nt2 t3\nt4");
+  });
+});
+
+/**
+ * Tab 완성 응답과 배경 출력 재그리기의 겹침(second-opinion SO-R1, 이슈 10). `>>> imp`에서 Tab을 누르고 `complete` 왕복 중에 배경 출력이
+ * 오면 입력줄은 지워지고 재그리기 콜백을 기다린다. 완성 응답이 그 콜백보다 먼저 처리돼도(`applyResume` → `editInsert`) 삽입은 버퍼에
+ * 들어가고, 콜백은 삽입 뒤 커서로 다시 그린다.
+ */
+describe("Tab 완성 응답과 배경 출력 재그리기의 겹침", () => {
+  /** `imp`를 친 뒤 Tab을 눌러 `complete` 왕복을 연다. `finish`로 응답을 돌려준다. */
+  const openTab = async () => {
+    let finish: (value: SourceCompletion) => void = () => {};
+    const complete = vi.fn(
+      () =>
+        new Promise<SourceCompletion>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const session = startSession({ asyncWrite: true, workerHandlers: { complete } });
+    const first = await openPrompt(session, "imp");
+    await session.pump();
+    expect(session.vt.screen()).toBe(">>> imp");
+    session.fake.type("\t");
+    await waitFor(() => complete.mock.calls.length > 0);
+    return { session, first, finish: (value: SourceCompletion) => finish(value) };
+  };
+
+  test("완성 응답이 재그리기 콜백보다 먼저 오면 커서는 import 끝이고 이어 친 글자가 그 뒤에 붙는다", async () => {
+    const { session, first, finish } = await openTab();
+    // 배경 출력이 오고 그 재그리기 write 콜백은 아직 오지 않았다(실 xterm: 파싱 한 번 전).
+    await session.output("tick\n");
+    finish({ completions: ["import"], start: 0 });
+    await settle();
+    await session.pump();
+
+    expect(session.vt.screen()).toBe("tick\n>>> import");
+    expect(session.vt.cursor()).toEqual([1, 10]);
+    session.fake.type(" os\r");
+    await session.pump();
+    await expect(first.promise).resolves.toBe("import os");
+  });
+
+  test("대조: 재그리기 콜백이 완성 응답보다 먼저 오면 커서는 import 끝이다", async () => {
+    const { session, first, finish } = await openTab();
+    await session.output("tick\n");
+    await session.pump();
+    finish({ completions: ["import"], start: 0 });
+    await settle();
+    await session.pump();
+
+    expect(session.vt.screen()).toBe("tick\n>>> import");
+    expect(session.vt.cursor()).toEqual([1, 10]);
+    session.fake.type(" os\r");
+    await session.pump();
+    await expect(first.promise).resolves.toBe("import os");
   });
 });

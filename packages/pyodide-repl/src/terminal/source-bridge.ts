@@ -9,6 +9,8 @@
  * 첫 프롬프트 전(`loading`)에 대기하던 코드는 첫 요청에서 읽기를 열지 않고 바로 `{ source }`로 응답한다(`request()`).
  *
  * 벤더는 프롬프트 전체(꼬리 `a>>> `의 `a` 포함)를 지우므로 그린 뒤 지워진 꼬리를 이 모듈이 다시 쓴다(확정 11, 판단 허용 6).
+ * 읽기 중 배경 출력이 남긴 프롬프트 앞 접두(`tick>>> `의 `tick`, `Readline.abovePrefix()`, RD-022b)도 함께 지워지므로 `접두 + 꼬리`
+ * 순서(화면 순서)로 다시 쓴다.
  */
 import { ReadTakenError } from "@cp949/runo-xterm-readline";
 import type { Readline } from "@cp949/runo-xterm-readline";
@@ -24,7 +26,7 @@ import type { ReplReadOptions } from "./read-options";
 export type SourcePrompt = "wait" | "busy" | "open";
 
 export interface SourceBridgeDeps {
-  readline: Pick<Readline, "takeRead">;
+  readline: Pick<Readline, "takeRead" | "abovePrefix">;
   /** 화면 쓰기 순서를 재는 데 쓴다(`write("", cb)` 콜백은 앞선 쓰기·벤더 읽기 그리기 뒤에 온다). */
   terminal: Pick<RewindTerminal, "write">;
   sinks: Pick<TerminalSinks, "write" | "tail">;
@@ -160,14 +162,19 @@ export function createSourceBridge(deps: SourceBridgeDeps): SourceBridge {
     prompt,
     send(code) {
       if (prompt() !== "open") return false;
+      // 배경 출력이 남긴 접두는 읽기가 끝나면 읽을 수 없으므로 가져가기 전에 읽는다(재그리기 대기 중이면 아직 그리지 않은 값).
+      const prefix = readline.abovePrefix();
       const line = readline.takeRead();
       if (line === undefined) return false;
       // 읽기는 여기서 끝났다. `ReadTakenError` 처리는 `readLine` 핸들러의 몫이다.
       readState = "none";
       takenCode = code;
       restore = line;
-      // 벤더가 꼬리까지 지웠으므로 다시 쓴다. 꼬리가 열어 둔 색은 프롬프트가 닫았을 것이라 닫아 준다.
-      if (openTail !== "") sinks.write(`${openTail}\x1b[0m\r\n`);
+      // 벤더가 접두·꼬리까지 지웠으므로 화면 순서(접두 → 꼬리 → 프롬프트) 그대로 다시 쓴다. 벤더는 접두 뒤에서 색을 닫고
+      // (`State.setPromptPrefix`) 꼬리가 열어 둔 색은 프롬프트가 닫았을 것이라, 비어 있지 않은 조각마다 뒤에서 닫는다. 열린 읽기가
+      // 없으므로 이 쓰기는 sink의 읽기 밖 경로(꼬리 추적기 공급)로 간다.
+      const erased = [prefix, openTail].filter((part) => part !== "");
+      if (erased.length > 0) sinks.write(`${erased.join("\x1b[0m")}\x1b[0m\r\n`);
       return true;
     },
   };
