@@ -65,11 +65,11 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 오염시키지 않는다.
 
 1. **진입 첫 줄에서 `seq()` 확인**. `last_seq`와 같으면 ack도 예외도 없이 무시(재전송). 다르면
-   `last_seq` 갱신 후 ack. `last_seq` 초기값은 설치 시점의 `buf[SEQ]`(세션 리셋 뒤 같은 버퍼를 재사용해도
-   이전 세션의 재전송이 새 세션을 끊지 않는다). 이 저장소의 `install(console, ack, seq, report, extra_own_codes=())`은
+   `last_seq` 갱신 후 ack. `last_seq` 초기값은 설치 시점의 `buf[SEQ]`다. 두 경로 모두 worker(세션)마다 새 interrupt
+   buffer를 만들어 실제 초기값은 0이다. 설치 시점 값을 읽는 규칙 자체는 바뀌지 않았다. 이 저장소의 `install(console, ack, seq, report, extra_own_codes=())`은
    `ack`·`seq`가 항상 필수 인자이고 `sigint_handler`가 무조건 호출한다 — 번호·ack 없이 동작하는 분기는 없다.
-   (같은 버퍼 재사용은 **REPL 경로**의 설명이다. 실행 driver의 `createRunner`는 worker마다 새 interrupt buffer를 만들어
-   `last_seq`가 0에서 시작하고 옛 worker의 눌림과 섞이지 않는다, `14-runner.md` 14.3.5.)
+   (REPL `createRepl`의 `startSession`과 실행 driver의 `createRunner` 모두 worker마다 새 interrupt buffer·송신기를 만든다. 옛 worker가
+   `terminate()` 뒤에도 최대 약 2초 살아 같은 buffer의 눌림을 가로채는 것을 막기 위해서다, `14-runner.md` 14.3.5.)
 2. `frame.f_back`을 따라 `co_filename`이 콘솔의 `filename`(REPL은 `<console>`, 실행 driver는 `filename` 옵션 값 — 기본 `main.py`, `14-runner.md` 14.2.2)인 프레임이 **하나라도 있으면**
    `signal.default_int_handler`로 `KeyboardInterrupt`를 올린다. 정상 반환 후 다른 경로로 올리면 안 된다:
    `input()` 취소의 EINTR 경로에서 예외를 못 보면 CPython이 읽기를 다시 시도한다(PEP 475).
@@ -160,8 +160,7 @@ run_sync 래퍼, main]` → `[<module>, main]`(래퍼가 나른 예외는 안쪽
   돌려주는 `interrupt_idle` proxy는 감시 타이머가 쓰고 세션 끝(core `boot.ts`의 `finally`)에 `destroy()`한다.
 - REPL 루프(repl `worker/repl-loop.ts`)는 `readLine`이 줄을 돌려준 직후, `runner.run` **전에** `discardPendingInterrupt(buffer)`로
   비운다(취소 `null`에도 적용). 읽는 동안이나 Enter 직후 쓴 SIGINT는 대상 코드가 없다(TRP-009).
-- 새 worker를 만들기 직전 main이 `interruptSender.cancel()` → `Atomics.store(buffer, SIGNAL, 0)` 순서로
-  치운다(재전송이 새 worker에 도착하면 같은 사고).
+- 새 worker를 만들기 직전 main이 옛 세션의 `interruptSender.cancel()`로 재전송 타이머를 멈춘다. 새 세션은 새 buffer를 쓰므로 옛 buffer에 남은 SIGINT는 새 worker가 보지 못하고, `SIGNAL`을 지우는 단계는 없다(`08-session.md` 8.1).
 
 ## 2.7 main 쪽 Ctrl+C 처리
 

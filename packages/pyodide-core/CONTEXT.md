@@ -101,7 +101,7 @@ _Avoid_: 강제 종료, kill
 _Avoid_: 입력 콜백, 프롬프트 핸들러
 
 **세션마다 새 interrupt buffer**:
-runner가 worker를 만들 때마다 interrupt buffer와 송신기를 새로 만드는 규칙. 옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채는 것을 막는다. REPL은 buffer를 세션 사이에 재사용한다(다른 경로).
+runner와 REPL이 worker를 만들 때마다 interrupt buffer와 송신기를 새로 만드는 규칙. 옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채는 것을 막는다. REPL은 `startSession`이 같은 규칙을 지킨다(이전에는 핸들 수명 buffer를 재사용했다).
 
 ### 호환 탐지
 

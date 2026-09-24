@@ -4,8 +4,8 @@
 
 ## 8.1 리셋 = worker 교체(`ReplHandle.reset()`, RD-010)
 
-`readline`(벤더 `Readline`)·`interruptBuffer`·`interruptSender`·Ctrl+C 핸들러는 핸들(`index.ts`) 소유라
-리셋을 넘어 산다. `Terminal`(화면)도 호출자 소유라 마운트 시 1회만 만들어진다. 세션 1개(worker·RPC·
+`readline`(벤더 `Readline`)·Ctrl+C 핸들러는 핸들(`index.ts`) 소유라 리셋을 넘어 산다. interrupt buffer·송신기는 세션(`session.ts`)이
+소유해 세션마다 새로 만들어진다(아래 4번). `Terminal`(화면)도 호출자 소유라 마운트 시 1회만 만들어진다. 세션 1개(worker·RPC·
 sink·리더·가드·게이트)는 `session.ts`의 `startSession()`이 만들고 `reset()`이 통째로 교체하는 단위다
 (`00-architecture.md` 4.2). RD-020 뒤 `startSession()`은 두 부분을 조립한다. core 세션(`startCoreSession`,
 core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초기화 프레임·RPC(core 핸들러 + driver 핸들러
@@ -14,7 +14,7 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 게이트 `readLinePending`·`cancelSettling`·`reading`·`readLine`/`writeOutput`/`writeError` 핸들러·종료 시 읽기 정리를 맡는다.
 
 `reset()` 순서. 자동 들여쓰기 단위(`lastUsedIndentation`)는 세션 소유(`createAutoIndent`, RD-013 완료)라
-별도 초기화 단계가 없다 — 5번이 새 세션을 만들 때 `startSession()`이 만드는 REPL main driver가 `createAutoIndent
+별도 초기화 단계가 없다 — 4번이 새 세션을 만들 때 `startSession()`이 만드는 REPL main driver가 `createAutoIndent
 (readline)`을 다시 불러 새 객체(4칸)가 되기 때문이다:
 
 1. `session.terminate()` — 옛 세션을 끝낸다. core 세션(`terminate()`)의 순서는 `ended=true` → REPL main driver의
@@ -25,24 +25,21 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
    `complete` 요청 reject가 취소된 세션의 버퍼·커서로 큐를 다시 처리하는 것을 막는다, RD-015 DELTA-04a) →
    `readline.cancelRead()`(열린 읽기를 `ReadCancelledError`로 끝낸다. 화면·history·리스너·`term`은 건드리지
    않는다, `06-editing.md` 6.1)다.
-2. `Atomics.store(interruptBuffer, SIGNAL, 0)` — interrupt buffer는 세션 사이에 재사용하므로(같은
-   `SharedArrayBuffer`) 옛 세션이 못 비운 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를
-   죽이지 않는다. (REPL 경로다. 실행 driver의 `createRunner.reset()`은 worker마다 새 buffer를 만들고 이 단계가 없다.
-   옛 worker가 `terminate()` 뒤에도 최대 약 2초 살아 같은 buffer의 눌림을 가로챌 수 있기 때문이다, `14-runner.md` 14.3.5.
-   REPL에서 실행 중 리셋 직후 같은 가로채기가 나는지는 확인하지 않았다.)
-3. 커서 행 처리: `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다
+2. 커서 행 처리: `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다
    (TRP-006). 개행 여부는 **코어**가 결정한다 — 벤더 `cancelRead()`는 화면에 아무것도 그리지 않는다.
-4. `writeNotice(readline, RESET_NOTICE, "info")` — 청록 안내 줄
+3. `writeNotice(readline, RESET_NOTICE, "info")` — 청록 안내 줄
    `[세션 리셋됨 — 이전 변수/import가 모두 초기화되었습니다]`. 세션 밖 출력 경로(TRAP-12의 유일한 예외,
    `05-output.md` 4.1).
-5. `startSession(...)`로 새 세션을 만든다: 새 `MessageChannel`·메일박스·`InitFrame`·RPC·worker·sink
-   세트·리더·가드·게이트. `interruptBuffer`는 같은 것을 새 프레임에 싣는다(`createWorker()`가 새 worker를
-   만든다).
-6. `onStatus("loading")`을 동기로 발행한다. 이후 새 worker의 `ready`/`loadFailed` 알림이
+4. `startSession(...)`로 새 세션을 만든다: 새 `MessageChannel`·메일박스·interrupt buffer·송신기·`InitFrame`·RPC·worker·sink
+   세트·리더·가드·게이트(`createWorker()`가 새 worker를 만든다). 옛 buffer에 남은 SIGINT는 새 worker가 보지 못하므로 리셋이
+   `SIGNAL`을 지우는 단계는 없다. 옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채는 것을
+   막기 위해서다(`14-runner.md` 14.3.5, `docs/traps/TRP-049`). 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않는 것도 이 분리가
+   보장한다(브라우저 `session-reset-check.mjs`의 `ccreset`·`ccafter`).
+5. `onStatus("loading")`을 동기로 발행한다. 이후 새 worker의 `ready`/`loadFailed` 알림이
    `ready`/`load-failed`를 재발행한다.
 
-5번에서 `createWorker()`가 던지면(잘못된 URL, `SecurityError`) `reset()`은 던지지 않는다. 핸들의 세션을 비우고
-6번 대신 `onStatus("crashed")` → `onCrash?.(String(error))` 순으로 부른다(`dispose()` 뒤면 `onCrash` 생략). core
+4번에서 `createWorker()`가 던지면(잘못된 URL, `SecurityError`) `reset()`은 던지지 않는다. 핸들의 세션을 비우고
+5번 대신 `onStatus("crashed")` → `onCrash?.(String(error))` 순으로 부른다(`dispose()` 뒤면 `onCrash` 생략). core
 `createRunner.reset()`의 `restart()`와 같은 계약이다(`14-runner.md`). 그 뒤 `busy`는 `false`, `runSource()`는 `unavailable`로
 거부하고 복구는 다시 `reset()`이다. 소비자가 `onCrash` 안에서 동기로 `reset()`을 부르면 생성이 계속 실패할 때 재귀한다 —
 데모(`ReplView`)는 `onCrash`에서 메시지만 저장하고 재시작은 버튼으로 한다. `crashed` 콜백 안에서 `reset()`을 부르면
@@ -60,9 +57,9 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 세션 소유 vs 핸들 소유(`session.ts`·`repl-main-driver.ts`·core `session/core-session.ts`): 세션은 게이트 4종(`alive`·`readLinePending`·`inputReadsPending`·
 `cancelSettling`)·`reading`·`ended`·sink·리더·가드·`autoIndent`(`lastUsedIndentation`, RD-013)·
 `blockHistory`(기준점 `blockBase`·`pendingBlock`, RD-014)·`tabReader`(`createTabReader`, 세대·큐·왕복 상태
-`requesting`, RD-015)·메일박스·RPC·worker를 소유한다. 리셋마다 전부
+`requesting`, RD-015)·메일박스·RPC·worker·interrupt buffer·송신기를 소유한다. 리셋마다 전부
 초기값으로 새로 만들어져, 옛 세션의 상태(예: 취소 응답 직후의 `cancelSettling=true`)가 새 세션으로 새지
-않는다. 핸들은 `readline`·`interruptBuffer`·`interruptSender`·Ctrl+C 핸들러(`session?.pythonRunning()`을
+않는다. 핸들은 `readline`·Ctrl+C 핸들러(`session?.pythonRunning()`·`session.interrupt()`를
 현재 세션 변수로 늦게 읽어, 리셋으로 세션이 바뀌어도 다시 등록할 필요가 없다)·`dispose()`·`reset()`을
 소유한다.
 

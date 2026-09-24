@@ -150,7 +150,7 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 
 `createRunner`는 worker(세션)를 만들 때마다 interrupt buffer와 송신기를 새로 만든다. 옛 worker는 `terminate()` 뒤에도 Chromium에서 스크립트가 끝나지 않는 상태(Python 루프)이면 최대 약 2초 살아 있다(실측: Playwright `close` 이벤트가 `terminate()`로부터 약 2.0초). 그동안 옛 worker의 SIGINT 폴링이 같은 buffer의 눌림을 소비·ack하고 `KeyboardInterrupt`를 삼키면 새 worker의 첫 눌림(Ctrl+C·`stop()`)이 유실된다(폴백 프로브 N=8 중 수정 전 6회 유실, 수정 후 0회). node의 `worker.terminate()`는 즉시라 node 시험만으로는 재현되지 않는다(`docs/traps/TRP-049`). 메일박스는 이미 세션마다 새로 만들었다(`00-architecture.md` 3.4).
 
-이 규칙은 **runner 경로**다. REPL(`createRepl`)은 `spawnSession`이 buffer·송신기를 핸들 소유로 한 번 만들고 리셋 사이에 재사용한다(`03-ctrl-c.md` 2절의 "같은 버퍼", `08-session.md` 8.1 2번). REPL에는 실행 중 `reset()` 직후 첫 Ctrl+C가 옛 worker에 가로채일 수 있는 같은 잠재 결함이 있고 브라우저에서 재현을 확인하지 않았다(`.scratch/run-driver-terminal-followups/issues/01-*.md`).
+REPL(`createRepl`)도 같다: `startSession`(`session.ts`)이 세션마다 buffer·송신기를 만들고 `ReplSession.interrupt()`가 그 송신기로 보낸다(`08-session.md` 8.1 4번). 이전에는 REPL이 buffer를 핸들 수명으로 한 번 만들어 리셋 사이에 재사용했고, 브라우저 `session-reset-check.mjs`의 `ccafter`(실행 중 리셋 직후 첫 Ctrl+C, N=8)에서 유실 1/8이 관찰됐다(수정 후 0/8). `Atomics.store(SIGNAL, 0)`으로 옛 SIGINT를 지우는 단계는 없어졌다. runner는 소유 주체가 `createRunner`이고 REPL은 `startSession`이다. buffer·송신기 생성 두 줄이 두 곳에 남아 있고 공통 도우미 추출은 하지 않았다.
 
 ### 14.3.6 알려진 경계
 
@@ -212,7 +212,7 @@ type InputProvider = (
 `run()`이 받아들여질 때 화면을 준비한다.
 
 - `clearOnRun: true`이면 화면과 스크롤백을 지우고(`\x1b[H\x1b[2J\x1b[3J`) 꼬리를 비운다.
-- 아니면(기본) 커서가 행 머리가 아닐 때(`terminal.buffer.active.cursorX !== 0`) `\r\n` 한 번을 쓰고 꼬리를 비운다(RD-010 세션 리셋의 커서 규칙과 같다, `08-session.md` 8.1 3번). 이전 run이 `print("a", end="")`로 끝났어도 새 실행은 새 줄에서 시작한다.
+- 아니면(기본) 커서가 행 머리가 아닐 때(`terminal.buffer.active.cursorX !== 0`) `\r\n` 한 번을 쓰고 꼬리를 비운다(RD-010 세션 리셋의 커서 규칙과 같다, `08-session.md` 8.1 2번). 이전 run이 `print("a", end="")`로 끝났어도 새 실행은 새 줄에서 시작한다.
 - 거부될 `run()`은 화면을 건드리지 않는다: 실행 중인 프로그램의 출력 한가운데서 화면이 지워지면 안 된다. 거부 여부는 core `run()`의 판정과 같은 재료로 그 시점에 예측한다: `disposed`·비문자열·상태 `not-isolated`·`load-failed`·`crashed`·core `busy`(14.3). 결과 Promise 정착 뒤 풀리는 플래그로 예측하면 `reset()` 직후 같은 틱의 `run()`(받아들여지는데 화면을 준비하지 않음)과 대기 run이 있는 `onStatus("ready")` 콜백 안의 `run()`(거부되는데 화면을 준비함)에서 낡는다(`docs/traps/TRP-047`).
 - `clear()`: 화면과 스크롤백을 지우고 꼬리를 리셋한다. 입력 읽기가 열려 있는 동안과 `dispose()` 뒤에는 무동작이다(활성 읽기의 앵커 행이 어긋나 입력줄이 사라진다. 벤더 Ctrl+L은 읽기 상태를 다시 잡지만 공개 API가 아니다). 사용자가 입력 대기 중 Clear를 눌러도 반응이 없다.
 - `reset()`은 화면에 아무것도 내지 않는다(REPL의 `RESET_NOTICE`가 없다). 앱이 `onStatus("restarting")`으로 표시한다.

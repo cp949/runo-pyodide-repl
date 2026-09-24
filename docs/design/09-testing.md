@@ -222,7 +222,7 @@ RD-016이 `planTab` 게이트 분기 10건 추가: 빈 스템 `import `·`from o
 - "이 로그가 없다"는 확인은 후속 출력에 밀려 뷰포트 밖으로 나간 행을 놓친다. 화면을 지우고(Ctrl+L) 한 번의 동작 직후 행 목록을
   정확히 단언한다(예: `gc.collect()` 직후 화면이 값 에코 한 줄뿐). 수정을 제거하는 변조로 확인이 실패하는지 봐서 검출력을 확인한다.
 - 미확인으로 남은 것: **프로덕션 빌드, Firefox, Safari, `sync=false` 폴백**, 자동화 E2E(범위 밖).
-- **세션 리셋·크래시(RD-010)**: worker 교체(`session-reset-check.mjs`, `_works/_completed/20260922-11-rd-010-session-reset/verify/`)는 `data-testid=status`의 상태 전이(`loading`→`ready`/`load-failed`)로 "리셋이 끝났다"를 기다린다 — 화면 행(안내 줄) 개수로 판정하면 xterm 뷰포트(기본 24행) 밖으로 밀려난 옛 행이 DOM에서 사라져 여러 번 반복한 뒤(실측 4번째부터) 무한 대기한다(`docs/traps/TRP-024`). 리셋 직전 Ctrl+C 경합(`Promise.all([ctrlC(), 리셋 클릭])`)도 N=10을 상태 전이 기준으로 돌려야 안정적이다. 취소 트레이스백 직후 곧바로 타이핑하면 첫 글자가 드물게 드롭된다(`docs/traps/TRP-005`류) — `h.settled()`로 화면이 멈춘 뒤 입력한다. `crashed` 유발은 `pyodide.code.run_js("setTimeout(() => { throw new Error('forced') }, 0)")`(동기 throw는 `JsException`이 되어 worker를 안 죽이므로 타이머 경로가 필요, RD-010 확정 17)이고 `pageerror` 기준선은 이 유발 1건만 허용(그 밖은 0).
+- **세션 리셋·크래시(RD-010)**: worker 교체(`session-reset-check.mjs`, `_works/_completed/20260922-11-rd-010-session-reset/verify/`)는 `data-testid=status`의 상태 전이(`loading`→`ready`/`load-failed`)로 "리셋이 끝났다"를 기다린다 — 화면 행(안내 줄) 개수로 판정하면 xterm 뷰포트(기본 24행) 밖으로 밀려난 옛 행이 DOM에서 사라져 여러 번 반복한 뒤(실측 4번째부터) 무한 대기한다(`docs/traps/TRP-024`). 리셋 직전 Ctrl+C 경합(`Promise.all([ctrlC(), 리셋 클릭])`)도 N=10을 상태 전이 기준으로 돌려야 안정적이다(`ccreset`). 실행 중 리셋 직후 첫 Ctrl+C는 `ccafter`가 센다(아래 `session-reset-check.mjs` 문단). 취소 트레이스백 직후 곧바로 타이핑하면 첫 글자가 드물게 드롭된다(`docs/traps/TRP-005`류) — `h.settled()`로 화면이 멈춘 뒤 입력한다. `crashed` 유발은 `pyodide.code.run_js("setTimeout(() => { throw new Error('forced') }, 0)")`(동기 throw는 `JsException`이 되어 worker를 안 죽이므로 타이머 경로가 필요, RD-010 확정 17)이고 `pageerror` 기준선은 이 유발 1건만 허용(그 밖은 0).
 - `cursorX===0`(개행 직후 아무것도 안 그린 상태에서 리셋) 분기는 idle 프롬프트가 항상 `>>> `까지 그려진 뒤에야 관찰 가능해(cursorX=4) 브라우저에서 실사용 경로로 재현되지 않는다(Enter와 리셋 클릭을 경합시켜도 매번 프롬프트가 먼저 그려짐, 4회 확인). `index.test.ts`가 `cursorX`를 직접 0으로 둔 단위 시험으로만 고정한다 — 모든 분기가 브라우저로 확인 가능한 것은 아니다.
 
 ## 9.4 측정·비교 기준
@@ -305,11 +305,20 @@ RD의 확인 스크립트는 이 파일을 **복사하지 않고 import**하며 
 시작하는 것만 골라 돈다.
 
 RD-010의 `session-reset-check.mjs`(`_works/_completed/20260922-11-rd-010-session-reset/verify/`)가 이
-구조의 첫 사례다: dev 서버(5173)에 대해 절 8개(`reset`·`cursor`·`ctrll`·`carry`·`ccreset`·`exit`·`crash`·
+구조의 첫 사례다: dev 서버(5173)에 대해 절 9개(`reset`·`cursor`·`ctrll`·`carry`·`ccreset`·`ccafter`·`exit`·`crash`·
 `strict`)를 순서대로 돌리고, `pnpm --filter demo build && pnpm --filter demo preview`(4173)에 대해
 `reset`·`exit`·`crash` 3절을 재실행한다. 양성 대조는 소스를 변조(`git status --short`가 비어 있는 상태에서
 시작해 원복 뒤 다시 비어 있는지 확인)한 뒤 dev 서버가 HMR로 반영하길 기다렸다 재실행하는 방식으로
-했다(`verify/positive-controls.md`).
+했다(`verify/positive-controls.md`). 이 스크립트는 그 뒤 `apps/demo/e2e/checks/session-reset-check.mjs`로 옮겨졌고 `ccafter`
+절이 더해졌다(아래 문단).
+
+`ccafter`(N=8): 삼키는 루프(`while True: try: while True: pass / except KeyboardInterrupt: pass`) 실행 중 `reset()`한 뒤 새 세션에서
+`while True: pass`를 시작하고 곧바로 Ctrl+C를 눌러, 옛 worker가 새 세션의 첫 눌림을 가로채지 않는지 센다(`TRP-049`). 옛 worker가
+`terminate()` 뒤 약 2초 사는 창 안에서 눌러야 하므로 리셋 뒤 고정 대기를 넣지 않고, 회차 로그의 클릭→Ctrl+C 시간(관찰값 약 1.0초, 판정 아님)이 창 안인지 본다(부팅 지연으로 창을 넘긴 회차는 유실을 검출하지 못한다). 유실된 눌림은 옛 worker가 ack해 재전송이 없으므로
+루프가 스스로 끝나지 않는다 — 판정은 고정 대기 뒤 부재 확인이 아니라 정지 감지용 조건 대기(15000ms) 시간 초과다(9.7). 수정 전(REPL이
+buffer를 재사용하던 코드) 유실은 1/8(7/8 통과), 수정 후는 0/8(2회 실행 총 16회)이다. 수정 전 유실률이 낮아 이 절 하나만으로는 수정 효과를
+통계적으로 입증하지 못한다. 인과는 단위 시험(`packages/pyodide-repl/src/index.test.ts`, 리셋 뒤 새 프레임의 buffer가 옛 것과 다르고 눌림이
+새 buffer에만 쓰인다)과 core 폴백 프로브(수정 전 6/8·수정 후 0/8, `14-runner.md` 14.3.5)가 뒷받침한다.
 
 RD-011의 `multiline-check.mjs`(`_works/_completed/20260923-12-rd-011-multiline-submit/verify/`)는 절 8개
 (`paste`·`tab`·`parse`·`stop`·`block`·`shift`·`recall`·`input`, dev 18개 확인)를 순서대로 돌리고,

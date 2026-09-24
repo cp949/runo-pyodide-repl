@@ -222,8 +222,8 @@ main : 안내 표시. 복구는 reset()
 (S7) 세션 리셋(RD-010, `08-session.md` 8.1)
 main : reset() 호출 → readline.cancelRead()(옛 활성 읽기를 ReadCancelledError로, 화면·history 불변)
        → session.endSession()(alive=false, interruptSender.cancel()) → rpc.dispose() → worker.terminate()
-       → Atomics.store(interruptBuffer, SIGNAL, 0) → (cursorX!==0이면 개행) → writeNotice(RESET_NOTICE, "info")
-       → onStatus('loading') → 새 worker로 (S1)을 다시 탄다(같은 interruptBuffer, 새 채널·메일박스·프레임)
+       → (cursorX!==0이면 개행) → writeNotice(RESET_NOTICE, "info")
+       → onStatus('loading') → 새 worker로 (S1)을 다시 탄다(새 interruptBuffer·송신기, 새 채널·메일박스·프레임)
 worker: (새 worker) init 수신부터 (S1)과 동일
 
 (S8) 크래시(RD-010, `08-session.md` 8.4)

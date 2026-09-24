@@ -19,3 +19,5 @@ Origin: RD-022 확정 10(REPL `spawnSession`은 건드리지 않는다). 내부 
 
 - 2026-09-24 등록 시점 분류: 제품 결함이 아닌 리팩터링 후보라 재현 시나리오가 없어 `open` 조건을 충족하지 못한다. 기록만 남기는 `deferred`.
 - 2026-09-25 RD-024 관찰: 재개 조건의 "세 번째 소비자(RD-024 React)가 세션 배선을 다시 구현하려 할 때"에 해당하지 않았다. `<PythonRunner>`·`<PythonRepl>`·`usePythonRunner`는 core `createRunner`·terminal `createTerminalRunner`·repl `createRepl`을 위임만 하고 buffer·송신기·`startCoreSession` 배선을 새로 만들지 않는다(`docs/design/15-react.md` 15.1). 그래서 재개하지 않고 `deferred`를 유지한다.
+- 2026-09-25 이슈 01 종결에 따른 재개 조건 판단: 재개 조건 "01을 착수할 때 추출 여부를 그때 판단한다"에 따라 판단했고 **추출하지 않는다. `deferred` 유지**. 근거: (1) 이번 수정으로 두 경로의 동작 차이(runner는 세션마다 새 buffer, REPL은 재사용)가 사라졌다. (2) 남는 중복은 buffer·송신기 생성 두 줄(REPL `session.ts` `startSession`, core `runner.ts` `spawn()`)이다. (3) 세션 교체 순서는 runner의 `restarting` 상태·`stop()` 폴백과 REPL의 안내 줄·슬롯(`runSource`) 처리가 달라 공통 도우미로 묶는 추상화 비용이 크다. 재개 조건은 "세 번째 소비자가 세션 배선을 다시 구현하려 할 때" 하나만 남는다.
+- 2026-09-25 현상 절 정정: 위 "현상"의 "동작이 갈라져 있다: runner는 세션마다 새 interrupt buffer를 쓰고 REPL은 재사용한다"는 01 수정으로 더는 사실이 아니다. 두 경로 모두 세션마다 새 buffer·송신기를 만든다(`docs/design/14-runner.md` 14.3.5). 본문은 등록 시점 기록이라 고치지 않는다.

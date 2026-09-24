@@ -84,11 +84,11 @@ main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미
   (`lastUsedIndentation`)는 세션 소유(`createAutoIndent`, RD-013 완료)라 별도 초기화 단계가 없다 — 새
   세션을 만드는 자리에서 저절로 4칸으로 돌아간다. 순서: 벤더 `readline.cancelRead()`로 옛 세션의 열린
   읽기를 화면·history를 건드리지 않고
-  끝낸다 → 인터럽트 송신기 취소 → interrupt buffer `SIGNAL=0` → RPC dispose → 이전 worker `terminate()`
+  끝낸다 → 인터럽트 송신기 취소 → RPC dispose → 이전 worker `terminate()`
   → 커서가 행 머리가 아니면 개행 → 청록 안내 줄 → 새 worker + 새 초기화 프레임(`08-session.md` 8.1).
-  interrupt buffer는 세션 간 **재사용**(ack·요청 번호가 이어진다), 메일박스·sink 세트는 worker마다 **새로**
-  만든다. 실행 driver의 `createRunner`는 다르다: buffer·송신기도 worker마다 새로 만든다(옛 worker가 `terminate()` 뒤에도
-  Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채기 때문, `14-runner.md` 14.3.5).
+  interrupt buffer·송신기·메일박스·sink 세트는 worker마다 **새로** 만든다(REPL `startSession`·실행 driver `createRunner` 공통).
+  옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채기 때문이다(`14-runner.md` 14.3.5).
+  옛 buffer에 남은 SIGINT는 새 worker가 보지 못하므로 리셋이 `SIGNAL`을 지우는 단계는 없다.
 - worker `error` 이벤트·부팅 예외·`reset()` 중 worker 생성 실패 → `crashed` 상태 + `onCrash(message)` → 앱이 재시작 버튼을
   띄운다(RD-010, `08-session.md` 8.1·8.4).
 - `exit()`/`quit()`/`SystemExit` → `sessionTerminated` 알림 → 앱이 안내를 띄우고, 복구 경로는 리셋뿐이다.
@@ -161,8 +161,8 @@ export function startCoreSession(options: CoreSessionOptions): CoreSession;
 interface CoreSessionOptions {
   createWorker: () => Worker; // 세션마다 호출
   indexURL: string; // 끝 '/'가 붙은 pyodide CDN 위치
-  interruptBuffer: Int32Array; // 핸들 소유, 세션을 넘어 산다
-  interruptSender: InterruptSender; // 핸들 소유
+  interruptBuffer: Int32Array; // 호출자 소유, 세션마다 새로 만든다(TRP-049)
+  interruptSender: InterruptSender; // 호출자 소유, buffer와 짝
   driver: MainDriver; // 화면 상호작용 (아래)
   output: (chunk: { stream: "stdout" | "stderr"; text: string }) => void; // Python stdout·stderr 원문
   onStatus: (s: "ready" | "load-failed" | "terminated" | "crashed") => void;
@@ -269,8 +269,8 @@ packages/pyodide-terminal/src/                  (xterm 실행창 + repl 공유 �
   selection-copy.ts        선택 시 자동 복사·선택 중 Ctrl+C 복사(Shift 무관)   ← 06 6.6
 
 packages/pyodide-repl/src/                      (REPL driver + REPL 프런트)
-  index.ts                 createRepl (main 쪽 조립, readline·interruptBuffer·sender·Ctrl+C 핸들러·dispose·`runSource`/`busy` 판정)
-  session.ts               core 세션(startCoreSession)과 REPL main driver를 조립해 ReplSession을 만든다. reset()(RD-010)이 통째로 교체하는 단위   ← 08-session.md
+  index.ts                 createRepl (main 쪽 조립, readline·Ctrl+C 핸들러·dispose·`runSource`/`busy` 판정)
+  session.ts               core 세션(startCoreSession)과 REPL main driver를 조립해 ReplSession을 만든다. 세션마다 interrupt buffer·송신기를 새로 만든다. reset()(RD-010)이 통째로 교체하는 단위   ← 08-session.md
   repl-main-driver.ts      REPL main driver: sink·리더·가드·자동 들여쓰기·블록 히스토리·Tab 리더를 세션마다 만들고 `readLine`·`writeOutput`·`writeError` 핸들러, `isIdle`, 종료 시 읽기 정리를 낸다   ← 08 8.1
   driver-options.ts        REPL driver 옵션 타입(`{ topLevelAwait }`)·파서. main 쪽 driver가 싣고 worker 쪽 driver가 검증한다
   repl-protocol.ts         `readLine` 응답 `{ source }`·요청 4번째 인자 `outcome`의 타입·판별 함수(main·worker 공용)   ← 01 1.2
