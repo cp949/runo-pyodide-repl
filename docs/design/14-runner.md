@@ -78,7 +78,7 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 
 ## 14.3 `createRunner`(core main)
 
-옵션: `createWorker`(필수, worker를 만들 때마다 부른다), `onOutput`(필수), `pyodide?: { indexURL? }`, `filename?`, `topLevelAwait?`, `inputProvider?`, `onStatus?`, `onCrash?`, `onLoadFailed?`. 핸들: `run(code)`·`stop()`·`interrupt()`·`reset()`·`dispose()`·`status`. 옵션 검증 오류(14.2.3)는 worker·버퍼를 만들기 전에 동기로 던진다. 첫 상태(`loading` 또는 `not-isolated`)는 `createRunner`가 반환하기 전에 `onStatus`로 동기 통지한다. `onLoadFailed(message)`는 `onStatus("load-failed")` 앞에 온다(core는 로드 실패 사유를 훅으로만 알린다). `onCrash(message)`는 `crashed` 다음에 부른다.
+옵션: `createWorker`(필수, worker를 만들 때마다 부른다), `onOutput`(필수), `pyodide?: { indexURL? }`, `filename?`, `topLevelAwait?`, `inputProvider?`, `onStatus?`, `onCrash?`, `onLoadFailed?`. 핸들: `run(code)`·`stop()`·`interrupt()`·`reset()`·`dispose()`·`status`·`busy`. `busy`는 지금 `run()`을 부르면 `busy`로 거부되는가다(run이 실행 슬롯을 차지함 — 로딩·재시작 대기 포함 — 또는 `waiting-input`). `status`만으로는 대기 run의 슬롯 점유를 알 수 없다. 옵션 검증 오류(14.2.3)는 worker·버퍼를 만들기 전에 동기로 던진다. 첫 상태(`loading` 또는 `not-isolated`)는 `createRunner`가 반환하기 전에 `onStatus`로 동기 통지한다. `onLoadFailed(message)`는 `onStatus("load-failed")` 앞에 온다(core는 로드 실패 사유를 훅으로만 알린다). `onCrash(message)`는 `crashed` 다음에 부른다.
 
 ### 14.3.1 상태 8종
 
@@ -88,13 +88,13 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 | `ready` | worker `ready`, 실행 종료, run 없는 입력 읽기 종료 | `running`(run 전송), `restarting`, `crashed` |
 | `running` | `runCode` 전송 | `ready`(결말), `waiting-input`, `restarting`, `crashed` |
 | `waiting-input` | worker가 `input()`·`sys.stdin` 읽기로 메일박스에서 정지(`readInput` 알림) | `running`(응답·취소 뒤, run 있음) 또는 `ready`(run 없음), `restarting`, `crashed` |
-| `restarting` | `reset()` 또는 `stop()` 폴백이 worker를 교체 | `ready`, `load-failed`, `crashed` |
+| `restarting` | `reset()` 또는 `stop()` 폴백이 worker를 교체(새 worker를 만든 뒤 통지. 생성이 던지면 거치지 않고 `crashed`) | `ready`, `load-failed`, `crashed` |
 | `load-failed` | pyodide 로드 실패(worker는 살아 있다) | `reset()` |
-| `crashed` | worker `error` 이벤트·`crashed` 알림, 재생성 중 `createWorker` 예외 | `reset()` |
+| `crashed` | worker `error` 이벤트·`crashed` 알림, 재생성 중 `createWorker` 예외 | `reset()`(크래시 뒤에도 살아 있는 worker의 입력 읽기는 공급자를 부르지 않고 응답 없이 버려 상태가 바뀌지 않는다) |
 | `not-isolated` | `crossOriginIsolated !== true`(worker를 만들지 않는다) | 없음(`reset()`도 no-op) |
 
 - `waiting-input`은 run 없이도 나타난다: `run()`이 끝난 뒤 남은 asyncio task가 `input()`을 부르면 worker가 메일박스에 정지한다. 이때 provider가 그대로 불리고, 새 `run()`은 `busy`, `stop()`은 그 읽기만 취소하고 `"idle"`, `interrupt()`도 읽기를 취소하며, 읽기가 끝나면 `ready`로 돌아온다(복구는 `reset()`이기도 하다).
-- 로딩·재시작 대기 중이던 `run()`이 `ready`에서 시작되면 `ready` → `running` 두 상태를 차례로 통지한다.
+- 로딩·재시작 대기 중이던 `run()`이 `ready`에서 시작되면 `ready` → `running` 두 상태를 차례로 통지한다. `onStatus("ready")` 콜백이 `reset()`을 부르면 대기 run은 옛 세션으로 보내지 않고 새 worker의 `ready`까지 기다린다.
 - REPL의 `ReplStatus`(6종)와 달리 `terminated`가 없다(`runDriver`가 `sessionTerminated`를 보내지 않고 `exit`는 결과 값이다). `running`·`waiting-input`·`restarting`이 더해졌다.
 
 ### 14.3.2 `run(code)`와 결과
@@ -126,7 +126,7 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 | 실행 없음(`ready` 등) | 배경 task의 열린 읽기가 있으면 그것만 취소 | `"idle"` |
 | 로딩·재시작 대기 중인 run | 대기 취소(위 표) | `"idle"` |
 | 실행 중 | 열린 입력 읽기가 있으면(`waiting-input`) 읽기 취소(`KeyboardInterrupt`), 없으면 interrupt 송신. **호출 시각부터 1000ms**(`STOP_FALLBACK_MS`) 안에 `run()`이 끝나면 | `"stopped"` |
-| 실행 중, 1000ms 안에 끝나지 않음 | worker를 terminate하고 새로 만든다(`restarting`). `run()`은 `{ kind: "restarted" }` | `"restarted"` |
+| 실행 중, 1000ms 안에 끝나지 않음 | worker를 terminate하고 새로 만든다(`restarting`). `run()`은 `{ kind: "restarted" }`. 새 worker 생성(`createWorker`)이 던져 `crashed`가 돼도 같다 | `"restarted"` |
 | `dispose()` 뒤 | — | `"idle"` |
 
   `stop()`을 겹쳐 부르면 첫 호출의 Promise를 공유하고 타이머는 첫 호출 시각부터다. `stop()` 중에 새로 시작된 읽기(`KeyboardInterrupt`를 잡고 다시 `input()`을 부른 프로그램)는 provider를 거치지 않고 즉시 취소한다. `"stopped"`는 결말이 무엇이든(`interrupted`이든 크래시·`dispose()`이든) worker 교체 없이 실행이 끝났다는 뜻이다.
@@ -135,8 +135,10 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 ### 14.3.4 `reset()`·`dispose()`·크래시
 
 - `reset()`은 옛 세션을 끝내고(열린 읽기 버림, 송신기 취소, RPC dispose, worker `terminate()`) 새 세션을 시작한다(`restarting`). 변수·import가 모두 초기화된다. `crashed`·`load-failed`에서도 복구한다. `dispose()` 뒤·`not-isolated`에서는 no-op. `stop()` 폴백도 같은 교체 경로다.
-- `dispose()`는 worker·RPC를 정리하고 실행·대기 중 run을 `RunRejectedError("disposed")`로 끝낸다. 두 번 불러도 안전하다.
+- `dispose()`는 worker·RPC를 정리하고 실행·대기 중 run을 `RunRejectedError("disposed")`로 끝낸다. 두 번 불러도 안전하다. `dispose()` 뒤에는 `onStatus`·`onOutput`·`onCrash`를 부르지 않고 `status`도 바뀌지 않는다(열린 읽기를 버린 뒤의 재개 알림 포함).
 - 크래시: worker `error` 이벤트나 `crashed` 알림이 오면 열린 읽기를 버리고 상태 `crashed` → 실행·대기 중 run은 `RunRejectedError("crashed")`. 크래시 뒤 새 `run()`은 `unavailable`이다. 자동 재생성은 없고 복구는 `reset()`이다(REPL `08-session.md`와 같다). 재생성 중 `createWorker`가 던져도 `crashed`가 된다(첫 생성이 던지면 `createRunner`가 던진다).
+
+- 상태 콜백 재진입: `onStatus` 콜백 안에서 `run()`·`stop()`·`reset()`·`dispose()`를 불러도 된다. `createRunner`는 콜백을 부르기 전에 슬롯·`stop()` 결말을 확정하고 콜백 뒤에 세션·슬롯을 다시 확인한다. 그래서 `crashed` 콜백 안의 `reset()`(자동 복구)에서도 실행 중이던 run은 `crashed`로 거부되고 `onCrash`는 불리며, `load-failed` 콜백 안의 `reset()`에서도 대기 run은 `unavailable`이다. `ready` 콜백 안의 `reset()`은 대기 run을 새 worker의 `ready`까지 미루고, `running` 콜백 안의 `reset()`·`dispose()`는 그 run을 `restarted`·`disposed`로 끝낸다(`runCode`는 알림 전에 옛 worker로 이미 보냈다). `restarting` 콜백 안의 `dispose()`·`reset()`은 방금 만든 worker를 정리한다(누수 없음).
 
 ### 14.3.5 worker(세션)마다 새 interrupt buffer
 
@@ -202,7 +204,7 @@ type InputProvider = (prompt: string, signal: AbortSignal) => Promise<string | n
 
 - `clearOnRun: true`이면 화면과 스크롤백을 지우고(`\x1b[H\x1b[2J\x1b[3J`) 꼬리를 비운다.
 - 아니면(기본) 커서가 행 머리가 아닐 때(`terminal.buffer.active.cursorX !== 0`) `\r\n` 한 번을 쓰고 꼬리를 비운다(RD-010 세션 리셋의 커서 규칙과 같다, `08-session.md` 8.1 3번). 이전 run이 `print("a", end="")`로 끝났어도 새 실행은 새 줄에서 시작한다.
-- 거부될 `run()`은 화면을 건드리지 않는다: 실행 중인 프로그램의 출력 한가운데서 화면이 지워지면 안 된다. 거부 여부는 core 상태로 예측한다(`disposed`·비문자열·`not-isolated`·`load-failed`·`crashed`·`running`·`waiting-input`, 그리고 `loading`·`restarting`에서 앞선 run이 대기 중일 때). 결과 Promise 정착 뒤 풀리는 플래그만으로 예측하면 `ready` 콜백 안의 재호출에서 낡는다(`docs/traps/TRP-047`). 좁은 잔여 창(대기 run이 있는 `onStatus("ready")` 콜백 안의 `run()`)은 `.scratch/run-driver-terminal-followups/issues/04-*.md`에 있다.
+- 거부될 `run()`은 화면을 건드리지 않는다: 실행 중인 프로그램의 출력 한가운데서 화면이 지워지면 안 된다. 거부 여부는 core `run()`의 판정과 같은 재료로 그 시점에 예측한다: `disposed`·비문자열·상태 `not-isolated`·`load-failed`·`crashed`·core `busy`(14.3). 결과 Promise 정착 뒤 풀리는 플래그로 예측하면 `reset()` 직후 같은 틱의 `run()`(받아들여지는데 화면을 준비하지 않음)과 대기 run이 있는 `onStatus("ready")` 콜백 안의 `run()`(거부되는데 화면을 준비함)에서 낡는다(`docs/traps/TRP-047`).
 - `clear()`: 화면과 스크롤백을 지우고 꼬리를 리셋한다. 입력 읽기가 열려 있는 동안과 `dispose()` 뒤에는 무동작이다(활성 읽기의 앵커 행이 어긋나 입력줄이 사라진다. 벤더 Ctrl+L은 읽기 상태를 다시 잡지만 공개 API가 아니다). 사용자가 입력 대기 중 Clear를 눌러도 반응이 없다.
 - `reset()`은 화면에 아무것도 내지 않는다(REPL의 `RESET_NOTICE`가 없다). 앱이 `onStatus("restarting")`으로 표시한다.
 

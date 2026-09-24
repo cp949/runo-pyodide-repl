@@ -41,6 +41,7 @@ try {
 await runner.stop(); // "idle" | "stopped" | "restarted" — interrupt 뒤 1000ms 안에 끝나지 않으면 worker를 교체한다
 runner.interrupt();  // Ctrl+C용. interrupt만 보내고 terminate하지 않는다
 runner.reset();      // worker를 새로 만든다(변수·import 초기화)
+runner.busy;         // 지금 run()을 부르면 "busy"로 거부되는가(로딩·재시작 대기 run과 waiting-input 포함)
 runner.dispose();
 ```
 

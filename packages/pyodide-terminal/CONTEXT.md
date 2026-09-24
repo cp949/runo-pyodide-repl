@@ -28,7 +28,7 @@ _Avoid_: 무시된 키, 유실 키(의도된 동작이다)
 `run()` 시작 시 커서가 행 머리가 아니면(`cursorX !== 0`) `\r\n`을 한 번 쓰는 규칙. `clearOnRun`이면 대신 화면을 지운다. 거부될 `run()`은 화면을 건드리지 않는다.
 
 **거부 예측**:
-core가 코드를 실행하지 않고 거부할 `run()`(상태로 알 수 있는 경우)에서 화면을 준비하지 않게 하는 판정(`willBeRejected`). `loading`·`restarting` 중 대기하는 run은 상태만으로 알 수 없어 `inFlight` 플래그를 함께 본다.
+core가 코드를 실행하지 않고 거부할 `run()`에서 화면을 준비하지 않게 하는 판정(`willBeRejected`). core `run()`과 같은 재료(`status`·`busy`)를 그 시점에 읽는다. `loading`·`restarting` 중 대기하는 run의 슬롯 점유는 상태로 알 수 없어 core `busy`가 알려 준다.
 _Avoid_: 사전 검증
 
 ### 공통 부품

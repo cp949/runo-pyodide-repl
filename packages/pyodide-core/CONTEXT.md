@@ -72,7 +72,7 @@ core `./worker`의 `.d.mts`를 import하는 코드. 그 파일이 `pyodide`·`py
 _Avoid_: 스크립트 러너, 실행 엔진
 
 **runner(`createRunner`)**:
-main 쪽 UI 비의존 실행 핸들. worker 생성·재생성, worker마다 새 interrupt buffer·송신기, core 세션, 상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`를 맡는다. `MainDriver`를 구현해 core 세션 위에 얹힌다. xterm 실행창(`createTerminalRunner`, terminal 패키지)과 다른 소비자가 이것을 쓴다.
+main 쪽 UI 비의존 실행 핸들. worker 생성·재생성, worker마다 새 interrupt buffer·송신기, core 세션, 상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`, 슬롯 점유 `busy`를 맡는다. `MainDriver`를 구현해 core 세션 위에 얹힌다. xterm 실행창(`createTerminalRunner`, terminal 패키지)과 다른 소비자가 이것을 쓴다.
 _Avoid_: 세션 매니저, 실행기
 
 **runner 상태**:
