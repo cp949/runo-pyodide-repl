@@ -154,7 +154,7 @@ interface InitFrame {
   interruptBuffer: Int32Array     // SAB 뷰. 구조적 복제로 같은 메모리를 가리킨다
   stdinCtrl: Int32Array           // 메일박스 제어
   stdinData: Uint8Array           // 메일박스 데이터
-  driver: unknown                 // driver 전용 옵션. core는 모양을 모른다(REPL은 { topLevelAwait: boolean })
+  driver: unknown                 // driver 전용 옵션. core는 모양을 모른다(REPL은 { topLevelAwait: boolean }, 실행 driver는 { filename?: string, topLevelAwait?: boolean })
   pyodide: { indexURL: string }
 }
 ```
@@ -165,7 +165,7 @@ interface InitFrame {
   - `kind === 'init'`인 객체(init 후보): 리스너를 떼고(이후 네이티브 `message` 채널은 쓰지 않는다) `parseInitFrame`으로 검증한다. 실패하면 필드 이름을 담아 `console.error("[worker] 초기화 프레임이 올바르지 않다", …)` 후 프레임을 버린다.
   - 그 밖의 메시지(`kind`가 다른 객체·`null`·원시값): 같은 `console.error`(`parseInitFrame`의 오류 메시지 포함)를 남기되 리스너를 **유지**해 뒤에 오는 init을 받는다. 무시하지 않고 로그를 남기는 것은 옛 `{ once: true }` 동작의 오류 표시를 유지하기 위해서다.
   검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`).
-- `driver` 필드: `parseInitFrame`은 필드가 있는지만 본다(`"driver" in frame`, 값은 `undefined`도 통과). 옛 모양(최상위 `topLevelAwait`, `driver` 없음)의 프레임을 worker가 조용히 받아 driver 옵션을 잃는 것을 막는다. 값은 worker 쪽 driver가 `WorkerDriver.parseOptions(frame.driver)`로 검증한다. REPL은 `{ topLevelAwait: boolean }`이고 repl `driver-options.ts`의 파서가 `driver: 객체 필요`·`topLevelAwait: boolean 필요` 오류를 낸다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 그 오류로 거부되고 `runWorker`가 `console.error("[worker] 부팅 시퀀스 예외", …)`로 남긴다. main 쪽 driver의 `options`가 프레임의 `driver` 필드로 실린다.
+- `driver` 필드: `parseInitFrame`은 필드가 있는지만 본다(`"driver" in frame`, 값은 `undefined`도 통과). 옛 모양(최상위 `topLevelAwait`, `driver` 없음)의 프레임을 worker가 조용히 받아 driver 옵션을 잃는 것을 막는다. 값은 worker 쪽 driver가 `WorkerDriver.parseOptions(frame.driver)`로 검증한다. REPL은 `{ topLevelAwait: boolean }`이고 repl `driver-options.ts`의 파서가 `driver: 객체 필요`·`topLevelAwait: boolean 필요` 오류를 낸다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 그 오류로 거부되고 `runWorker`가 `console.error("[worker] 부팅 시퀀스 예외", …)`로 남긴다. main 쪽 driver의 `options`가 프레임의 `driver` 필드로 실린다. 실행 driver의 `createRunner`는 worker를 만들기 전에 같은 파서(`parseRunDriverOptions`)로 먼저 검증한다(`docs/traps/TRP-042`, `14-runner.md` 14.2.3).
 - `SharedArrayBuffer` 뷰는 postMessage로 넘겨도 같은 메모리를 공유한다(coincident 프록시가 값으로 직렬화하던 문제가 없다).
 - 설정 변경(REPL의 `topLevelAwait`)은 새 프레임 = 새 worker다. worker가 main에 설정을 되묻는 호출은 없다.
 

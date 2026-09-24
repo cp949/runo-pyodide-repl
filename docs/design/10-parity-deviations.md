@@ -150,6 +150,13 @@ stdin 읽기의 끝:
     붙여넣기(한 덩어리) 4096자 초과에서 웹은 아무것도 남기지 않고 3.14는 앞 4095자를 남긴다. 키 입력은 한 글자씩 오므로 웹은 앞 4096자를 남기고 이후를 버린다. **여러 줄에 걸친 누적이
     4096을 넘는 경우의 3.14 동작은 측정하지 않았다(미실측).** 사람이 4096자 넘게 실행 중에 치거나 붙이는 일은 드물어 웹 정책을 바꾸지 않는다(서로게이트 쌍·이스케이프 시퀀스 중간 절단 방지).
 
+실행창(RD-022, `14-runner.md`). 기준은 REPL이 아니라 `python main.py`(run마다 새 프로세스)다. 아래 4건은 pty 실측이 아니라 worker 하나를 재사용하는 구조와 입력 정책에서 오는 차이이고 3.14와 나란히 측정하지 않았다.
+
+50. **`run()`이 끝난 뒤에도 남은 `asyncio` task·JS 타이머 콜백의 출력이 나온다.** CPython 스크립트는 메인이 끝나면 프로세스가 종료돼 남은 task가 사라지지만(non-daemon 스레드는 기다린다) worker는 살아 있어 이벤트 루프가 계속 돈다. `create_task`·`call_later`로 남긴 콜백은 상태가 `ready`인 동안에도 실행되고 출력이 화면에 나온다(취소·대기 없음). 그 콜백이 `input()`을 부르면 worker가 메일박스에서 정지해 상태가 `waiting-input`(run 없음)이 되고 새 `run()`은 `busy`다(`14-runner.md` 14.3.1). 정리는 `reset()`이다.
+51. **`sys.modules`와 인터프리터 상태가 run 사이에 유지된다.** run마다 새로 만드는 것은 `__main__` 이름공간(`console.globals`)뿐이다(시험이 확인: 이전 run의 변수는 `NameError`, `import`한 표준 모듈은 `sys.modules`에 남고 `pyodide.globals`는 오염되지 않는다). 같은 인터프리터를 재사용하므로 모듈 전역 상태·`sys` 속성·`builtins` 수정 같은 인터프리터 수준 변경도 다음 run에 이어질 수 있다(구조에서 오는 결과이고 항목별로는 확인하지 않았다). CPython은 run마다 인터프리터가 새로다. 초기화는 `reset()`이다.
+52. **`input()` 밖에서 친 키·붙여넣기를 버린다.** 3.14 tty는 실행 중 입력을 큐에 쌓아 다음 읽기가 받고 REPL도 그것을 따른다(편차 32·45~49). 실행창은 벤더 `Readline`을 `typeAhead: false`로 만들어 읽기 밖 입력(키·붙여넣기·IME 조합 결과·Shift+Enter)을 쌓지 않고 버린다. Ctrl+C·Ctrl+L 단독 입력만 읽기 밖에서도 처리한다. `input()` 프롬프트를 그리는 `read()`의 write 콜백이 오기 전(수 ms)에 친 키도 버려진다. 사양이다(실행창은 `input()` 중에만 입력을 받는다, ADR-0006, `14-runner.md` 14.5.2).
+53. **`import`가 가리키는 pyodide 배포 패키지가 첫 실행에서 자동으로 로드된다.** `PyodideConsole.runcode`가 실행 전에 `loadPackagesFromImports(source)`를 불러 `import numpy` 같은 줄이 네트워크로 패키지를 내려받은 뒤 성공한다(로드 중 상태는 `running`). CPython은 설치돼 있지 않으면 `ModuleNotFoundError`다. REPL도 같은 `PyodideConsole.runcode`를 거치므로 같은 동작일 것으로 보이나 REPL에서는 확인하지 않았다(편차 20은 Tab 후보만 다룬다).
+
 top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 한 줄로 끝나고 `except KeyboardInterrupt`로는 잡히지 않는 것(우리 구현은 콘솔 task를 취소하고 표지 예외 `IdleInterrupt`를 한 줄로 표시한다. `except asyncio.CancelledError`는 잡고 `finally`는 돈다)은 **편차로 등록하지 않는다**. 대기 중 Ctrl+C를 task 취소로 처리하고 한 줄만 내는 것은 3.14의 `python -m asyncio`와 같은 동작이고, 우리 TLA 옵션의 기준이 기본 REPL이 아니라 `python -m asyncio`이기 때문이다(편차 1과 같은 정렬). 2절 "범위 밖"에도 넣지 않는다 — 재현하지 않기로 한 차이가 아니라 차이가 아니다.
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약"), RD-008 pty 재측정 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/pty/results.md`

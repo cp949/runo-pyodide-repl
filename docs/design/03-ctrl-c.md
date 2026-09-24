@@ -65,7 +65,9 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
    `last_seq` 갱신 후 ack. `last_seq` 초기값은 설치 시점의 `buf[SEQ]`(세션 리셋 뒤 같은 버퍼를 재사용해도
    이전 세션의 재전송이 새 세션을 끊지 않는다). 이 저장소의 `install(console, ack, seq, report, extra_own_codes=())`은
    `ack`·`seq`가 항상 필수 인자이고 `sigint_handler`가 무조건 호출한다 — 번호·ack 없이 동작하는 분기는 없다.
-2. `frame.f_back`을 따라 `co_filename`이 콘솔의 `filename`(`<console>`)인 프레임이 **하나라도 있으면**
+   (같은 버퍼 재사용은 **REPL 경로**의 설명이다. 실행 driver의 `createRunner`는 worker마다 새 interrupt buffer를 만들어
+   `last_seq`가 0에서 시작하고 옛 worker의 눌림과 섞이지 않는다, `14-runner.md` 14.3.5.)
+2. `frame.f_back`을 따라 `co_filename`이 콘솔의 `filename`(REPL은 `<console>`, 실행 driver는 `filename` 옵션 값 — 기본 `main.py`, `14-runner.md` 14.2.2)인 프레임이 **하나라도 있으면**
    `signal.default_int_handler`로 `KeyboardInterrupt`를 올린다. 정상 반환 후 다른 경로로 올리면 안 된다:
    `input()` 취소의 EINTR 경로에서 예외를 못 보면 CPython이 읽기를 다시 시도한다(PEP 475).
 3. 사용자 프레임이 없고 **사용자 실행 중**(= `runcode` 안, 시간 조건 없음)이면 `interrupt_idle()`로

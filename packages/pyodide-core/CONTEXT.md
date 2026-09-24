@@ -15,7 +15,7 @@ core가 세션 동안 부르는, 소비자(REPL 등)가 채우는 인터페이�
 _Avoid_: 플러그인(`plugins`는 RD-023의 별개 개념), 콜백 모음, 어댑터
 
 **driver 옵션**:
-초기화 프레임의 `driver` 필드(`InitFrame.driver: unknown`). core는 값의 모양을 모르고 필드가 있는지만 검증한다. worker 쪽 `WorkerDriver.parseOptions(frame.driver)`가 값을 검증한다. REPL은 `{ topLevelAwait }`.
+초기화 프레임의 `driver` 필드(`InitFrame.driver: unknown`). core는 값의 모양을 모르고 필드가 있는지만 검증한다. worker 쪽 `WorkerDriver.parseOptions(frame.driver)`가 값을 검증한다. REPL은 `{ topLevelAwait }`, 실행 driver는 `{ filename, topLevelAwait }`(`parseRunDriverOptions`).
 _Avoid_: 설정, config
 
 ### main 쪽
@@ -40,7 +40,7 @@ RPC 끝점을 만들 때 core 핸들러 표와 driver 핸들러 표를 `composeR
 _Avoid_: 등록, 미들웨어
 
 **읽기 seam**:
-`MainDriver.readInput(cancelable)`. `input()`·`sys.stdin` 읽기 한 건을 driver가 수행해 줄 또는 `null`(취소)로 돌려주는 내부 경계다. 공개 `InputProvider`가 아니다(RD-022). `isReadCancelled(error)`는 "읽기가 끝나 응답 없이 버린다"는 오류를 driver가 판정하게 한다(core가 터미널 라이브러리를 import하지 않는다).
+`MainDriver.readInput(cancelable)`. `input()`·`sys.stdin` 읽기 한 건을 driver가 수행해 줄 또는 `null`(취소)로 돌려주는 내부 경계다. 공개 `InputProvider`가 아니라 core 내부 seam이고, `createRunner`가 이 seam 위에 공개 `InputProvider`를 얹는다(RD-022). `isReadCancelled(error)`는 "읽기가 끝나 응답 없이 버린다"는 오류를 driver가 판정하게 한다(core가 터미널 라이브러리를 import하지 않는다).
 
 ### worker 쪽
 
@@ -64,6 +64,40 @@ _Avoid_: 싱글턴 driver
 
 **core 타입 소비자**:
 core `./worker`의 `.d.mts`를 import하는 코드. 그 파일이 `pyodide`·`pyodide/ffi` 타입을 import한다. core는 `pyodide`를 배포 `dependencies`가 아니라 optional peer(`^` 범위, Python 3.14 minor `314.x` 안의 타입 호환)로 선언하므로, 소비자가 같은 minor의 `pyodide`(+`@types/node`·`@types/emscripten`)를 직접 설치해야 한다(`README.md`, `docs/design/00-architecture.md` 4.4, `09-testing.md` 9.8.3, `13-version-upgrade.md` 13.7). repl만 쓰는 소비자는 해당하지 않는다.
+
+### 실행 driver와 runner(RD-022)
+
+**실행 driver(`runDriver`)**:
+`WorkerDriver<RunDriverOptions>` 구현. 앱 worker 파일이 `runWorker({ driver: runDriver })`로 쓴다. RPC `runCode(source)`를 받아 run마다 새 globals에서 `CodeRunner(exec)` + `console.runcode`로 실행하고 결말을 돌려준다. REPL driver와 달리 제어 흐름이 없고 요청 단위로 일한다. `probe`는 없다.
+_Avoid_: 스크립트 러너, 실행 엔진
+
+**runner(`createRunner`)**:
+main 쪽 UI 비의존 실행 핸들. worker 생성·재생성, worker마다 새 interrupt buffer·송신기, core 세션, 상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`를 맡는다. `MainDriver`를 구현해 core 세션 위에 얹힌다. xterm 실행창(`createTerminalRunner`, terminal 패키지)과 다른 소비자가 이것을 쓴다.
+_Avoid_: 세션 매니저, 실행기
+
+**runner 상태**:
+`RunnerStatus` = `loading`·`ready`·`running`·`waiting-input`·`restarting`·`load-failed`·`crashed`·`not-isolated`. REPL의 `ReplStatus`(6종)와 다르다(`terminated` 없음, 앞의 세 개가 새것). 전이표는 `docs/design/14-runner.md` 14.3.1.
+
+**결말(`RunResult`)**:
+`run()`이 코드가 실행됐을 때 돌려주는 값. worker가 만드는 `RunOutcome`(`ok`·`error{ errorType, traceback }`·`interrupted{ traceback }`·`exit{ code }`)에 main이 만드는 `restarted`를 더한 것이다. 코드가 실행되지 못했거나 실행 중 worker가 사라지면 값이 아니라 `RunRejectedError`로 reject한다.
+_Avoid_: 반환값, 종료 상태
+
+**`RunRejectedError`**:
+`reason`이 `busy`·`unavailable`·`disposed`·`crashed`인 오류. `busy` = 이미 슬롯을 차지한 run이 있다(대기 중 포함), `unavailable` = 지금 실행할 수 없는 상태(`not-isolated`·`load-failed`·`crashed`, 대기 중 취소)다.
+
+**실행 슬롯**:
+runner가 한 번에 하나만 허용하는 실행 자리. 로딩·재시작 대기 중인 run도 차지한다. 슬롯이 차 있거나 `waiting-input`이면 새 `run()`은 `busy`다.
+
+**폴백(stop fallback)**:
+`stop()`이 interrupt를 보낸 뒤 `STOP_FALLBACK_MS`(1000ms) 안에 `run()`이 끝나지 않으면 worker를 terminate하고 새로 만드는 것. `stop()`은 `"restarted"`, 그 `run()`은 `{ kind: "restarted" }`. 타이머는 `stop()` 호출 시각부터다.
+_Avoid_: 강제 종료, kill
+
+**`InputProvider`**:
+`(prompt, signal) => Promise<string | null>`. runner가 `input()`·`sys.stdin` 읽기 한 건마다 부르는 공개 입력 seam. `prompt`는 화면의 미종결 마지막 줄(출력 꼬리), `null`은 읽기 취소, `signal`은 Ctrl+C·`stop()`·`reset()`·`dispose()`·크래시에서 abort된다. provider 생략과 `null`은 `KeyboardInterrupt`(`interrupted`)이지 `EOFError`가 아니다(메일박스에 EOF 상태가 없다).
+_Avoid_: 입력 콜백, 프롬프트 핸들러
+
+**세션마다 새 interrupt buffer**:
+runner가 worker를 만들 때마다 interrupt buffer와 송신기를 새로 만드는 규칙. 옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채는 것을 막는다. REPL은 buffer를 세션 사이에 재사용한다(다른 경로).
 
 ### 호환 탐지
 

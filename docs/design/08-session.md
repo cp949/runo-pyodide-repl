@@ -27,7 +27,9 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
    않는다, `06-editing.md` 6.1)다.
 2. `Atomics.store(interruptBuffer, SIGNAL, 0)` — interrupt buffer는 세션 사이에 재사용하므로(같은
    `SharedArrayBuffer`) 옛 세션이 못 비운 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를
-   죽이지 않는다.
+   죽이지 않는다. (REPL 경로다. 실행 driver의 `createRunner.reset()`은 worker마다 새 buffer를 만들고 이 단계가 없다.
+   옛 worker가 `terminate()` 뒤에도 최대 약 2초 살아 같은 buffer의 눌림을 가로챌 수 있기 때문이다, `14-runner.md` 14.3.5.
+   REPL에서 실행 중 리셋 직후 같은 가로채기가 나는지는 확인하지 않았다.)
 3. 커서 행 처리: `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다
    (TRP-006). 개행 여부는 **코어**가 결정한다 — 벤더 `cancelRead()`는 화면에 아무것도 그리지 않는다.
 4. `writeNotice(readline, RESET_NOTICE, "info")` — 청록 안내 줄

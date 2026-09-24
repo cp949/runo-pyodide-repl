@@ -13,6 +13,7 @@
 | `docs/design/01-protocols.md` | RPC 메시지, stdin 메일박스, interrupt buffer, 초기화 프레임 |
 | `docs/design/02~08` | 기능별 규칙(콘솔, Ctrl+C, stdin, 출력, 편집, Tab, 세션) |
 | `docs/design/09~12` | 테스트 전략, 3.14 편차·범위 밖, 알려진 함정, 이전 구현 인벤토리 |
+| `docs/design/14-runner.md` | 실행 driver·`createRunner`(상태 8종·결과·`stop()`)·`InputProvider`·xterm 실행창(`createTerminalRunner`) |
 | `docs/design/13-version-upgrade.md` | pyodide 버전 원천(pnpm catalog), 업그레이드 절차, 부팅 시 호환 탐지 등급표 |
 | `docs/adr/` | 결정 기록(동기 브리지 미채택, 메일박스, readline 벤더링, cross-origin isolation, input 동기 유지, core·플러그인 패키지 분리, pyodide 단일 버전 고정) |
 | `docs/traps/` | 이 저장소에서 새로 발견한 함정(색인 `INDEX.md`). 이전 구현의 함정은 `docs/design/11-known-traps.md` |
@@ -24,7 +25,8 @@
 
 ```text
 apps/demo                Vite + React 19 데모
-packages/pyodide-core    @cp949/runo-pyodide-core — 프로토콜·worker 커널·main 세션(private, UI·xterm·coincident 비의존)
+packages/pyodide-core    @cp949/runo-pyodide-core — 프로토콜·worker 커널·main 세션·실행 driver·`createRunner`(private, UI·xterm·coincident 비의존)
+packages/pyodide-terminal @cp949/runo-pyodide-terminal — xterm 실행창 `createTerminalRunner` + repl 공유 부품(`./internal`, private, coincident 비의존)
 packages/pyodide-repl    @cp949/runo-pyodide-repl — REPL driver + REPL 프런트(main 쪽 + worker 쪽 + Python 스크립트)
 packages/pyodide-testkit @repo/pyodide-testkit — 시험 전용 도우미(private, pack 제외)
 packages/xterm-readline  @cp949/runo-xterm-readline — strtok/xterm-readline 1.2.2 벤더링(MIT), 변경 목록은 패키지 README

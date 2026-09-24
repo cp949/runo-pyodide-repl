@@ -673,7 +673,7 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 
 ## Phase 4 — 패키지 분리와 새 소비자
 
-[ADR-0006](./docs/adr/0006-pyodide-core-and-plugin-packages.md). 순서: RD-020 → RD-021 → RD-022 → RD-023 → RD-024. RD-025는 독립이다. 배포는 `pnpm pack` tarball(버전 동기)이고, 소비자는 `/work/cp949/runo/runo-pyodide-canvas`·`runo-lab`이다. 저장소는 향후 `runo-pyodide`로 개명한다(시점 미정).
+[ADR-0006](./docs/adr/0006-pyodide-core-and-plugin-packages.md). 순서: RD-020 → RD-021 → RD-022 → RD-023 → RD-024. RD-022a는 RD-022 뒤, RD-024(`<PythonRepl>`의 `runSource`) 앞이다. RD-025는 독립이다. 배포는 `pnpm pack` tarball(버전 동기)이고, 소비자는 `/work/cp949/runo/runo-pyodide-canvas`·`runo-lab`이다. 저장소는 향후 `runo-pyodide`로 개명한다(시점 미정).
 
 ### RD-020 — `pyodide-core` 추출과 `pyodide-repl` 축소(동작 불변)
 
@@ -719,13 +719,34 @@ pyodide 버전 원천을 `pnpm-workspace.yaml`의 catalog 한 곳(`catalog: pyod
 
 ### RD-022 — 실행 driver와 `pyodide-terminal` 실행창
 
-상태: 대기 · 이전: 없음 · 설계: ADR-0006, `00-architecture.md` 4절
+상태: 완료(2026-09-24) · 이전: 없음 · 설계: ADR-0006, `00-architecture.md` 4절, `14-runner.md`
 
-core에 실행 driver(`runDriver`)를, `packages/pyodide-terminal`에 xterm 실행창을 둔다. xterm 결합 공통 부품(`sinks`·`rewind-tail`·`stdin-reader`·`notice`·`selection-copy`)을 repl에서 terminal로 옮긴다. `run(code)`는 run마다 새 globals(`__name__ == "__main__"`, 파일명 옵션 기본 `"main.py"`), `sys.modules` 유지(편차 등록), 실행 중 `run()`은 거부. `stop()`은 interrupt → 1000ms 안에 복귀하지 않으면 terminate → worker 자동 재생성(`stopped`와 `restarted` 구분). 상태 `loading`·`ready`·`running`·`waiting-input`·`restarting`·`load-failed`·`crashed`·`not-isolated`, `run()` 결과 `ok` / `error{ errorType, traceback }` / `interrupted` / `exit{ code }` / `restarted`, 트레이스백은 stderr와 결과 양쪽. 실행창은 `input()` 대기 중에만 한 줄 편집(history 없음), 그 외 키 무시. Ctrl+C는 선택이 있으면 복사, 실행 중이면 `^C` + interrupt, `ready`면 무동작. 화면 지우기는 기본 안 함(`clear()`·`clearOnRun`). REPL에는 `runSource(code)`를 추가한다(REPL globals, 입력 줄 에코 없이 출력, 치던 한 줄 보존·재그리기, 블록 입력 중·실행 중이면 거부).
+core에 실행 driver(`runDriver`)를, `packages/pyodide-terminal`에 xterm 실행창을 둔다. xterm 결합 공통 부품(`sinks`·`rewind-tail`·`stdin-reader`·`notice`·`selection-copy`)을 repl에서 terminal로 옮긴다. `run(code)`는 run마다 새 globals(`__name__ == "__main__"`, 파일명 옵션 기본 `"main.py"`), `sys.modules` 유지(편차 등록), 실행 중 `run()`은 거부. `stop()`은 interrupt → 1000ms 안에 복귀하지 않으면 terminate → worker 자동 재생성(`stopped`와 `restarted` 구분). 상태 `loading`·`ready`·`running`·`waiting-input`·`restarting`·`load-failed`·`crashed`·`not-isolated`, `run()` 결과 `ok` / `error{ errorType, traceback }` / `interrupted` / `exit{ code }` / `restarted`, 트레이스백은 stderr와 결과 양쪽. 실행창은 `input()` 대기 중에만 한 줄 편집(history 없음), 그 외 키 무시. Ctrl+C는 선택이 있으면 복사, 실행 중이면 `^C` + interrupt, `ready`면 무동작. 화면 지우기는 기본 안 함(`clear()`·`clearOnRun`). REPL `runSource(code)`는 RD-022a로 분리했다(아래).
 
 시나리오: `name = input("이름: "); print(name)`을 `run()`하면 `이름: `에서 한 줄을 받아 출력한다. `while True: pass` 실행 중 Ctrl+C 또는 `stop()`이면 `KeyboardInterrupt` 트레이스백과 결과 `interrupted`. `input()` 대기가 아닐 때 친 글자는 화면에 나타나지 않는다. 연속 두 번 `run()`은 두 번째가 거부된다.
 
 완료 기준: 첫 DELTA에서 `PyodideConsole(filename="main.py")` + `compile(..., "exec")` → `console.runcode` 재사용 가설을 확인한다(실패 시 SIGINT 계층을 "실행 호스트"(`filename`·실행 래퍼·트레이스백 포맷터) 인터페이스로 일반화하고 같은 RD에서 처리). 위 시나리오의 단위·jsdom 시험(RED + 변이 검사). 실행창용 새 e2e 판정 스크립트(demo에 실행창 화면 추가) L1. REPL 회귀는 영향 스크립트 `ONLY=` L1. coincident 비의존 검사를 terminal에 확장.
+
+결과: core에 worker 실행 driver `runDriver`(RPC `runCode`, run마다 새 globals·`CodeRunner(exec)` + `console.runcode`, 결말 4종 분류)와 main `createRunner`(상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`, `RunRejectedError`, `InputProvider`, 1000ms 폴백)를 두었다. 새 `packages/pyodide-terminal`(`@cp949/runo-pyodide-terminal`)에 `createTerminalRunner`와 repl 공유 부품 5종(`./internal`, repl → terminal 단방향)을 두었고, 벤더 `ReadlineOptions.typeAhead`를 더했다. demo는 `?view=runner`로 실행창 화면을 갖는다. 규칙 본문은 `docs/design/14-runner.md`, 편차 50~53 등록(`10-parity-deviations.md`), ADR-0006 갱신, 함정 `docs/traps/TRP-040`~`TRP-050`.
+- 가설: `CodeRunner(exec)` + `console.runcode` 경로가 SIGINT 계층(`sigint-handler.py`)을 수정 없이 재사용한다(8항목 통과, 멈추는 지점 1 미발동). SIGINT 계층·REPL 동작·repl 공개 export는 바뀌지 않았다.
+- L0(각 `--force`, 마무리 시점 1회): `pnpm check-types`(10/10)·`lint`(6/6)·`build`(5/5)·`test --force --concurrency=1`(15 태스크, `check-dist` 포함) 통과. 실행한 시험 **1799**(core 448·repl 978·terminal 149·xterm-readline 176·testkit 45·demo 3), 기준 1512 대비 +287: core +208(실행 driver 시험 126 = 가설 26 + 분류·옵션·재진입·stdin 100, `createRunner` 73, 폴백 뒤 interrupt 시험 9), repl −86(부품 5종 시험이 terminal로 이동), terminal +149(이동 86 + 경계 시험 3 + `createTerminalRunner`·`stdin-reader` 신규 60), xterm-readline +16(`typeAhead`). 시험 제목은 `dev` 대비 삭제 0. repl `dist/index.d.mts`·`dist/worker.d.mts` export 이름 diff 0. `pnpm smoke:pack`(4 tarball)·`pnpm check-dist`(terminal 포함) 통과, terminal `dist`에 `coincident` 0.
+- 실제 pyodide 시험(node): `while` 루프·`time.sleep(10)` 중단, TLA `await` 깨움, `input()` 한 줄·취소, `sys.exit(3)`·`sys.exit("x")`, `1/0` 트레이스백의 `File "main.py"` + 소스 줄, 문법 오류, 새 globals(`NameError`·`__name__`·`__file__`), TLA 끔·켬(`core/src/worker/run-driver-pyodide.test.ts` 38·`run-driver-classify.test.ts` 49·`session/runner-pyodide.test.ts` 13).
+- 변이 검사(`mutate-safe.mjs`, 신규 방어선): 총 **185개 중 178 killed, 7 survived**(전부 동등 변이·방어 코드로 판정: `return_mode` 기본값·`dont_inherit`, `topLevelAwait ?? false`, `interrupt()`의 `pythonRunning` 게이트·`onStatus`의 `isCurrent()` 가드, terminal의 `signal.aborted` 앞단 검사·`clear()`의 `disposed` 가드). 1차에서 살아남은 시험 구멍 4건은 시험을 추가해 killed로 바꿨다(`createRunner` 2·`createTerminalRunner` 2). 벤더 `typeAhead` 11/11, DELTA-03a(폴백 뒤 첫 interrupt 유실 수정) 4/4.
+- L1(각 1회): `e2e:runner-check` normal **16/16**·not-isolated **5/5**(DELTA-03a 수정 뒤 재개 실행, `pageErrors` 0), REPL 4종 `repl-check`(normal) 15/15·`stdin-input` 19/19·`selection-copy` 14/14·`session-reset` 25/25(`crash` 절의 forced pageerror 1건은 등록된 예외)는 **부품 이동·terminal 추가 뒤 멈추기 전에 실행한 결과**이고 DELTA-03a(core `runner.ts`만 변경) 뒤에는 재실행하지 않았다. `BASELINE.md`에 runner-check 행 추가.
+- 예외·결정: (1) 허용 편차 4건 등록(50 뒤늦은 비동기 출력·51 `sys.modules` 유지·52 `input()` 밖 키 무시·53 import 기반 자동 패키지 로드). (2) 벤더 옵션 `ReadlineOptions.typeAhead`(기본 `true`, 기존 동작 불변)를 더했다. (3) `SystemExit` 코드가 int32 밖이면 `& 0xFF`로 줄인다(그릴링 확정 7 "`int` → 그 값"의 좁은 예외, pyodide가 2**53 - 1 이상을 BigInt로 만들어 `code: number`를 깬다). (4) provider 생략·`null`의 `input()`은 `EOFError`가 아니라 `KeyboardInterrupt`(`interrupted`)다(확정 11 문구를 사용자 확정으로 정정, 메일박스에 EOF 상태가 없다). (5) 문법 오류의 `errorType`은 `SyntaxError` 하위 클래스도 `"SyntaxError"`로 통일한다(사용자 확정). (6) 확정 밖 추가: terminal `.`가 `RunRejectedError`·타입을 재export, core `createRunner`의 `onLoadFailed`, `stdin-reader`의 `read(cancelable, signal?)`. (7) 폴백 재시작 뒤 첫 interrupt 유실은 브라우저에서 발견돼(원인: 옛 worker가 `terminate()` 뒤 최대 약 2초 살아 같은 interrupt buffer의 눌림을 가로챔) worker(세션)마다 새 buffer·송신기를 만드는 core 수정으로 해소했다. REPL `reset()`의 같은 잠재 결함은 범위 밖이라 이슈로 등록했다(`.scratch/run-driver-terminal-followups/issues/01-*.md`, open).
+- 미수행: L2 전체 `e2e:baseline`, L3(`e2e:measure`·반복 재현성 N≥10), 브라우저 양성 대조(변조 → runner-check 셀 실패). runner-check 최종 판정은 normal 1회(16/16)·not-isolated 1회(5/5)이고 preview 서버에서는 실행하지 않았다(dev 전용 셀). `stop()` 폴백의 옛 worker 종료 순서는 브라우저에서 직접 관측하지 않았다(node 지연 종료 시뮬레이션 + 프로브 N=8 수정 전 유실 6·수정 후 0으로 인과를 확인). 병렬 `pnpm test`는 sleep-slice 100ms 판정이 부하로 흔들려 L0는 `--concurrency=1`로 판정했다(`.scratch/sigint-test-isolation/issues/04-*.md`, deferred).
+
+인계: RD-023(`plugins`)은 `runWorker({ driver: runDriver })`의 `runWorker` 옵션에 `plugins`를 더하면 되고, worker 파일이 앱 소유이며 core init 리스너가 모듈 본문에서 동기 등록되는 규칙은 그대로다(`14-runner.md` 14.1). RD-024(React)가 쓸 API: terminal `.`의 `createTerminalRunner(options)` → `{ run, stop, reset, clear, dispose, status, setCopyOnSelect }`, `RunRejectedError`, 타입 `TerminalRunnerOptions`·`TerminalRunnerHandle`·`RunnerStatus`·`RunResult`·`StopResult`·`InputProvider`. 옵션은 `terminal`(호출자 소유)·`createWorker`(필수)·`pyodide?`·`filename?`·`topLevelAwait?`·`clearOnRun?`·`copyOnSelect?`·`onCopy?`·`inputProvider?`·`onStatus?`·`onOutput?`·`onCrash?`다. React에서는 effect 안에서 만들고 cleanup에서 `dispose()`(Terminal은 dispose하지 않는다, StrictMode 이중 마운트에서 worker가 남지 않는다 — demo `RunnerView.tsx`가 그 형태다). 상태는 `createTerminalRunner`가 반환하기 전에 `onStatus`로 동기 통지된다. 확인 도구는 저장소에 있다: `apps/demo/e2e/checks/runner-check.mjs`(`e2e:runner-check`, not-isolated는 `pnpm --filter demo exec node e2e/checks/runner-check.mjs not-isolated http://localhost:4174`), `apps/demo/src/RunnerView.tsx`·`runner.worker.ts`. 실행 로그·변이 검사기(`mutate-safe.mjs`, 스펙 `mutations-delta0{2,3,3a,4,6}*.json`)·프로브(`probe-fallback-ctrlc-delta03a.mjs`)는 `_works/_completed/20260924-26-rd-022-run-driver-terminal/verify/`에 있다. 함정: `docs/traps/TRP-040`~`TRP-050`(TRP-007 갱신). 후속 이슈: `.scratch/run-driver-terminal-followups/issues/`.
+
+### RD-022a — REPL `runSource(code)`
+
+상태: 대기 · 이전: 없음 · 설계: ADR-0006, `14-runner.md`, `02-console-core.md`, `08-session.md`
+
+REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>` 파일명·`exec` 컴파일로 RD-022가 검증한 `runcode` 경로로 실행하고(입력 줄 에코 없이 출력만), 치던 한 줄을 보존해 출력 뒤 다시 그린다. 블록 입력 중(`... `)이거나 Python이 실행 중이면 `RunRejectedError("busy")`로 거부한다. 결과는 RD-022의 결과 유니온(`ok` / `error{ errorType, traceback }` / `interrupted` / `exit{ code }` / `restarted`)이다.
+
+시나리오: `pri`까지 친 상태에서 `runSource("x = 1\nprint(x)")`를 부르면 `1`이 출력되고 그 뒤 `>>> pri`가 다시 그려진다. 이어서 `x`를 치면 `1`이 나온다(REPL globals에 `x`가 남는다).
+
+완료 기준: 단위·jsdom 시험(RED + 변이 검사), 영향 받는 REPL L1 스크립트 `ONLY=`, `runSource` 새 판정 셀(브라우저 L1). L2는 사용자 지시 때만.
 
 ### RD-023 — `pyodide-dom-bridge`(coincident DOM 프록시)
 
@@ -741,7 +762,7 @@ core에 실행 driver(`runDriver`)를, `packages/pyodide-terminal`에 xterm 실�
 
 상태: 대기 · 이전: 없음 · 설계: ADR-0006, `08-session.md`(이중 마운트)
 
-`packages/pyodide-react`에 `<PythonRunner ref>`(handle `run`·`stop`·`reset`, props `createWorker`·`indexURL?`·`inputProvider?`·`onStatus`·`onOutput?`·`terminalOptions?`)와 `<PythonRepl ref>`(handle `runSource`·`reset`), 저수준 `usePythonRunner`를 둔다. 컴포넌트가 xterm 생성·FitAddon 리사이즈·dispose·StrictMode 이중 마운트를 처리하고, `inputProvider`를 생략하면 xterm 줄 입력이다. React 19 ref-as-prop. iframecall 어댑터는 넣지 않는다(앱 계층). demo는 이 패키지로 옮긴다.
+`packages/pyodide-react`에 `<PythonRunner ref>`(handle `run`·`stop`·`reset`, props `createWorker`·`indexURL?`·`inputProvider?`·`onStatus`·`onOutput?`·`terminalOptions?`)와 `<PythonRepl ref>`(handle `runSource`(RD-022a)·`reset`), 저수준 `usePythonRunner`를 둔다. 컴포넌트가 xterm 생성·FitAddon 리사이즈·dispose·StrictMode 이중 마운트를 처리하고, `inputProvider`를 생략하면 xterm 줄 입력이다. React 19 ref-as-prop. iframecall 어댑터는 넣지 않는다(앱 계층). demo는 이 패키지로 옮긴다.
 
 시나리오: React 19 StrictMode 앱에서 `<PythonRepl>`을 마운트하면 worker가 하나만 살아 있고, 창 크기를 바꾸면 터미널이 맞춰진다. `ref.current.run(code)`가 실행창에서 실행된다.
 

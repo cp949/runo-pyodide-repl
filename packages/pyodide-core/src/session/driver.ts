@@ -1,7 +1,7 @@
 /**
  * main 쪽 core 세션(`startCoreSession`)과 driver의 경계. core 세션은 worker 생성·초기화 프레임·RPC 핸들러 합성·`readInput`
  * 처리·"Python 실행 중" 게이트·종료 수명 주기를 소유하고, driver는 화면 상호작용(REPL의 줄 읽기·입력 읽기·출력 그리기)을 낸다.
- * 이 모양은 REPL이 쓰는 것만 담는다(RD-020, 실행 driver는 RD-022). 공개 API로 문서화하기 전의 내부 계약이다.
+ * 이 모양은 REPL과 `createRunner`(`runner.ts`)가 쓰는 것만 담는다. 공개 API가 아니라 내부 계약이다.
  */
 import type { ReadyPayload } from "../protocol/ready-payload";
 import type { RpcHandlers } from "../protocol/rpc";
@@ -34,7 +34,7 @@ export interface MainDriver {
   isIdle(): boolean;
   /**
    * `input()`·`sys.stdin` 읽기 한 건. 줄이면 문자열, 취소면 `null`. core가 결과를 메일박스에 싣는다(`deliver`·`cancel`).
-   * 내부 seam이다: 공개 `InputProvider` 모양(`prompt`·`signal`)은 RD-022.
+   * 내부 seam이다: 공개 모양 `InputProvider`(`prompt`·`signal`)는 `runner.ts`가 이 메서드에 연결한다.
    */
   readInput(cancelable: boolean): Promise<string | null>;
   /**

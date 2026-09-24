@@ -4,7 +4,7 @@
  * 상태는 `onStatus`로 주고받는다. xterm 실행창(`createTerminalRunner`)과 canvas 같은 다른 소비자가 이것 위에 얹힌다.
  * worker 쪽은 `runDriver`(`worker/run-driver.ts`)다.
  *
- * 규칙 요약(docs/design/14-runner.md 예정, 설계는 그릴링 확정 4·5·6·10·11·17):
+ * 규칙 요약(전체 규칙은 docs/design/14-runner.md):
  * - 한 번에 하나만 실행한다. 실행 중(대기 중 포함)에 `run()`을 또 부르면 `RunRejectedError("busy")`.
  * - `loading`·`restarting`이면 `ready`까지 기다린 뒤 실행한다(대기도 슬롯을 차지한다). `load-failed`·`crashed`·`not-isolated`면
  *   `RunRejectedError("unavailable")`.

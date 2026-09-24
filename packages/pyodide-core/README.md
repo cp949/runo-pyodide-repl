@@ -6,8 +6,49 @@ pyodide를 Web Worker에서 실행하는 프로토콜(RPC·`input()` 메일박�
 
 tarball을 `file:`로 설치한다(`pnpm smoke:pack`이 이 경로를 검증한다). 진입점은 두 개다.
 
-- `@cp949/runo-pyodide-core`: main 쪽(프로토콜, `startCoreSession`, `PYODIDE_VERSION`, `DEFAULT_PYODIDE_INDEX_URL`).
-- `@cp949/runo-pyodide-core/worker`: worker 쪽(`runWorker`, `bootWorker`, driver 타입).
+- `@cp949/runo-pyodide-core`: main 쪽(프로토콜, `startCoreSession`, `createRunner`, `RunRejectedError`, `PYODIDE_VERSION`, `DEFAULT_PYODIDE_INDEX_URL`).
+- `@cp949/runo-pyodide-core/worker`: worker 쪽(`runWorker`, `bootWorker`, `runDriver`, driver 타입).
+
+## 코드 실행(`createRunner`)
+
+UI 비의존으로 코드 한 덩어리씩 실행한다. xterm 없이 `onOutput`·`InputProvider`만 채워 쓴다(xterm 실행창은 `@cp949/runo-pyodide-terminal`의 `createTerminalRunner`가 이것을 감싼다).
+
+```ts
+// runner.worker.ts — 앱의 worker 파일. Vite `worker.format`은 'es'.
+import { runDriver, runWorker } from "@cp949/runo-pyodide-core/worker";
+runWorker({ driver: runDriver });
+```
+
+```ts
+import { createRunner, RunRejectedError } from "@cp949/runo-pyodide-core";
+
+const runner = createRunner({
+  createWorker: () => new Worker(new URL("./runner.worker.ts", import.meta.url), { type: "module" }),
+  onOutput: ({ stream, text }) => {}, // stdout·stderr 원문 조각. 줄 끝·색은 소비자가 정한다
+  onStatus: (status) => {},           // loading | ready | running | waiting-input | restarting | load-failed | crashed | not-isolated
+  inputProvider: async (prompt, signal) => "한 줄", // 생략하면 input()은 읽기 취소(KeyboardInterrupt)를 받는다
+  // filename?: "main.py", topLevelAwait?: false, pyodide?: { indexURL }
+});
+
+try {
+  const result = await runner.run("x = 1\nprint(x)"); // 코드는 run마다 새 globals(__main__)에서 실행된다
+  // { kind: "ok" } | { kind: "error", errorType, traceback } | { kind: "interrupted", traceback }
+  // | { kind: "exit", code } | { kind: "restarted" }
+} catch (error) {
+  if (error instanceof RunRejectedError) error.reason; // "busy" | "unavailable" | "disposed" | "crashed"
+}
+
+await runner.stop(); // "idle" | "stopped" | "restarted" — interrupt 뒤 1000ms 안에 끝나지 않으면 worker를 교체한다
+runner.interrupt();  // Ctrl+C용. interrupt만 보내고 terminate하지 않는다
+runner.reset();      // worker를 새로 만든다(변수·import 초기화)
+runner.dispose();
+```
+
+- 한 번에 하나만 실행한다. 실행 중(대기 포함)의 `run()`은 `RunRejectedError("busy")`다. 로딩·재시작 중의 `run()`은 `ready`까지 기다린다.
+- 페이지가 cross-origin isolated여야 한다. 아니면 worker를 만들지 않고 상태 `not-isolated`, `run()`은 `unavailable`이다.
+- `input()`은 `InputProvider`가 받는다. provider 생략 또는 `null` 반환은 읽기 취소라서 `input()`이 `EOFError`가 아니라 `KeyboardInterrupt`이고 결과는 `interrupted`다.
+- 옵션 오류(빈 `filename` 등)는 worker를 만들기 전에 동기로 던진다.
+- 상태 전이표·`run()` 거부 조건·`stop()` 결말·`InputProvider` 계약은 `docs/design/14-runner.md`.
 
 ## pyodide 요구사항
 
