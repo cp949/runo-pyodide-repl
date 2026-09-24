@@ -1,20 +1,18 @@
 // @vitest-environment jsdom
 /**
  * 감시 타이머(`startInterruptWatch`) 시험(03-ctrl-c.md 2.5, 09-testing.md 9.2).
- * `protocol/interrupt-protocol`의 실제 함수를 buffer에 묶어 deps로 주입하고, `interruptIdle`·`atPrompt`만
- * `vi.fn`으로 흉내낸다. `worker/`는 `protocol/`을 import하지 않는 규칙이라 `startInterruptWatch` 자체는 버퍼를
+ * core `protocol/interrupt-protocol`의 실제 함수를 buffer에 묶어 deps로 주입하고, `interruptIdle`·`atPrompt`만
+ * `vi.fn`으로 흉내낸다. `worker/`는 core 프로토콜(`@cp949/runo-pyodide-core`)을 import하지 않는 규칙이라 `startInterruptWatch` 자체는 버퍼를
  * 모르고 deps 클로저로만 움직인다 — 이 시험이 그 배선(주입)을 대신 맡는다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ACK, SIGNAL, createInterruptBuffer } from "@cp949/runo-pyodide-core";
 import {
-  ACK,
-  SIGNAL,
   consumeInterrupt,
-  createInterruptBuffer,
   discardPendingInterrupt,
   hasPendingInterrupt,
   signalInterrupt,
-} from "../protocol/interrupt-protocol";
+} from "@cp949/runo-pyodide-core/worker";
 import { startInterruptWatch } from "./interrupt-watch";
 
 interface Rig {

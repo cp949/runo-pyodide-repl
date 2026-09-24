@@ -15,21 +15,21 @@ import {
   test,
   vi,
 } from "vitest";
+import { ACK, createInterruptBuffer, SIGNAL } from "@cp949/runo-pyodide-core";
 import {
-  ACK,
   acknowledgeInterrupt,
-  createInterruptBuffer,
   discardPendingInterrupt,
   readRequestSeq,
-  SIGNAL,
   signalInterrupt,
-} from "../protocol/interrupt-protocol";
-import type {
-  PresserCommand,
-  PresserEvent,
-} from "../test/roles/interrupt-presser";
-import { restoreRunSync, saveRunSync } from "../test/sigint-setup";
-import { spawnRole } from "../test/thread";
+} from "@cp949/runo-pyodide-core/worker";
+import {
+  INTERRUPT_PRESSER_ROLE,
+  restoreRunSync,
+  saveRunSync,
+  type PresserCommand,
+  type PresserEvent,
+} from "../test/sigint-setup";
+import { spawnRole } from "@repo/pyodide-testkit/thread";
 import { createConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
 import { installSigintHandler } from "./sigint-handler";
@@ -330,7 +330,7 @@ function setupConsole() {
 
   /** 눌림 스레드를 띄운다. 시험이 끝나면 회수된다(`spawnRole`의 `onTestFinished`). */
   function presser() {
-    const role = spawnRole("interrupt-presser", { buffer, ctl });
+    const role = spawnRole(INTERRUPT_PRESSER_ROLE, { buffer, ctl });
     return {
       /** 눌림을 예약한다. 바로 돌아오고, 눌림 스레드가 시작 표시를 기다린 뒤 쓴다. */
       press(

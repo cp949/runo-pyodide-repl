@@ -7,7 +7,7 @@
  */
 import { Readline } from "@cp949/runo-xterm-readline";
 import { describe, expect, test, vi } from "vitest";
-import { createFakeTerminal } from "../test/fake-terminal";
+import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
 import { createAutoIndent } from "./auto-indent";
 import { createReadGuard } from "./read-guard";
 import { createReplReader } from "./repl-reader";

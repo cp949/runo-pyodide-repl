@@ -3,7 +3,7 @@
  * 클립보드·DOM 이벤트를 대체해 실제 xterm 없이 결정·부작용을 검증한다.
  */
 import { describe, expect, test, vi } from "vitest";
-import { createFakeTerminal } from "../test/fake-terminal";
+import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
 import { createSelectionCopy, decideKey, type CopyResult } from "./selection-copy";
 
 describe("decideKey", () => {

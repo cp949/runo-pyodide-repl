@@ -4,7 +4,7 @@
  * `Atomics.wait`로 정지하고, main 역할(시험 본문)이 `deliver`/`cancel`/`fail`로 깨운다.
  */
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { spawnRole } from "../test/thread";
+import { spawnRole } from "@repo/pyodide-testkit/thread";
 import { createMailboxWriter, createStdinMailbox } from "./stdin-mailbox";
 
 /** worker 스레드의 `wait()` 결과. 값(문자열 또는 취소 null) 또는 던진 오류의 메시지. */
@@ -24,7 +24,7 @@ function patterned(length: number): string {
 function setup() {
   const mailbox = createStdinMailbox();
   const writer = createMailboxWriter(mailbox);
-  const role = spawnRole("mailbox-reader", mailbox);
+  const role = spawnRole(new URL("../test/roles/mailbox-reader.ts", import.meta.url), mailbox);
   return {
     writer,
     /** worker가 `wait()`에 들어가게 하고 그 결과를 기다린다. */

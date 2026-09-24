@@ -10,12 +10,12 @@
  * ctl: [0] 예약, [1] 종료 플래그, [2] KeyboardInterrupt 수, [3] 시작 표시.
  */
 import { parentPort, workerData } from "node:worker_threads";
-import { createInterruptSender } from "../../../../../packages/pyodide-repl/src/protocol/interrupt-sender.ts";
+import { createInterruptSender } from "../../../../../packages/pyodide-core/src/protocol/interrupt-sender.ts";
 import {
   SEQ,
   SIGNAL,
   signalInterrupt,
-} from "../../../../../packages/pyodide-repl/src/protocol/interrupt-protocol.ts";
+} from "../../../../../packages/pyodide-core/src/protocol/interrupt-protocol.ts";
 
 const port = parentPort;
 if (!port) throw new Error("worker 스레드에서만 실행한다");

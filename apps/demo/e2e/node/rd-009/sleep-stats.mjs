@@ -1,12 +1,12 @@
 /**
  * node N=30 통계(RD-009 완료 기준). 실제 pyodide(node)에 저장소 worker 모듈을 `boot.ts`와 같은
  * 순서로 배선하고(`createConsole` → `suppressWebLoopReraise` → `connectInterrupts` → `createSubmissionRunner`),
- * 별도 스레드(`src/test/roles/interrupt-presser.ts`)가 저장소 송신 프로토콜(`signalInterrupt`)로 눌림을 쓴다.
+ * 별도 스레드(core `src/test/roles/interrupt-presser.ts`)가 저장소 송신 프로토콜(`signalInterrupt`)로 눌림을 쓴다.
  * `--mode jspi|nojspi` × 5 프로그램 × N=30, 눌림 시각은 300~3000ms 균등 무작위(시행마다 다시 뽑는다).
  * 출처 RD-009, `_works/_completed/20260922-09-rd-009-idle-ctrl-c/verify/node/`에서 이관(RD-018 DELTA-04).
  *
  * 실행(레포 루트에서):
- *   H1=packages/pyodide-repl/src/test/ts-resolve-hook.mjs
+ *   H1=packages/pyodide-testkit/src/ts-resolve-hook.mjs
  *   H2=apps/demo/e2e/node/rd-009/py-raw-hook.mjs
  *   node --import $H1 --import $H2 apps/demo/e2e/node/rd-009/sleep-stats.mjs --mode jspi --n 30
  *
@@ -91,7 +91,7 @@ const {
   acknowledgeInterrupt,
   readRequestSeq,
   discardPendingInterrupt,
-} = await import(new URL("src/protocol/interrupt-protocol.ts", REPO).href);
+} = await import(new URL("../pyodide-core/src/protocol/interrupt-protocol.ts", REPO).href);
 
 const pyodide = await loadPyodide();
 
@@ -155,11 +155,11 @@ let presser;
 function ensurePresser() {
   if (presser) return presser;
   presser = new Worker(
-    new URL("src/test/roles/interrupt-presser.ts", REPO),
+    new URL("../pyodide-core/src/test/roles/interrupt-presser.ts", REPO),
     {
       execArgv: [
         "--import",
-        new URL("src/test/ts-resolve-hook.mjs", REPO).href,
+        new URL("../pyodide-testkit/src/ts-resolve-hook.mjs", REPO).href,
       ],
       workerData: { buffer, ctl },
     },

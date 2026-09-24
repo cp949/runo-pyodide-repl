@@ -13,11 +13,11 @@
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { PresserEvent } from "../test/roles/interrupt-presser";
 import {
   BUSY,
   CONSOLE_TRACEBACK,
   execSource,
+  type PresserEvent,
   type SetupOptions,
   setupConsoleRunner,
   teardownConsoleRunner,

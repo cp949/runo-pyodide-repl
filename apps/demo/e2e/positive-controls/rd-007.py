@@ -42,7 +42,7 @@ CONTROLS = {
         ],
     },
     "2": {
-        "file": "packages/pyodide-repl/src/protocol/interrupt-sender.ts",
+        "file": "packages/pyodide-core/src/protocol/interrupt-sender.ts",
         "find": "      Atomics.compareExchange(buffer, SIGNAL, 0, 2);\n      resends++;\n",
         "replace": "",
         # 소실은 확률적이다. 기본 200회로 보고 0이면 호출자가 N을 올려 한 번 더 돌린다.

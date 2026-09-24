@@ -9,13 +9,15 @@
 import type { PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
 import {
-  acknowledgeInterrupt,
   createInterruptBuffer,
-  discardPendingInterrupt,
-  readRequestSeq,
   SIGNAL,
   signalInterrupt,
-} from "../protocol/interrupt-protocol";
+} from "@cp949/runo-pyodide-core";
+import {
+  acknowledgeInterrupt,
+  discardPendingInterrupt,
+  readRequestSeq,
+} from "@cp949/runo-pyodide-core/worker";
 import { createConsole, type PyodideConsoleProxy } from "../worker/console";
 import { loadSplitPaste } from "../worker/multiline";
 import {
@@ -28,8 +30,11 @@ import {
   type SubmissionRunner,
 } from "../worker/submission-runner";
 import { suppressWebLoopReraise } from "../worker/webloop-reraise";
-import type { PresserCommand, PresserEvent } from "./roles/interrupt-presser";
-import { spawnRole } from "./thread";
+import type {
+  PresserCommand,
+  PresserEvent,
+} from "../../../pyodide-core/src/test/roles/interrupt-presser";
+import { spawnRole } from "@repo/pyodide-testkit/thread";
 
 /**
  * 상한 있는 바쁜 루프(약 0.23초). 핸들러가 잘못돼 SIGINT가 버려져도 시험이 멈추지 않고 단언에서 실패한다.
@@ -49,6 +54,17 @@ export const CONSOLE_TRACEBACK =
   'Traceback (most recent call last):\n  File "<console>", line 1, in <module>\nKeyboardInterrupt\n';
 
 /** [SIGINT, ack, 요청 번호, 예약]. 슬롯 배치는 프로토콜 규약이라 인덱스 그대로 본다. */
+/**
+ * 눌림 스레드 역할 스크립트 위치. 시험 세 곳이 같은 파일을 띄운다(`spawnRole`은 URL을 받는다).
+ * 역할은 core `src/test/roles/`에 있고(core 프로토콜을 import한다) core는 시험 전용 export를 내지 않으므로
+ * 저장소 안 상대 경로로 가리킨다. 패키지 배치를 바꾸면 이 두 경로(URL·타입 import)만 고친다.
+ */
+export const INTERRUPT_PRESSER_ROLE = new URL(
+  "../../../pyodide-core/src/test/roles/interrupt-presser.ts",
+  import.meta.url,
+);
+export type { PresserCommand, PresserEvent };
+
 export const slots = (buffer: Int32Array) => Array.from(buffer);
 
 export interface SetupOptions {
@@ -228,7 +244,7 @@ export function setupConsoleRunner(
   });
 
   function presser(): Presser {
-    const role = spawnRole("interrupt-presser", { buffer, ctl });
+    const role = spawnRole(INTERRUPT_PRESSER_ROLE, { buffer, ctl });
     return {
       press(command): void {
         role.post({ kind: "press", ...command } satisfies PresserCommand);

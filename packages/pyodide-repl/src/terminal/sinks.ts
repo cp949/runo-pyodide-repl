@@ -3,7 +3,7 @@
  * 이 함수들을 지나므로 개행·색 규칙이 한곳에 있다. `Readline`은 `print`/`println`만 쓴다(ADR-0003).
  */
 import type { Readline } from "@cp949/runo-xterm-readline";
-import { createOutputTail } from "./output-tail";
+import { createOutputTail } from "@cp949/runo-pyodide-core";
 
 export const RED = "\x1b[31m";
 export const RESET = "\x1b[0m";

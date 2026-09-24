@@ -5,8 +5,10 @@
  * 프레임을 놓치지 않으려면 호출 즉시(첫 await 이전) 리스너가 걸려 있어야 한다(01-protocols.md 4절).
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createInterruptBuffer } from "./protocol/interrupt-protocol";
-import { createStdinMailbox } from "./protocol/stdin-mailbox";
+import {
+  createInterruptBuffer,
+  createStdinMailbox,
+} from "@cp949/runo-pyodide-core";
 import { runReplWorker } from "./worker";
 import { bootReplWorker } from "./worker/boot";
 

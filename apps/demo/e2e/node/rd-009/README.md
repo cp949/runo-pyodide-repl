@@ -2,7 +2,7 @@
 
 실제 pyodide(node)에 저장소 worker 모듈을 `boot.ts`와 같은 순서로 배선하고(`createConsole` →
 `suppressWebLoopReraise` → `connectInterrupts` → `createSubmissionRunner`), 별도 스레드
-(`src/test/roles/interrupt-presser.ts`)가 저장소 송신 프로토콜(`signalInterrupt`)로 눌림을 쓴다.
+(core `src/test/roles/interrupt-presser.ts`)가 저장소 송신 프로토콜(`signalInterrupt`)로 눌림을 쓴다.
 JSPI 있음·없음 × 5 프로그램 × N=30 = 300시행이라 수 분 걸리고 타이밍으로 판정하므로 `pnpm test`에 넣지 않는다.
 
 출처 RD-009, `_works/_completed/20260922-09-rd-009-idle-ctrl-c/verify/node/`에서 이관(RD-018 DELTA-04).
@@ -22,7 +22,7 @@ node의 훅 체인은 스택이라 나중에 등록한 훅이 먼저 실행된�
 ## 실행
 
 ```bash
-H1=packages/pyodide-repl/src/test/ts-resolve-hook.mjs
+H1=packages/pyodide-testkit/src/ts-resolve-hook.mjs
 H2=apps/demo/e2e/node/rd-009/py-raw-hook.mjs
 cd /path/to/repo   # 레포 루트
 

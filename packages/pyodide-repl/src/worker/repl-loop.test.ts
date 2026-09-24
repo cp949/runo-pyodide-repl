@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * REPL 루프(`runReplLoop`)의 순수 제어 흐름 시험(00-architecture.md 3.2).
- * protocol/RPC 구현을 import하지 않고 주입한 `readLine`·`run`으로 프롬프트와 pending 전달, 종료,
+ * core 프로토콜·RPC 구현을 import하지 않고 주입한 `readLine`·`run`으로 프롬프트와 pending 전달, 종료,
  * 실행 오류 복구, 읽기 요청 거절 정책을 고정한다.
  */
 import { afterEach, describe, expect, test, vi } from "vitest";

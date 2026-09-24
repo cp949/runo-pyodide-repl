@@ -1,5 +1,5 @@
 /**
- * worker 스레드 시험 전용 해석 훅. `--import`로 스레드에 등록한다(`src/test/thread.ts`).
+ * worker 스레드 시험 전용 해석 훅. `--import`로 스레드에 등록한다(`thread.ts`).
  * 프로덕션 소스는 번들러 해석을 전제로 확장자 없이 상대 import를 쓴다(`../protocol/rpc`). Node의 타입 제거 실행은 그
  * 확장자를 풀지 못하므로 `.ts`를 붙여 다시 푼다.
  */

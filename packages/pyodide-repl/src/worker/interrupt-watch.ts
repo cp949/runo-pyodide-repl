@@ -10,7 +10,7 @@
  * - 실행 중(`atPrompt()`가 거짓) 규칙은 위와 같다: 남기고 다음 틱에 다시 시도한다.
  * - 중지: 반환한 함수가 `clearInterval`한다.
  *
- * `worker/`는 `protocol/`을 import하지 않으므로 버퍼 대신 deps 클로저를 받는다(`boot.ts`가 넣는다). 타이머는
+ * `worker/`는 core 프로토콜(`@cp949/runo-pyodide-core`)을 import하지 않으므로 버퍼 대신 deps 클로저를 받는다(`boot.ts`가 넣는다). 타이머는
  * 요청 번호를 확인하지 않는다(알려진 한계).
  */
 export interface InterruptWatchDeps {

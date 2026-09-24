@@ -4,7 +4,7 @@
  */
 import { Readline } from "@cp949/runo-xterm-readline";
 import { describe, expect, test } from "vitest";
-import { createFakeTerminal } from "../test/fake-terminal";
+import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
 import { writeNotice } from "./notice";
 import { createTerminalSinks } from "./sinks";
 

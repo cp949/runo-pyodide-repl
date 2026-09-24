@@ -1,7 +1,10 @@
 import { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
-import { createInterruptBuffer, SIGNAL } from "./protocol/interrupt-protocol";
-import { createInterruptSender } from "./protocol/interrupt-sender";
+import {
+  createInterruptBuffer,
+  SIGNAL,
+  createInterruptSender,
+} from "@cp949/runo-pyodide-core";
 import { startSession, type ReplSession } from "./session";
 import { createSelectionCopy, type CopyResult } from "./terminal/selection-copy";
 import { writeNotice } from "./terminal/notice";

@@ -4,7 +4,7 @@
  * pyodide 기본 핸들러가 받아 시작 코드(`signal.signal`, `eval_code`)가 `KeyboardInterrupt`로 죽는다(TRP-027).
  * 조각 교체가 핸들러보다 먼저인 것은 조각 래퍼의 코드 객체를 핸들러의 트레이스백 절단 목록에 넘겨야 해서다.
  *
- * `worker/`는 `protocol/`을 import하지 않는다. `ack`·`seq`·`discard`는 `boot.ts`가 `protocol/`의 함수를 클로저로 넣는다
+ * `worker/`는 core 프로토콜(`@cp949/runo-pyodide-core`)을 import하지 않는다. `ack`·`seq`·`discard`는 `boot.ts`가 core 프로토콜의 함수를 클로저로 넣는다
  * (`stdin-callback.ts`와 같은 패턴).
  */
 import type { PyodideInterface } from "pyodide";

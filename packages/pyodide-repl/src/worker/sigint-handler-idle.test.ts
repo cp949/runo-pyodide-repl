@@ -13,7 +13,7 @@
  *
  * 깨우기는 감시 타이머(DELTA-04)가 부르는 것이 프로덕션 경로이고, 여기서는 `sigint-setup.ts`의 `wakeAfter(ms)`가 그
  * 한 틱을 흉내낸다(`signalInterrupt` → `interruptIdle()` → 깨웠으면 소비·ack). 타이머 없이 핸들러만으로 깨우는 경로는
- * 눌림 스레드(`src/test/roles/interrupt-presser.ts`)가 만든다.
+ * 눌림 스레드(core `src/test/roles/interrupt-presser.ts`)가 만든다.
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";

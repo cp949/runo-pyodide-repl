@@ -8,18 +8,19 @@
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { ACK, SIGNAL, createInterruptBuffer } from "@cp949/runo-pyodide-core";
 import {
-  ACK,
-  SIGNAL,
   acknowledgeInterrupt,
-  createInterruptBuffer,
   discardPendingInterrupt,
   readRequestSeq,
   signalInterrupt,
-} from "../protocol/interrupt-protocol";
-import type { PresserCommand } from "../test/roles/interrupt-presser";
-import { CONSOLE_TRACEBACK } from "../test/sigint-setup";
-import { spawnRole } from "../test/thread";
+} from "@cp949/runo-pyodide-core/worker";
+import {
+  CONSOLE_TRACEBACK,
+  INTERRUPT_PRESSER_ROLE,
+  type PresserCommand,
+} from "../test/sigint-setup";
+import { spawnRole } from "@repo/pyodide-testkit/thread";
 import { createConsole } from "./console";
 import { connectInterrupts } from "./interrupt-buffer";
 import { loadSplitPaste } from "./multiline";
@@ -195,7 +196,7 @@ describe("connectInterrupts", () => {
       Atomics.store(ctl, 0, 1);
       Atomics.notify(ctl, 0);
     });
-    const presser = spawnRole("interrupt-presser", { buffer, ctl });
+    const presser = spawnRole(INTERRUPT_PRESSER_ROLE, { buffer, ctl });
     presser.post({ kind: "press", offsets: [200] } satisfies PresserCommand);
 
     expect(await run("import time; started(); time.sleep(5)")).toEqual({

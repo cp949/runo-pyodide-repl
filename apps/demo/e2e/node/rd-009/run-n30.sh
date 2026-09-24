@@ -7,7 +7,7 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/../../../../.." && pwd)"
 
-H1="$ROOT/packages/pyodide-repl/src/test/ts-resolve-hook.mjs"
+H1="$ROOT/packages/pyodide-testkit/src/ts-resolve-hook.mjs"
 H2="$DIR/py-raw-hook.mjs"
 SCRIPT="$DIR/sleep-stats.mjs"
 

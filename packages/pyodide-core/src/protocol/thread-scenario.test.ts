@@ -15,7 +15,7 @@ import {
 } from "./interrupt-protocol";
 import { createRpc } from "./rpc";
 import { createMailboxWriter, createStdinMailbox } from "./stdin-mailbox";
-import { spawnRole } from "../test/thread";
+import { spawnRole } from "@repo/pyodide-testkit/thread";
 
 interface Received {
   line: string;
@@ -101,7 +101,7 @@ async function runScenario(options: ScenarioOptions = {}) {
   });
   onTestFinished(() => rpc.dispose());
 
-  const role = spawnRole("repl-worker");
+  const role = spawnRole(new URL("../test/roles/repl-worker.ts", import.meta.url));
   postInitFrame(
     { postMessage: (message, transfer) => role.post(message, transfer) },
     frame,

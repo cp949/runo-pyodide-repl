@@ -5,7 +5,7 @@
  * 실제 화면 결과(앞 행 중복 없음)는 브라우저(Playwright)가 본다.
  */
 import { describe, expect, test } from "vitest";
-import { createFakeTerminal } from "../test/fake-terminal";
+import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
 import { rewindTail } from "./rewind-tail";
 
 /** 폭 80의 비동기 write 가짜 터미널과, 시작 → flush → 완료를 한 번에 하는 도우미. */

@@ -5,7 +5,7 @@
  * 이관(RD-018 DELTA-04).
  *
  * 사용(레포 루트에서):
- *   node --import packages/pyodide-repl/src/test/ts-resolve-hook.mjs apps/demo/e2e/node/rd-007/press-loss.mjs --scenario single --n 3000
+ *   node --import packages/pyodide-testkit/src/ts-resolve-hook.mjs apps/demo/e2e/node/rd-007/press-loss.mjs --scenario single --n 3000
  *   node --import … apps/demo/e2e/node/rd-007/press-loss.mjs --scenario multi --k 300 --pages 10 --gap 25
  *   node --import … apps/demo/e2e/node/rd-007/press-loss.mjs --scenario multi --k 300 --pages 10 --mutate resend-new-seq
  *
@@ -42,7 +42,7 @@ const {
   acknowledgeInterrupt,
   readRequestSeq,
   discardPendingInterrupt,
-} = await import(new URL("src/protocol/interrupt-protocol.ts", REPO).href);
+} = await import(new URL("../pyodide-core/src/protocol/interrupt-protocol.ts", REPO).href);
 
 /** `--이름 값` 형태만 받는다. */
 function parseArgs(argv) {
@@ -141,7 +141,7 @@ pyodide.runPython(
 const presser = new Worker(new URL("presser.mjs", import.meta.url), {
   execArgv: [
     "--import",
-    new URL("src/test/ts-resolve-hook.mjs", REPO).href,
+    new URL("../pyodide-testkit/src/ts-resolve-hook.mjs", REPO).href,
   ],
   workerData: { buffer, ctl, mutate },
 });

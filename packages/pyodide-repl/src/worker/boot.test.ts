@@ -8,18 +8,18 @@
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
-import type { InitFrame } from "../protocol/init-frame";
 import {
   ACK,
   SIGNAL,
   createInterruptBuffer,
-  signalInterrupt,
-} from "../protocol/interrupt-protocol";
-import { createRpc } from "../protocol/rpc";
-import {
   createMailboxWriter,
   createStdinMailbox,
-} from "../protocol/stdin-mailbox";
+} from "@cp949/runo-pyodide-core";
+import {
+  type InitFrame,
+  signalInterrupt,
+  createRpc,
+} from "@cp949/runo-pyodide-core/worker";
 import { bootReplWorker } from "./boot";
 
 let pyodide: PyodideInterface;

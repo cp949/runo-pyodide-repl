@@ -10,7 +10,7 @@
 레포 루트에서:
 
 ```bash
-H1=./packages/pyodide-repl/src/test/ts-resolve-hook.mjs
+H1=./packages/pyodide-testkit/src/ts-resolve-hook.mjs
 H2=./apps/demo/e2e/node/rd-009/py-raw-hook.mjs
 N=apps/demo/e2e/node/rd-007
 
@@ -28,7 +28,7 @@ node --import $H1 --import $H2 $N/poll-overhead.mjs --rounds 10
 ```
 
 `--import <훅>`은 확장자 없는 상대 import(`../protocol/rpc`)를 푸는 해석 훅이다(Node 타입 제거 실행).
-`enum`·`namespace`가 없는 소스만 이렇게 로드된다 — 현재 `protocol/`·`worker/`가 그렇다.
+`enum`·`namespace`가 없는 소스만 이렇게 로드된다 — 현재 core `protocol/`·repl `worker/`가 그렇다.
 
 **두 훅이 모두 필요하다(RD-018 DELTA-04에서 실측)**: RD-007 완료 시점에는 `ts-resolve-hook.mjs` 하나로
 충분했지만, 그 뒤(DELTA-00 무렵) `console.ts`·`sigint-handler.ts`·`sleep-slice.ts`가 Python 소스를

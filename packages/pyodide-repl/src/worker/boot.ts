@@ -4,17 +4,17 @@
  * `loadPyodide`로 시험하고 브라우저에서는 CDN 로더(`loadPyodideFromCdn`)를 쓴다.
  */
 import type { PyodideInterface } from "pyodide";
-import type { InitFrame } from "../protocol/init-frame";
 import {
+  type InitFrame,
   acknowledgeInterrupt,
   consumeInterrupt,
   discardPendingInterrupt,
   hasPendingInterrupt,
   readRequestSeq,
   signalInterrupt,
-} from "../protocol/interrupt-protocol";
-import { createRpc } from "../protocol/rpc";
-import { createMailboxReader } from "../protocol/stdin-mailbox";
+  createRpc,
+  createMailboxReader,
+} from "@cp949/runo-pyodide-core/worker";
 import {
   loadCompleteSource,
   type CompleteSource,
@@ -52,7 +52,7 @@ export async function bootReplWorker(
   frame: InitFrame,
   deps: BootDeps,
 ): Promise<void> {
-  // complete 핸들러는 createRpc 생성 시에만 등록할 수 있다(protocol/rpc.ts, 나중 등록 API 없음). 콘솔이 아직 없는
+  // complete 핸들러는 createRpc 생성 시에만 등록할 수 있다(core `protocol/rpc.ts`, 나중 등록 API 없음). 콘솔이 아직 없는
   // 동안(로드 중)과 프롬프트 대기 중이 아닌 동안(실행 중)은 completer/atPrompt를 클로저로 읽어 빈 응답으로 답한다.
   let completer: CompleteSource | null = null;
   let atPrompt = false;
@@ -80,7 +80,7 @@ export async function bootReplWorker(
     });
     // time.sleep 조각 교체 → SIGINT 핸들러 설치 → 폐기 → 버퍼 연결. 폴링은 연결 뒤에 시작하므로 이 순서가 부팅 중
     // 눌림으로부터 시작 코드를 지킨다.
-    // `worker/`가 `protocol/`을 import하지 않도록 프로토콜 함수는 여기서 클로저로 넣는다. 실패는 loadFailed다.
+    // `worker/`가 core 프로토콜을 import하지 않도록 프로토콜 함수는 여기서 클로저로 넣는다. 실패는 loadFailed다.
     interruptIdle = connectInterrupts(
       pyodide,
       repl.pyconsole,

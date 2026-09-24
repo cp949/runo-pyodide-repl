@@ -10,7 +10,7 @@
  * `interrupt_idle`은 감시 타이머가 같은 일을 하는 진입점이다. 그 밖(다음 문장 컴파일, 트레이스백 생성, 시작 코드)의
  * SIGINT는 버린다(TRP-009). pyodide 내부가 기대와 다르면 깨우기만 건너뛰고 `warn`으로 알린다.
  *
- * `worker/`는 `protocol/`을 import하지 않는다. `ack`·`seq`는 `boot.ts`가 `acknowledgeInterrupt`·`readRequestSeq`를
+ * `worker/`는 core 프로토콜(`@cp949/runo-pyodide-core`)을 import하지 않는다. `ack`·`seq`는 `boot.ts`가 `acknowledgeInterrupt`·`readRequestSeq`를
  * 클로저로 넣는다(`stdin-callback.ts`와 같은 패턴).
  */
 import type { PyodideInterface } from "pyodide";

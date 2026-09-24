@@ -7,13 +7,15 @@ import { ReadCancelledError } from "@cp949/runo-xterm-readline";
 import type { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
 import type { ReplStatus } from "./index";
-import { postInitFrame, type InitFrame } from "./protocol/init-frame";
-import type { InterruptSender } from "./protocol/interrupt-sender";
-import { createRpc, type Rpc } from "./protocol/rpc";
 import {
+  postInitFrame,
+  type InitFrame,
+  type InterruptSender,
+  createRpc,
+  type Rpc,
   createMailboxWriter,
   createStdinMailbox,
-} from "./protocol/stdin-mailbox";
+} from "@cp949/runo-pyodide-core";
 import { createAutoIndent } from "./terminal/auto-indent";
 import { createBlockHistory } from "./terminal/block-history";
 import { mergeReadOptions } from "./terminal/read-options";

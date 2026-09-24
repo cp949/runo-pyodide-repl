@@ -1,5 +1,7 @@
-import { parseInitFrame } from "./protocol/init-frame";
-import type { InitFrame } from "./protocol/init-frame";
+import {
+  parseInitFrame,
+  type InitFrame,
+} from "@cp949/runo-pyodide-core/worker";
 import { bootReplWorker } from "./worker/boot";
 import { loadPyodideFromCdn } from "./worker/load-pyodide";
 

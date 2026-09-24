@@ -8,7 +8,7 @@
  * 워밍업 뒤 ABAB로 교차 측정해 중앙값 비율을 낸다. 통과: `repo`의 두 비율이 1.03 이내.
  *
  * 사용(레포 루트에서):
- *   node --import packages/pyodide-repl/src/test/ts-resolve-hook.mjs apps/demo/e2e/node/rd-007/poll-overhead.mjs [--rounds 10]
+ *   node --import packages/pyodide-testkit/src/ts-resolve-hook.mjs apps/demo/e2e/node/rd-007/poll-overhead.mjs [--rounds 10]
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -32,7 +32,7 @@ const {
   acknowledgeInterrupt,
   readRequestSeq,
   discardPendingInterrupt,
-} = await import(new URL("src/protocol/interrupt-protocol.ts", REPO).href);
+} = await import(new URL("../pyodide-core/src/protocol/interrupt-protocol.ts", REPO).href);
 
 const args = Object.fromEntries(
   process.argv

@@ -8,10 +8,10 @@
  * `readLine`을 요청하는 형태로 옮겼고, `sessionTerminated` 알림 → `onStatus('terminated')`를 더했다.
  * RD-006: worker의 `readInput` 알림 → stdin 읽기(꼬리 프롬프트) → 메일박스 `deliver`·`fail`, REPL 읽기와의 순서(read-guard).
  * worker가 없어 메일박스를 아무도 가져가지 않으므로 main이 쓴 값이 그대로 남는다. 실제 `Atomics.wait` 왕복은
- * `protocol/thread-scenario.test.ts`가 본다.
+ * core `protocol/thread-scenario.test.ts`가 본다.
  * RD-007: 실행 중 Ctrl+C. 벤더 `Readline`이 활성 읽기 없이 부르는 `setCtrlCHandler`가 `^C`를 꼬리에 쓰고 프레임의
  * interrupt buffer에 SIGINT를 쓰는지, 게이트(`pythonRunning`)가 대상 코드가 없는 구간의 눌림을 버리는지, cancel 지점이
- * 송신기의 재전송을 멈추는지 본다. 송신기의 상태기계 자체는 `protocol/interrupt-sender.test.ts`가 맡는다.
+ * 송신기의 재전송을 멈추는지 본다. 송신기의 상태기계 자체는 core `protocol/interrupt-sender.test.ts`가 맡는다.
  * RD-008: 입력줄 Ctrl+C 취소. REPL 읽기는 응답 `null`, stdin 읽기는 메일박스 CANCELLED가 되고 둘 다 `^C`를 찍지 않는다.
  * 취소 응답 뒤 다음 요청이 오기 전의 구간(`cancelSettling`)은 게이트를 닫고, `input()` 취소에는 닫지 않는다.
  */
@@ -25,14 +25,21 @@ import {
   type ReplHandle,
   type ReplOptions,
 } from "./index";
-import { parseInitFrame, type InitFrame } from "./protocol/init-frame";
-import { ACK, SEQ, SIGNAL } from "./protocol/interrupt-protocol";
-import { createRpc, type Rpc, type RpcHandlers } from "./protocol/rpc";
+import {
+  type InitFrame,
+  ACK,
+  SEQ,
+  SIGNAL,
+  createRpc,
+  type Rpc,
+  type RpcHandlers,
+} from "@cp949/runo-pyodide-core";
+import { parseInitFrame } from "@cp949/runo-pyodide-core/worker";
 import {
   createFakeTerminal,
   type FakeTerminal,
   type FakeTerminalOptions,
-} from "./test/fake-terminal";
+} from "@repo/pyodide-testkit/fake-terminal";
 import type { SourceCompletion } from "./worker/complete-source";
 
 type Outcome =

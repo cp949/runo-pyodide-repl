@@ -4,7 +4,7 @@
  * 있을 때만 `KeyboardInterrupt`, 요청 번호 확인·ack, 핸들러 프레임 절단)은 pyodide의 시그널 폴링·asyncio 스케줄러·
  * `ConsoleFuture`의 트레이스백 생성에 걸쳐 있어 실제 pyodide(node)에서만 재현된다. mock 없이 로드한다.
  * 같은 스레드에서 쓰는 눌림(`press()`)은 결정적이고, 실제 스레드 경합은 눌림 스레드 역할
- * (`src/test/roles/interrupt-presser.ts`)이 만든다.
+ * (core `src/test/roles/interrupt-presser.ts`)이 만든다.
  *
  * 핸들러를 먼저 설치하고 그 뒤에 버퍼를 연결한다(worker의 `connectInterrupts`와 같은 순서). 연결 순서 자체의 시험은
  * `interrupt-buffer.test.ts`가 맡는다.
@@ -14,7 +14,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   discardPendingInterrupt,
   signalInterrupt,
-} from "../protocol/interrupt-protocol";
+} from "@cp949/runo-pyodide-core/worker";
 import {
   BUSY,
   CONSOLE_TRACEBACK,
