@@ -34,12 +34,11 @@ DEV_LOG = os.environ.get("DEV_LOG", os.path.join(tempfile.gettempdir(), "rd-009-
 CONTROLS = {
     "1": {
         "file": "packages/pyodide-core/src/worker/boot.ts",
+        # RD-021 경로 정정: `warn` 주입이 수집기 `report`로 바뀌어 호출이 한 줄이 됐다(TRP-034).
         "find": (
             "    // WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제. "
-            "세션당 1회, 실패해도 REPL 동작은 그대로다(경고만 남는다).\n"
-            "    suppressWebLoopReraise(pyodide, {\n"
-            "      warn: (message) => console.warn(message),\n"
-            "    });\n"
+            "세션당 1회, 실패해도 REPL 동작은 그대로다(`webloop-handlers`로 알린다).\n"
+            "    suppressWebLoopReraise(pyodide, { report: collector.report });\n"
         ),
         "replace": "",
         "scripts": [
