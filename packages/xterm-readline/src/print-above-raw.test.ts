@@ -764,6 +764,22 @@ describe("재그리기 대기 중 공개 편집 API", () => {
     expect(term.vt.screen()).toBe("> abc\nA\n> ac");
   });
 
+  test("Tab printAbove 재그리기 대기 중 getCursor는 끝이 아니라 편집이 들어갈 처음 커서를 돌려준다", () => {
+    // 호출자(tab-reader 경합 판정)는 getCursor로 본 자리에 editInsert가 들어간다고 가정한다. 둘이 같은 커서를 봐야 한다.
+    const { term, readline } = setup();
+    void readline.read("> ");
+    term.type("abc");
+    term.feed(ARROW_LEFT);
+    term.asyncWrite = true;
+    void readline.printAbove("A");
+
+    expect(readline.getCursor()).toBe(2);
+    readline.editInsert("Z");
+    expect(readline.getCursor()).toBe(3);
+    term.flush();
+    expect(readline.getCursor()).toBe(3);
+  });
+
   test("콜백 전 편집 뒤 takeRead는 편집 뒤 텍스트·커서를 돌려준다", () => {
     const { term, readline } = setup();
     void readline.read("> ").catch(() => {});

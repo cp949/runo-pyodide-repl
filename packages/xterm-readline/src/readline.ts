@@ -579,10 +579,11 @@ export class Readline implements ITerminalAddon {
 
   /**
    * 현재 버퍼의 커서 위치(UTF-16 인덱스)를 돌려준다. `getLine`/`updateLine`과 같은 수준으로 활성
-   * 읽기가 없어도 현재 state에 작용한다.
+   * 읽기가 없어도 현재 state에 작용한다. 재그리기 대기 중이면 저장 커서(`redrawCursor`)다 — Tab `printAbove`의
+   * `moveCursorToEnd()`가 논리 커서를 끝으로 옮겨 두어도 공개 편집 API가 쓰는 자리와 같은 값을 돌려준다.
    */
   public getCursor(): number {
-    return this.state.cursor();
+    return this.redrawing ? this.redrawCursor : this.state.cursor();
   }
 
   /**
