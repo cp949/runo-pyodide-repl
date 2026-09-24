@@ -62,3 +62,51 @@ export function spawnRole(roleUrl: URL, workerData?: unknown): Role {
       }),
   };
 }
+
+/**
+ * 역할 스크립트를 DOM `Worker`와 같은 모양으로 띄운다(`createWorker` 주입용). 지원하는 것은 `postMessage(메시지, 전송 목록)`·
+ * `terminate()`·`error` 이벤트 리스너(`{ message }`)뿐이다. 시험이 끝나면 스레드를 종료한다.
+ */
+export function spawnWorkerLike(roleUrl: URL, workerData?: unknown): WorkerLike {
+  const worker = new Worker(roleUrl, {
+    execArgv: ["--import", RESOLVE_HOOK],
+    workerData,
+  });
+  const listeners = new Map<(event: { message: string }) => void, (error: Error) => void>();
+  onTestFinished(async () => {
+    await worker.terminate();
+  });
+  return {
+    postMessage: (message: unknown, transfer?: readonly unknown[]) =>
+      worker.postMessage(message, transfer as never),
+    terminate: () => {
+      void worker.terminate();
+    },
+    addEventListener: (
+      type: string,
+      listener: (event: { message: string }) => void,
+    ) => {
+      if (type !== "error") return;
+      const wrapped = (error: Error) => listener({ message: error.message });
+      listeners.set(listener, wrapped);
+      worker.on("error", wrapped);
+    },
+    removeEventListener: (
+      type: string,
+      listener: (event: { message: string }) => void,
+    ) => {
+      const wrapped = listeners.get(listener);
+      if (type !== "error" || !wrapped) return;
+      listeners.delete(listener);
+      worker.off("error", wrapped);
+    },
+  };
+}
+
+/** `spawnWorkerLike`가 돌려주는 값. DOM `Worker`가 필요한 자리(`createWorker`)에는 소비자가 `as unknown as Worker`로 넘긴다. */
+export interface WorkerLike {
+  postMessage(message: unknown, transfer?: readonly unknown[]): void;
+  terminate(): void;
+  addEventListener(type: string, listener: (event: { message: string }) => void): void;
+  removeEventListener(type: string, listener: (event: { message: string }) => void): void;
+}

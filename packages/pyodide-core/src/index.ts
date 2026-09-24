@@ -30,3 +30,14 @@ export type {
   OutputChunk,
   SessionStatus,
 } from "./session/driver";
+export type { RunOutcome } from "./protocol/run-outcome";
+export { RunRejectedError, createRunner } from "./session/runner";
+export type {
+  InputProvider,
+  RunRejectedReason,
+  RunResult,
+  RunnerHandle,
+  RunnerOptions,
+  RunnerStatus,
+  StopResult,
+} from "./session/runner";
