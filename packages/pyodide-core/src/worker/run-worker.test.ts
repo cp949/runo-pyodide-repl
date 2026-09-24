@@ -16,6 +16,7 @@ vi.mock("./boot", () => ({ bootWorker: vi.fn(async () => {}) }));
 
 /** 부팅이 mock이라 쓰이지 않는 driver. `runWorker`가 그대로 부팅에 넘기는지만 본다. */
 const driver: WorkerDriver = {
+  parseOptions: () => undefined,
   createSession() {
     throw new Error("부팅 mock이라 세션을 만들지 않는다");
   },
@@ -39,7 +40,7 @@ function createInitFrame() {
     interruptBuffer: createInterruptBuffer(),
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
-    topLevelAwait: false,
+    driver: {},
     pyodide: { indexURL: "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/" },
   };
 }

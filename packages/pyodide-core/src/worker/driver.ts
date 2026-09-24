@@ -13,7 +13,7 @@ export interface ConsoleContext {
   pyodide: PyodideInterface;
   /** `write`·`writeErrorRaw` RPC 알림에 연결된 sink. 전역 Writer와 콘솔 콜백이 같이 쓴다. */
   sinks: ConsoleSinks;
-  /** 검증된 초기화 프레임. 이 DELTA에서는 driver 옵션(`topLevelAwait`)이 프레임 최상위에 있다(DELTA-04에서 `driver` 필드로). */
+  /** 검증된 초기화 프레임. driver 옵션은 `frame.driver`가 아니라 `parseOptions`가 돌려준 값(`createSession`이 받았다)을 쓴다. */
   frame: InitFrame;
 }
 
@@ -47,7 +47,15 @@ export interface WorkerDriverSession {
   atPrompt(): boolean;
 }
 
-/** `runWorker({ driver })`가 받는 driver. worker 하나에 세션 하나를 만든다. */
-export interface WorkerDriver {
-  createSession(): WorkerDriverSession;
+/**
+ * `runWorker({ driver })`가 받는 driver. worker 하나에 세션 하나를 만든다.
+ *
+ * 초기화 프레임의 `driver` 필드(`unknown`)는 core가 모양을 모른다. 커널이 `parseOptions(frame.driver)`로 driver에 검증을
+ * 맡기고, 통과한 값으로 `createSession(options)`을 부른다. `parseOptions`가 던지면 세션 생성·RPC 생성·pyodide 로드를
+ * 시작하지 않고 부팅이 그 오류로 거부된다(`runWorker`가 `console.error`로 남긴다).
+ */
+export interface WorkerDriver<Options = unknown> {
+  /** 프레임의 `driver` 필드를 검증해 옵션으로 만든다. 모양이 틀리면 던진다. */
+  parseOptions(raw: unknown): Options;
+  createSession(options: Options): WorkerDriverSession;
 }

@@ -42,6 +42,14 @@ import {
 } from "@repo/pyodide-testkit/fake-terminal";
 import type { SourceCompletion } from "./worker/complete-source";
 
+/**
+ * 초기화 프레임에 실린 `topLevelAwait`. driver 옵션이라 최상위가 아니라 `frame.driver` 안에 있다(RD-020, `InitFrame.driver`).
+ * 단언 값은 그대로이고 읽는 경로만 바뀌었다.
+ */
+function topLevelAwaitOf(frame: InitFrame): unknown {
+  return (frame.driver as { topLevelAwait?: unknown }).topLevelAwait;
+}
+
 type Outcome =
   | { state: "pending" }
   | { state: "resolved"; value: unknown }
@@ -793,7 +801,7 @@ describe("격리 페이지의 세션 시작", () => {
     expect(transfer).toHaveLength(1);
     expect(transfer[0] === message.rpcPort).toBe(true);
     expect(() => parseInitFrame(message)).not.toThrow();
-    expect(message.topLevelAwait).toBe(false);
+    expect(topLevelAwaitOf(message)).toBe(false);
     expect(message.pyodide.indexURL).toBe(DEFAULT_PYODIDE_INDEX_URL);
   });
 
@@ -1882,29 +1890,34 @@ describe("top-level await 옵션(RD-012)", () => {
   test("`topLevelAwait: true`로 만들면 첫 프레임의 topLevelAwait가 true다", () => {
     const { fakeWorker } = startSession({ topLevelAwait: true });
 
-    expect(fakeWorker.frame().topLevelAwait).toBe(true);
+    expect(topLevelAwaitOf(fakeWorker.frame())).toBe(true);
   });
 
   test("생략·false·boolean이 아닌 값은 첫 프레임의 topLevelAwait가 false다", () => {
-    expect(startSession().fakeWorker.frame().topLevelAwait).toBe(false);
+    expect(topLevelAwaitOf(startSession().fakeWorker.frame())).toBe(false);
     expect(
-      startSession({ topLevelAwait: false }).fakeWorker.frame().topLevelAwait,
+      topLevelAwaitOf(
+        startSession({ topLevelAwait: false }).fakeWorker.frame(),
+      ),
     ).toBe(false);
     expect(
-      startSession({ topLevelAwait: "yes" as unknown as boolean }).fakeWorker.frame()
-        .topLevelAwait,
+      topLevelAwaitOf(
+        startSession({
+          topLevelAwait: "yes" as unknown as boolean,
+        }).fakeWorker.frame(),
+      ),
     ).toBe(false);
   });
 
   test("reset({ topLevelAwait: true }) 뒤 새 worker의 프레임은 true다", () => {
     const session = startResettableSession();
-    expect(must(session.workers[0]).frame().topLevelAwait).toBe(false);
+    expect(topLevelAwaitOf(must(session.workers[0]).frame())).toBe(false);
 
     session.handle.reset({ topLevelAwait: true });
 
     expect(session.workers).toHaveLength(2);
     const newWorker = must(session.workers[1]);
-    expect(newWorker.frame().topLevelAwait).toBe(true);
+    expect(topLevelAwaitOf(newWorker.frame())).toBe(true);
     expect(() => parseInitFrame(newWorker.frame())).not.toThrow();
   });
 
@@ -1915,7 +1928,7 @@ describe("top-level await 옵션(RD-012)", () => {
     session.handle.reset();
 
     expect(session.workers).toHaveLength(3);
-    expect(must(session.workers[2]).frame().topLevelAwait).toBe(true);
+    expect(topLevelAwaitOf(must(session.workers[2]).frame())).toBe(true);
   });
 
   test("reset({ topLevelAwait: undefined })·reset({})도 직전 값을 유지한다", () => {
@@ -1926,8 +1939,8 @@ describe("top-level await 옵션(RD-012)", () => {
     session.handle.reset({});
 
     expect(session.workers).toHaveLength(4);
-    expect(must(session.workers[2]).frame().topLevelAwait).toBe(true);
-    expect(must(session.workers[3]).frame().topLevelAwait).toBe(true);
+    expect(topLevelAwaitOf(must(session.workers[2]).frame())).toBe(true);
+    expect(topLevelAwaitOf(must(session.workers[3]).frame())).toBe(true);
   });
 
   test("reset({ topLevelAwait: false })는 false로 되돌린다", () => {
@@ -1937,7 +1950,7 @@ describe("top-level await 옵션(RD-012)", () => {
     session.handle.reset({ topLevelAwait: false });
 
     expect(session.workers).toHaveLength(3);
-    expect(must(session.workers[2]).frame().topLevelAwait).toBe(false);
+    expect(topLevelAwaitOf(must(session.workers[2]).frame())).toBe(false);
   });
 });
 

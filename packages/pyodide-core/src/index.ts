@@ -1,4 +1,4 @@
-// main 쪽 프로토콜(01-protocols.md). 세션은 이후 DELTA에서 옮긴다.
+// main 쪽 프로토콜(01-protocols.md)과 core 세션(`startCoreSession`, driver 경계).
 export { postInitFrame } from "./protocol/init-frame";
 export type { InitFrame } from "./protocol/init-frame";
 export {
@@ -16,4 +16,15 @@ export {
   createMailboxWriter,
   createStdinMailbox,
 } from "./protocol/stdin-mailbox";
+export { composeRpcHandlers } from "./protocol/rpc-handlers";
 export { createOutputTail } from "./terminal/output-tail";
+export {
+  CORE_MAIN_HANDLER_NAMES,
+  startCoreSession,
+} from "./session/core-session";
+export type { CoreSession, CoreSessionOptions } from "./session/core-session";
+export type {
+  MainDriver,
+  OutputChunk,
+  SessionStatus,
+} from "./session/driver";

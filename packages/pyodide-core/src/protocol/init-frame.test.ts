@@ -21,7 +21,7 @@ function createFrame(): InitFrame {
     interruptBuffer: createInterruptBuffer(),
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
-    topLevelAwait: false,
+    driver: {},
     pyodide: { indexURL: "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/" },
   };
 }
@@ -48,7 +48,7 @@ describe("parseInitFrame", () => {
     "interruptBuffer",
     "stdinCtrl",
     "stdinData",
-    "topLevelAwait",
+    "driver",
     "pyodide",
   ] as const)(
     "필드가 빠지면 그 필드 이름을 담은 오류를 던진다: %s",
@@ -60,10 +60,26 @@ describe("parseInitFrame", () => {
     },
   );
 
-  it("topLevelAwait가 boolean이 아니면 던진다", () => {
+  // driver 설정은 driver 파서가 검증한다(repl `worker/repl-driver.test.ts`). core는 필드가 있는지만 본다: 옛 모양(설정이 최상위에
+  // 있고 driver 필드가 없는 프레임)을 worker가 조용히 받아들여 driver 설정을 잃는 일을 막는다.
+  it.each([
+    { label: "객체", driver: { topLevelAwait: true } },
+    { label: "null", driver: null },
+    { label: "undefined 값(키는 있음)", driver: undefined },
+    { label: "문자열", driver: "opts" },
+  ])("driver 필드의 값은 검증하지 않고 그대로 통과시킨다: $label", ({ driver }) => {
+    const frame = { ...createFrame(), driver };
+
+    expect(parseInitFrame(frame)).toBe(frame);
+  });
+
+  it("옛 모양(최상위 topLevelAwait, driver 필드 없음)은 driver 필드 오류로 거부한다", () => {
+    const frame: Partial<InitFrame> = createFrame();
+    delete frame.driver;
+
     expect(() =>
-      parseInitFrame({ ...createFrame(), topLevelAwait: "true" }),
-    ).toThrow(/topLevelAwait/);
+      parseInitFrame({ ...frame, topLevelAwait: false }),
+    ).toThrow(/driver/);
   });
 
   // 비공유 뷰는 postMessage의 구조적 복제에서 메모리가 복사돼 main과 worker가 서로 다른 메모리를 본다. 오류 없이 통신만

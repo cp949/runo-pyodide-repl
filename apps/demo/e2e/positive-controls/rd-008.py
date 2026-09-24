@@ -53,9 +53,11 @@ CONTROLS = {
     "3": {
         # RD-018 DELTA-04 경로 정정(멈추는 지점 3): 이 게이트는 RD-010의 세션 추출로 index.ts에서 session.ts의
         # `pythonRunning` 계산식으로 옮겨졌다(문자열은 그대로, 파일과 들여쓰기(2→4칸)만 다르다).
-        "file": "packages/pyodide-repl/src/session.ts",
-        "find": "    alive && !readLinePending && inputReadsPending === 0 && !cancelSettling;",
-        "replace": "    alive && !readLinePending && inputReadsPending === 0;",
+        # RD-020 DELTA-04 경로 정정: 게이트가 core 세션(`alive && inputReadsPending === 0 && !driver.isIdle()`)과 REPL main
+        # driver의 `isIdle`로 갈렸다. `cancelSettling` 항이 있는 곳은 REPL의 `isIdle`이라 그 항을 뺀다(같은 변조, 파일만 다르다).
+        "file": "packages/pyodide-repl/src/repl-main-driver.ts",
+        "find": "    isIdle: () => readLinePending || cancelSettling,",
+        "replace": "    isIdle: () => readLinePending,",
         "scripts": [
             ["prompt-cancel-check.mjs", URL, {"ONLY": "I"}],
             ["prompt-cancel-check.mjs", URL, {"ONLY": "RM1"}],

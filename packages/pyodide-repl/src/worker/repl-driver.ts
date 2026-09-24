@@ -1,7 +1,7 @@
 /**
  * REPL worker driver(RD-020). core worker 커널(`runWorker`, `@cp949/runo-pyodide-core/worker`)이 공통 부팅
  * (RPC → loadPyodide → 콘솔 → webloop 억제 → Ctrl+C 연결 → stdin 배선 → `ready` → 감시 타이머)을 맡고, 이 driver는
- * REPL 전용 부분을 낸다: `complete` RPC 핸들러, 콘솔 확장(`sys.ps1/ps2`·헬퍼·TLA·완성기), 배너·제출 러너·`readLine` 루프.
+ * REPL 전용 부분을 낸다(초기화 프레임 `driver` 필드 `{ topLevelAwait }`의 검증 포함): `complete` RPC 핸들러, 콘솔 확장(`sys.ps1/ps2`·헬퍼·TLA·완성기), 배너·제출 러너·`readLine` 루프.
  */
 import {
   discardPendingInterrupt,
@@ -11,6 +11,7 @@ import {
   type WorkerDriver,
   type WorkerDriverSession,
 } from "@cp949/runo-pyodide-core/worker";
+import { parseReplDriverOptions, type ReplDriverOptions } from "../driver-options";
 import { loadCompleteSource, type CompleteSource } from "./complete-source";
 import { createConsole, type ReplConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
@@ -22,7 +23,7 @@ function emptyCompletion() {
   return { completions: [], start: 0 };
 }
 
-function createReplSession(): WorkerDriverSession {
+function createReplSession(options: ReplDriverOptions): WorkerDriverSession {
   // complete 핸들러는 createRpc 생성 시에만 등록할 수 있다(core `protocol/rpc.ts`, 나중 등록 API 없음). 콘솔이 아직 없는
   // 동안(로드 중)과 프롬프트 대기 중이 아닌 동안(실행 중)은 completer/atPrompt를 클로저로 읽어 빈 응답으로 답한다.
   let completer: CompleteSource | null = null;
@@ -33,9 +34,9 @@ function createReplSession(): WorkerDriverSession {
       complete: (source: string, pending: string | undefined) =>
         atPrompt && completer ? completer(source, pending) : emptyCompletion(),
     },
-    createConsole({ pyodide, sinks, frame }: ConsoleContext): PyodideConsoleProxy {
+    createConsole({ pyodide, sinks }: ConsoleContext): PyodideConsoleProxy {
       repl = createConsole(pyodide, sinks, {
-        topLevelAwait: frame.topLevelAwait,
+        topLevelAwait: options.topLevelAwait,
       });
       completer = loadCompleteSource(pyodide, repl.pyconsole);
       return repl.pyconsole;
@@ -79,4 +80,7 @@ function createReplSession(): WorkerDriverSession {
 }
 
 /** REPL driver. `runWorker({ driver: replDriver })`가 worker 하나에 세션 하나를 만든다. */
-export const replDriver: WorkerDriver = { createSession: createReplSession };
+export const replDriver: WorkerDriver<ReplDriverOptions> = {
+  parseOptions: parseReplDriverOptions,
+  createSession: createReplSession,
+};

@@ -12,7 +12,11 @@ export interface InitFrame {
   stdinCtrl: Int32Array;
   /** stdin 메일박스 데이터. */
   stdinData: Uint8Array;
-  topLevelAwait: boolean;
+  /**
+   * driver 전용 옵션. core는 값의 모양을 모른다(`unknown`) — 필드가 있는지만 본다. 검증은 worker 쪽 driver 파서
+   * (`WorkerDriver.parseOptions`)가 한다. 예: REPL은 `{ topLevelAwait: boolean }`.
+   */
+  driver: unknown;
   pyodide: { indexURL: string };
 }
 
@@ -53,8 +57,9 @@ export function parseInitFrame(data: unknown): InitFrame {
     invalidField("stdinCtrl", "SharedArrayBuffer 위의 Int32Array");
   if (!isSharedView(frame.stdinData, Uint8Array))
     invalidField("stdinData", "SharedArrayBuffer 위의 Uint8Array");
-  if (typeof frame.topLevelAwait !== "boolean")
-    invalidField("topLevelAwait", "boolean");
+  // 값은 검증하지 않는다(driver 파서 몫). 필드 자체는 필요하다: 설정이 최상위에 있던 옛 모양의 프레임을 worker가
+  // 조용히 받아들여 driver 설정을 잃는 일을 막는다.
+  if (!("driver" in frame)) invalidField("driver", "필드(값은 driver가 검증)");
   if (
     typeof (frame.pyodide as { indexURL?: unknown } | undefined)?.indexURL !==
     "string"

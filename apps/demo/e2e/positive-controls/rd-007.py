@@ -32,7 +32,9 @@ CONTROLS = {
         # RD-018 DELTA-04 경로 정정(멈추는 지점 3): `sinks.write("^C")`는 RD-010의 세션 추출로 index.ts에서
         # session.ts의 echoCtrlC()로 옮겨졌다(문자열·들여쓰기는 그대로, 파일만 다르다). readline은 startSession의
         # 인자로 session.ts 스코프에도 있어 같은 변조가 그대로 적용된다.
-        "file": "packages/pyodide-repl/src/session.ts",
+        # RD-020 DELTA-04 경로 정정: session.ts를 core 세션과 REPL main driver로 나누면서 echoCtrlC()가
+        # `repl-main-driver.ts`로 갔다(문자열·들여쓰기 그대로, readline은 `createReplMainDriver`의 옵션으로 스코프에 있다).
+        "file": "packages/pyodide-repl/src/repl-main-driver.ts",
         "find": '      sinks.write("^C");',
         "replace": '      readline.print("^C");',
         # S1만 `^C`의 위치를 본다. G1(트레이스백)은 에코 방식과 무관하므로 통과해야 한다 — "해당 확인만 실패한다"는 대조.

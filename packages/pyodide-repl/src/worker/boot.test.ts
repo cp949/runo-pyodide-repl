@@ -72,7 +72,7 @@ function createMainSide(script: unknown[] = []) {
     interruptBuffer: createInterruptBuffer(),
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
-    topLevelAwait: false,
+    driver: { topLevelAwait: false },
     pyodide: { indexURL: "unused-in-node/" },
   };
   const events: unknown[][] = [];

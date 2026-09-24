@@ -32,11 +32,15 @@ export interface BootOptions extends BootDeps {
   driver: WorkerDriver;
 }
 
-/** core가 worker 쪽에 등록하는 RPC 핸들러. 지금은 없다(main→worker 요청은 driver의 `complete`뿐이다). */
+/**
+ * core가 worker 쪽에 등록하는 RPC 핸들러(main → worker 요청). 지금은 없다(main→worker 요청은 driver의 `complete`뿐이다).
+ * 방향이 반대인 main 쪽 표(worker → main: `write`·`readInput` 등)는 `session/core-session.ts`의 `CORE_MAIN_HANDLER_NAMES`다.
+ * 두 표는 서로 다른 RPC 끝점에 붙어 이름 충돌 검사도 따로 한다(각 끝점에서 core 표 + driver 표를 `composeRpcHandlers`로 합성).
+ */
 const CORE_WORKER_HANDLERS = {};
 
 /**
- * 순서: driver 세션 생성 → RPC 생성(core + driver 핸들러 합성) → loadPyodide → `driver.createConsole` →
+ * 순서: driver 옵션 검증(`parseOptions`) → driver 세션 생성 → RPC 생성(core + driver 핸들러 합성) → loadPyodide → `driver.createConsole` →
  * suppressWebLoopReraise → connectInterrupts → setStdin → ntf ready → 감시 타이머 시작 → `driver.run`(00-architecture.md
  * 3.1(5)). `suppressWebLoopReraise`(WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제, 03-ctrl-c.md 2.8)는 콘솔 생성
  * 직후·Ctrl+C 연결 전에 한 번만 부른다. `connectInterrupts`(SIGINT 핸들러 설치 → 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중
@@ -49,7 +53,9 @@ export async function bootWorker(
   frame: InitFrame,
   options: BootOptions,
 ): Promise<void> {
-  const session = options.driver.createSession();
+  // 옵션이 틀리면 여기서 던진다: RPC·pyodide 로드 어느 것도 시작하기 전이다(프레임 검증 실패와 같이 `runWorker`가 로그로 남긴다).
+  const driverOptions = options.driver.parseOptions(frame.driver);
+  const session = options.driver.createSession(driverOptions);
   // driver 핸들러(`complete` 등)는 createRpc 생성 시에만 등록할 수 있다(`protocol/rpc.ts`, 나중 등록 API 없음).
   const rpc = createRpc(
     frame.rpcPort,

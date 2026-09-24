@@ -44,7 +44,7 @@ async function runScenario(options: ScenarioOptions = {}) {
     interruptBuffer: createInterruptBuffer(),
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
-    topLevelAwait: false,
+    driver: {},
     pyodide: { indexURL: "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/" },
   };
   const writer = createMailboxWriter(mailbox);
