@@ -28,6 +28,17 @@ export class ReadCancelledError extends Error {
   }
 }
 
+/**
+ * `takeRead()`가 읽기를 끝낼 때 reject 사유로 쓰는 오류. 제출(resolve)도 취소(`ReadCancelledError`)도
+ * 아니라 "호출자가 입력 상태를 가져갔다"는 뜻이라 별도 클래스로 구분한다.
+ */
+export class ReadTakenError extends Error {
+  constructor() {
+    super("read taken");
+    this.name = "ReadTakenError";
+  }
+}
+
 type CheckHandler = (text: string) => boolean;
 type CtrlCHandler = () => void;
 type PauseHandler = (resume: boolean) => void;
@@ -65,6 +76,11 @@ export interface ReadOptions {
    */
   prefill?: string;
   /**
+   * `prefill`을 채운 직후 커서를 둘 위치(UTF-16 인덱스). `[0, prefill 길이]`로 자른다. `prefill`이 없거나
+   * 빈 문자열이면 무시한다. 생략하면 커서는 끝에 놓인다. `takeRead()`가 돌려준 커서를 그대로 넘기면 된다.
+   */
+  prefillCursor?: number;
+  /**
    * 활성 읽기의 키마다 벤더 처리 앞에서 부른다. `true`를 돌려주면 벤더 처리를 생략한다(소비).
    * 활성 읽기가 없을 때(write 콜백 대기 중 포함)는 부르지 않는다. `readPaste`가 `editInsert`로 바로
    * 넣는 `Text` 토큰은 거치지 않는다(코드로 흘러들어온 텍스트에는 훅이 반응하지 않는다).
@@ -83,6 +99,12 @@ export interface ReadOptions {
  * `N_TTY_BUF_SIZE`와 같다. 넘치는 덩어리는 통째로 버린다.
  */
 const TYPE_AHEAD_LIMIT = 4096;
+
+/** `prefillCursor`를 `[0, length]`로 자른다. 생략·NaN이면 끝(`length`)이다. */
+function clampCursor(cursor: number | undefined, length: number): number {
+  if (cursor === undefined || Number.isNaN(cursor)) return length;
+  return Math.min(Math.max(Math.trunc(cursor), 0), length);
+}
 
 export class Readline implements ITerminalAddon {
   private term: Terminal | undefined;
@@ -108,6 +130,11 @@ export class Readline implements ITerminalAddon {
    * 덩어리), `Input`은 `onData`를 거치지 않는 Shift+Enter다.
    */
   private queued: (string | Input)[] = [];
+  /**
+   * `printAbove`가 재그리기를 시작할 때의 논리 커서. `moveCursorToEnd()`가 `line.pos`를 끝으로 옮기므로
+   * 재그리기 중 `takeRead()`가 원래 커서를 돌려주려면 따로 보관해야 한다.
+   */
+  private redrawCursor = 0;
   /**
    * 활성 읽기가 없을 때(실행 중·`read()` write 콜백 대기 중·부팅 중) 들어온 입력을 순서대로 쌓아 둔다
    * (type-ahead). `onData` 덩어리는 원본 문자열째, Shift+Enter는 `Input`째 쌓는다. 다음 `read()`의 write
@@ -200,6 +227,55 @@ export class Readline implements ITerminalAddon {
     const error = new ReadCancelledError();
     pending.forEach((p) => p.reject(error));
     active?.reject(error);
+  }
+
+  /**
+   * 열린 읽기를 제출·history 없이 끝내고 입력 상태를 가져간다. 열린 읽기가 없으면 아무것도 하지 않고
+   * `undefined`를 돌려준다.
+   *
+   * - 활성 읽기: 프롬프트 첫 행부터 입력 마지막 행까지(감긴 행·멀티라인 버퍼 포함) 화면에서 지우고 커서를
+   *   프롬프트 첫 행 열 0에 둔다. 프롬프트 앞에 붙은 꼬리(`a>>> `의 `a`)도 프롬프트라 함께 지워지므로 복원은
+   *   호출자가 한다. 돌려주는 값은 지우기 전의 텍스트·커서다.
+   * - write 콜백을 기다리는 읽기(아직 그려지지 않음): 화면에 그린 것이 없으므로 `{ text: "", cursor: 0 }`이다.
+   *   늦게 오는 콜백은 읽기를 되살리지 않는다(`cancelRead()`와 같은 `cancelled` 표시).
+   * - `printAbove` 재그리기 중: 입력줄은 이미 출력 위에 남았고 그 아래에 출력이 있어 지울 수 없다. 재그리기
+   *   전의 텍스트·커서를 돌려주고, 늦게 오는 재그리기 콜백은 읽기가 없어 입력줄을 다시 그리지 않는다.
+   *
+   * 읽기 promise는 `ReadTakenError`로 reject한다(`ReadCancelledError`와 구분). 재그리기 중 쌓인 키(`queued`)는
+   * type-ahead로 옮겨 다음 읽기가 재생한다. 이미 쌓인 type-ahead는 그대로 둔다. history는 건드리지 않는다.
+   */
+  public takeRead(): { text: string; cursor: number } | undefined {
+    const active = this.activeRead;
+    const pending = [...this.pendingReads];
+    if (active === undefined && pending.length === 0) return undefined;
+
+    let taken = { text: "", cursor: 0 };
+    if (active !== undefined) {
+      if (this.redrawing) {
+        taken = { text: this.state.buffer(), cursor: this.redrawCursor };
+      } else {
+        taken = { text: this.state.buffer(), cursor: this.state.cursor() };
+        this.state.erase();
+      }
+    }
+
+    this.activeRead = undefined;
+    this.pendingReads.clear();
+    pending.forEach((p) => {
+      p.cancelled = true;
+    });
+    // 재그리기 중 쌓인 키는 지금부터 활성 읽기가 없으므로 type-ahead로 옮겨 순서를 보존한다.
+    const queued = this.queued;
+    this.queued = [];
+    this.redrawing = false;
+    for (const entry of queued) {
+      this.pushTypeAhead(entry);
+    }
+
+    const error = new ReadTakenError();
+    pending.forEach((p) => p.reject(error));
+    active?.reject(error);
+    return taken;
   }
 
   /**
@@ -337,6 +413,8 @@ export class Readline implements ITerminalAddon {
     // 뒤에는 원래 위치로 돌려놓아야 하므로 먼저 저장해 둔다.
     const cursor = this.state.cursor();
     const term = this.term;
+    // 재그리기가 겹치면 뒤 호출의 cursor는 이미 끝으로 옮겨진 값이라 처음 값을 유지한다.
+    if (!this.redrawing) this.redrawCursor = cursor;
     this.state.moveCursorToEnd();
     this.write("\r\n" + text + "\r\n");
     this.redrawing = true;
@@ -487,7 +565,10 @@ export class Readline implements ITerminalAddon {
           this.history
         );
         if (options.prefill !== undefined && options.prefill !== "") {
-          this.state.update(options.prefill);
+          this.state.update(
+            options.prefill,
+            clampCursor(options.prefillCursor, options.prefill.length)
+          );
         } else {
           this.state.refresh();
         }

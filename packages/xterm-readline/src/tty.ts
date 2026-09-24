@@ -296,6 +296,19 @@ export class Tty {
     }
   }
 
+  /**
+   * `refreshLine`의 3·4단계(앵커 행으로 올라가 `\r\x1b[J`)만 떼어 낸 것. 물리 커서가 `layout` 기준
+   * (`anchorRow + cursor.row - scrollOffset`)에 있다고 보고 앵커 행 열 0까지 올라가 그 아래를 전부 지운다.
+   */
+  public eraseLine(layout: Layout) {
+    const viewportRow = Math.max(
+      layout.cursor.row - (layout.scrollOffset ?? 0),
+      0
+    );
+    if (viewportRow > 0) this.write(`\x1b[${viewportRow}A`);
+    this.write("\r\x1b[J");
+  }
+
   public moveCursor(oldCursor: Position, newCursor: Position) {
     if (newCursor.row > oldCursor.row) {
       // Move Down

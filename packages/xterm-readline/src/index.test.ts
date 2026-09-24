@@ -11,6 +11,8 @@ test("코어가 쓰는 Readline·ReadCancelledError·History·State·Tty·InputT
     "History",
     "InputType",
     "ReadCancelledError",
+    // RD-022a DELTA-02: takeRead()가 읽기를 끝낼 때 쓰는 오류. 코어가 ReadCancelledError와 구분하려고 값으로 쓴다.
+    "ReadTakenError",
     "Readline",
     "State",
     "Tty",

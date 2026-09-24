@@ -126,8 +126,9 @@ export class State {
     }
   }
 
-  public update(text: string) {
-    this.line.update(text, text.length);
+  /** 버퍼를 `text`로 바꾸고 다시 그린다. 커서는 `cursor`(생략하면 끝)에 둔다. */
+  public update(text: string, cursor: number = text.length) {
+    this.line.update(text, cursor);
     this.editing = false;
     this.refresh();
   }
@@ -248,6 +249,16 @@ export class State {
     }
     this.line.pos = this.line.buf.length;
     this.refresh();
+  }
+
+  /**
+   * 프롬프트 첫 행부터 입력 마지막 행까지 화면에서 지우고 커서를 프롬프트 첫 행 열 0에 둔다. 물리 커서 행은
+   * `refresh()`가 남긴 레이아웃(`layout.cursor`·`scrollOffset`)이 알려 주므로 새 상태 없이 같은 계산을 쓴다.
+   * 지운 뒤 레이아웃은 초기값으로 되돌려 이 State를 다시 그려도 옛 행을 기준으로 삼지 않는다.
+   */
+  public erase() {
+    this.tty.eraseLine(this.layout);
+    this.resetLayout();
   }
 
   /**
