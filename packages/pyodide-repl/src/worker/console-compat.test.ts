@@ -168,7 +168,7 @@ describe("incomplete-input-message 저하", () => {
 });
 
 describe("probe()는 콘솔 상태를 바꾸지 않는다", () => {
-  /** 사용자 전역·builtins의 `_`·미완성 블록·buffer를 스냅샷으로 뽑는다. */
+  /** 사용자 전역·builtins의 `_`·`sys.last_*`·미완성 블록·buffer를 스냅샷으로 뽑는다. */
   function snapshot(pyodide: PyodideInterface, repl: ReplConsole) {
     const names = pyodide.runPython("sorted(globals().keys())") as PyProxy;
     const globalNames = names.toJs() as string[];
@@ -179,10 +179,16 @@ describe("probe()는 콘솔 상태를 바꾸지 않는다", () => {
       "import builtins\nrepr(getattr(builtins, '_', 'unset'))",
       { globals: scratch },
     );
+    // 오류 표시(`formatsyntaxerror`)가 설정하는 값이다. 사용자가 `sys.last_value`·`pdb.pm()`으로 본다.
+    const lastExc = pyodide.runPython(
+      "import sys\nrepr([getattr(sys, n, 'unset') for n in ('last_exc', 'last_type', 'last_value', 'last_traceback')])",
+      { globals: scratch },
+    );
     scratch.destroy();
     return {
       globalNames,
       underscore,
+      lastExc,
       pending: repl.pending(),
     };
   }
@@ -203,6 +209,17 @@ describe("probe()는 콘솔 상태를 바꾸지 않는다", () => {
     expect(after).toEqual(before);
     expect(closed.kind).toBe("complete");
     expect(pyodide.runPython("y")).toBe(5);
+  }, 60_000);
+
+  test("사용자 오류가 남긴 sys.last_*는 probe() 뒤에도 그 오류를 가리킨다", async () => {
+    const { pyodide, repl } = await setup();
+    await repl.runLine("1 / 0"); // sys.last_* = ZeroDivisionError
+    const before = snapshot(pyodide, repl);
+
+    repl.probe();
+
+    expect(before.lastExc).toContain("ZeroDivisionError");
+    expect(snapshot(pyodide, repl)).toEqual(before);
   }, 60_000);
 
   test("문구가 바뀐 상태에서 probe()를 여러 번 불러도 결과가 같고 상태가 그대로다", async () => {

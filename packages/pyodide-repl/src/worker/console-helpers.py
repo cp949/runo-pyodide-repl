@@ -34,19 +34,32 @@ def format_syntax_error(source, flags):
 
 # pyodide가 EOF에서 끊긴 입력(`1 +`)을 어떤 문구로 표시하는지 시작 시 한 번 확인한다(RD-021 `incomplete-input-message` 탐지).
 # 실제 콘솔이 아니라 빈 globals의 독립 `PyodideConsole`에 push해서 실제 콘솔의 buffer·builtins._·전역을 건드리지 않는다.
-# 같은 클래스라 같은 컴파일·`formattraceback` 경로다. 문법 오류가 아니면(문구를 판정할 수 없으면) None.
+# 같은 클래스라 같은 컴파일·`formatsyntaxerror` 경로다. 문법 오류가 아니면(문구를 판정할 수 없으면) None.
+# `formatsyntaxerror`는 `sys.last_exc`·`last_type`·`last_value`·`last_traceback`을 설정한다. 그대로 두면 새 세션의
+# `sys.last_value`·`pdb.pm()`에 탐지용 오류가 보이므로 호출 전 상태(없었으면 없음)로 되돌린다.
+_LAST_EXC_NAMES = ("last_exc", "last_type", "last_value", "last_traceback")
+
 def incomplete_input_message():
+    import sys
     from pyodide.console import PyodideConsole
-    probe = PyodideConsole({})
-    fut = probe.push("1 +")
+    saved = {name: getattr(sys, name) for name in _LAST_EXC_NAMES if hasattr(sys, name)}
     try:
-        if fut.syntax_check != "syntax-error":
-            return None
-        return fut.formatted_error
+        probe = PyodideConsole({})
+        fut = probe.push("1 +")
+        try:
+            if fut.syntax_check != "syntax-error":
+                return None
+            return fut.formatted_error
+        finally:
+            # 사이클 GC 때 "exception was never retrieved"가 sys.stderr로 새지 않게 회수한다.
+            if fut.done():
+                fut.exception()
     finally:
-        # 사이클 GC 때 "exception was never retrieved"가 sys.stderr로 새지 않게 회수한다.
-        if fut.done():
-            fut.exception()
+        for name in _LAST_EXC_NAMES:
+            if name in saved:
+                setattr(sys, name, saved[name])
+            elif hasattr(sys, name):
+                delattr(sys, name)
 
 # await하지 않는 문법 오류 future의 예외를 회수한다. 그대로 두면 사이클 GC 때 asyncio가
 # "ConsoleFuture exception was never retrieved"를 sys.stderr로 내 터미널에 끼어든다

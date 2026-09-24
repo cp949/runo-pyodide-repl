@@ -41,7 +41,7 @@ catalog 값을 바꾼 뒤에는 `pnpm install`이 끝나야 `pyodide/package.jso
 ## 13.3 patch 절차
 
 1. `pnpm-workspace.yaml`의 `catalog.pyodide`를 새 버전으로 고치고 `pnpm install`(13.1). minor가 바뀌지 않았는지 확인한다(core `peerDependencies.pyodide`의 `^314.0.7`은 같은 minor 안에서 유지된다).
-2. `pnpm check-types`·`pnpm lint`·`pnpm test`·`pnpm build`·`pnpm check-dist`·`pnpm smoke:pack`(L0). 실패한 시험 목록을 기록한다. 실제 pyodide를 로드하는 node 시험이 비공개 경로를 직접 단정하므로 여기서 깨지는 것이 업그레이드 알림이다(`09-testing.md` 9.1). 13.5의 "고정 버전 부팅" 시험 2건이 `degraded: []`·`versionMismatch: false`를 단정하므로 저하 지점이 생기면 이 시험이 실패한다.
+2. `pnpm check-types`·`pnpm lint`·`pnpm test`·`pnpm build`·`pnpm check-dist`·`pnpm smoke:pack`(L0). 실패한 시험 목록을 기록한다. 실제 pyodide를 로드하는 node 시험이 비공개 경로를 직접 단정하므로 여기서 깨지는 것이 업그레이드 알림이다(`09-testing.md` 9.1). 13.5의 "고정 버전 부팅" 시험 3건이 `degraded: []`·`versionMismatch: false`를 단정하므로 저하 지점이 생기면 이 시험이 실패한다.
 3. `pnpm --filter demo e2e:baseline`(L2)을 사용자 지시가 있을 때 돌려 기준선과 비교한다. 지시가 없으면 돌리지 않고 "미실행"으로 판단 자료에 적는다(`docs/agents/rubber-workflow.md` "검증 실행 예산").
 4. 판단 자료(13.5)를 작성한다.
 5. **멈춘다.** 사용자가 결정한다. CDN 위치는 `PYODIDE_VERSION`에서 자동으로 유도되므로 별도 수정이 없다.
@@ -62,7 +62,7 @@ patch 절차 1~5에 더해:
 - patch / minor 구분.
 - L0 결과: 실패한 node 시험 목록(파일·시험 제목), 시험 수 변화.
 - `ready` 페이로드 결과: 고정 버전 부팅 시험이 단정하는 값이다. `degraded`(식별자 배열)·`details`(상세 이름). 시험이 통과하면 `degraded: []`, `versionMismatch: false`다. 실패하면 어떤 식별자가 실렸는지 기록한다.
-  - 시험: core `packages/pyodide-core/src/worker/boot-compat.test.ts`의 "고정 버전 pyodide 부팅은 degraded가 비고 versionMismatch가 거짓이다(업그레이드 알림 역할)", repl `packages/pyodide-repl/src/worker/repl-driver-probe.test.ts`의 "고정 버전 pyodide에서는 빈 배열이다".
+  - 시험: core `packages/pyodide-core/src/worker/boot-compat.test.ts`의 "고정 버전 pyodide 부팅은 degraded가 비고 versionMismatch가 거짓이다(업그레이드 알림 역할)", repl `packages/pyodide-repl/src/worker/repl-driver-probe.test.ts`의 "고정 버전 pyodide에서는 빈 배열이다", repl `packages/pyodide-repl/src/worker/console-compat.test.ts`의 "고정 버전 pyodide › probe()는 빈 배열이다".
 - e2e 기준선 차이(L2를 돌렸다면). 미실행이면 "미실행"과 사유.
 - 버전에 묶인 편차·함정의 영향 여부. 후보를 찾는 명령: `git grep -n "3\.14\.2\|314\.0\.7" docs/design/10-parity-deviations.md docs/design/11-known-traps.md docs/traps`. 2026-09-23 정책 그릴링이 지목한 목록(재확인 필요): 편차 13·18·19·26~29·34·35, 함정 TRAP-03·06·27, TRP-005·010·021. TRAP-06(TRP-019)은 업스트림(python/cpython#157548)이 수정됐는지도 본다(`11-known-traps.md` TRAP-06의 검증 방법: 재전송을 끈 단일 눌림 N=3000 소실 0이면 재전송 장치 제거 조건).
 - 재측정 권고 여부(minor면 필수).
@@ -90,7 +90,7 @@ console.warn("[session] pyodide 호환 경고", { expected, actual, degraded, de
 | 식별자 | 지점 | 탐지 방법 | 꺼지는 기능 | 코드 위치 |
 | --- | --- | --- | --- | --- |
 | `compiler-flags` | `pyconsole._compile.compiler.flags` | `hasCompilerFlags`: 경로가 number인가(접근이 던져도 없는 것으로 본다). 판정은 `setTopLevelAwait` 앞에서 한다 | TLA 스위치(`setTopLevelAwait` 건너뜀, pyodide 기본이 TLA 켬이라 `topLevelAwait: false`는 무시됨), EOF 문법 오류 문구 정규화(원문 표시). 붙여넣기 분할용 `compilerFlags()`는 상수 `TOP_LEVEL_AWAIT_FLAG`(0x2000)로 대체해 분할은 유지 | repl `worker/top-level-await.ts`(`hasCompilerFlags`), `worker/console.ts`(`probe`, `normalizeSyntaxError`, `compilerFlags`) |
-| `incomplete-input-message` | pyodide 콘솔이 EOF에서 끊긴 `1 +`에 내는 문구 `_IncompleteInputError: incomplete input` | 독립 `PyodideConsole({})`에 `1 +`를 push해 `formatted_error`의 마지막 줄이 `INCOMPLETE_INPUT_MARKER`인가(문구를 확인할 수 없으면 기대와 다른 것으로 본다). 실제 콘솔 상태를 바꾸지 않는다. `compiler-flags`와 독립 | 없음(정규화 대상 문구가 바뀌면 정규화가 켜지지 않아 원문이 나온다) | repl `worker/console-helpers.py`(`incomplete_input_message`), `worker/console.ts`(`probe`) |
+| `incomplete-input-message` | pyodide 콘솔이 EOF에서 끊긴 `1 +`에 내는 문구 `_IncompleteInputError: incomplete input` | 독립 `PyodideConsole({})`에 `1 +`를 push해 `formatted_error`의 마지막 줄이 `INCOMPLETE_INPUT_MARKER`인가(문구를 확인할 수 없으면 기대와 다른 것으로 본다). 실제 콘솔 상태를 바꾸지 않고, `formatsyntaxerror`가 설정하는 `sys.last_*`는 호출 전 값(없었으면 없음)으로 되돌린다. `compiler-flags`와 독립 | 없음(정규화 대상 문구가 바뀌면 정규화가 켜지지 않아 원문이 나온다) | repl `worker/console-helpers.py`(`incomplete_input_message`), `worker/console.ts`(`probe`) |
 | `webloop-handlers` | WebLoop `_keyboard_interrupt_handler`·`_system_exit_handler` | `hasattr`. 하나라도 없으면 둘 다 건너뜀. 상세 이름은 없는 속성 이름 | `KeyboardInterrupt`·`SystemExit` 재보고 억제(중단·`exit()`에서 브라우저 `pageerror`가 다시 난다) | core `worker/webloop-reraise.py`·`webloop-reraise.ts` |
 | `run-sync` | `pyodide.webloop.run_sync`·`pyodide.ffi.run_sync` 호출 가능, `console.runcode` 코루틴 함수 | `find_problems`. 상세 이름 3개: `pyodide.webloop.run_sync`·`pyodide.ffi.run_sync`·`console.runcode` | 정지한 실행(top-level await·`run_sync` 대기) 깨우기. 바쁜 루프 중단과 `time.sleep` 조각은 유지 | core `worker/sigint-handler.py`(`find_problems`, `install`), `sigint-handler.ts` |
 | `sleep-slice` | `time.sleep.__wrapped__`가 원본 C 함수, `pyodide_js.checkInterrupt` 호출 가능 | `find_problems`. 상세 이름: `time.sleep.__wrapped__`·`pyodide_js.checkInterrupt` | `time.sleep` 20ms 조각 교체(`time.sleep`은 pyodide 기본으로 남고 SIGINT 핸들러는 설치된다) | core `worker/sleep-slice.py`·`sleep-slice.ts` |
