@@ -1,6 +1,5 @@
-import { createRepl, RunRejectedError } from "@cp949/runo-pyodide-repl";
-import type { CopyResult, ReplHandle, ReplStatus } from "@cp949/runo-pyodide-repl";
-import { Terminal } from "@xterm/xterm";
+import { PythonRepl, RunRejectedError } from "@cp949/runo-pyodide-react";
+import type { CopyResult, PythonReplHandle, ReplStatus } from "@cp949/runo-pyodide-react";
 import "@xterm/xterm/css/xterm.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createWorker } from "./create-worker";
@@ -27,8 +26,9 @@ function describeError(error: unknown): string {
 }
 
 /**
- * xterm Terminal을 마운트하고 `createRepl`로 세션을 시작한다(RD-004). Terminal은 이 컴포넌트가 소유한다.
- * 크기는 xterm 기본값(80×24)으로 고정한다(FitAddon 없음). 세션 상태는 코어의 `onStatus`를 그대로 보여준다.
+ * `<PythonRepl>`(`@cp949/runo-pyodide-react`, RD-024)로 xterm 터미널과 REPL 세션을 마운트한다. Terminal 생성·정리는 컴포넌트가 맡는다.
+ * 기본 크기는 xterm 기본값(80×24)이다(`fit={false}`, e2e 기준선 유지). 쿼리 `?fit=1`이면 `fit`이 켜져 컨테이너 크기를 따른다
+ * (`App`이 prop으로 넘긴다). 세션 상태는 컴포넌트의 `onStatus`를 그대로 보여준다.
  * `exit()`로 세션이 끝나면(`terminated`) 종료 Alert가 뜬다. worker가 죽으면(`crashed`) 크래시 Alert와
  * 재시작 버튼이 뜬다. 리셋 버튼은 상시 있고 `reset()`을 부른다(RD-010). 터미널은 크래시 중에도 렌더한다 —
  * 화면의 출력이 단서다. top-level await 체크박스는 바뀔 때마다 즉시 `reset({ topLevelAwait })`를 부른다
@@ -40,9 +40,8 @@ function describeError(error: unknown): string {
  * 시작하면 이전 결과를 지우고, 늦게 끝난 이전 호출은 결과 칸을 쓰지 않는다(RD-022a). 결과 칸은 xterm DOM보다 먼저
  * 바뀔 수 있다.
  */
-export function ReplView() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const replRef = useRef<ReplHandle | null>(null);
+export function ReplView({ fit }: { fit: boolean }) {
+  const replRef = useRef<PythonReplHandle>(null);
   const [status, setStatus] = useState<ReplStatus>("loading");
   const [crashMessage, setCrashMessage] = useState<string | null>(null);
   const [topLevelAwait, setTopLevelAwait] = useState(false);
@@ -54,8 +53,8 @@ export function ReplView() {
   // `runSource` 호출 번호. 늦게 끝난 이전 호출(예: 실행 중 다시 눌러 `busy`를 받은 뒤 끝난 첫 호출)이 새 결과를 덮어쓰지 않게 한다.
   const sourceCallRef = useRef(0);
 
-  // `setToast`·`toastTimerRef`만 참조하는 안정된 콜백(useCallback 빈 deps) — 아래 마운트 effect의
-  // deps에 넣어도 재마운트를 일으키지 않는다.
+  // `setToast`·`toastTimerRef`만 참조하는 안정된 콜백(useCallback 빈 deps). `PythonRepl`의 `onCopy`는 latest-ref로 읽혀
+  // 콜백 식별자가 바뀌어도 재마운트하지 않으므로 안정성은 필수가 아니다.
   const showToast = useCallback((result: CopyResult) => {
     setToast(result.ok ? `copied ${result.chars} chars to clipboard` : "copy failed");
     if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
@@ -65,34 +64,13 @@ export function ReplView() {
     }, 1000);
   }, []);
 
+  // 마운트 때 터미널에 포커스를 준다. 자식(`PythonRepl`)의 마운트 effect가 부모보다 먼저 돌므로 StrictMode 재마운트 뒤에도
+  // 살아 있는 Terminal에 닿는다(`autoFocus` prop은 없다).
   useEffect(() => {
-    const container = containerRef.current;
-    if (container === null) return;
+    replRef.current?.focus();
+  }, []);
 
-    const terminal = new Terminal({ cursorBlink: true });
-    terminal.open(container);
-    terminal.focus();
-    const repl = createRepl({
-      terminal,
-      createWorker,
-      onStatus: setStatus,
-      onCrash: setCrashMessage,
-      // 마운트 시점 값만 쓴다(state를 그대로 참조하면 이 effect가 `copyOnSelect`를 deps에 요구해
-      // 매 토글마다 재마운트된다) — 이후 토글은 `handle.setCopyOnSelect()`로 흐른다.
-      copyOnSelect: readCopyOnSelect(),
-      onCopy: showToast,
-    });
-    replRef.current = repl;
-
-    // StrictMode의 mount → cleanup → mount에서도 worker·Terminal·줄 편집기가 남지 않게 정리한다.
-    return () => {
-      replRef.current = null;
-      repl.dispose();
-      terminal.dispose();
-    };
-  }, [showToast]);
-
-  // 언마운트 시 토스트 타이머를 정리한다(위 마운트 effect와 독립적인 별도 effect).
+  // 언마운트 시 토스트 타이머를 정리한다(위 포커스 effect와 독립적인 별도 effect).
   useEffect(() => {
     return () => {
       if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
@@ -198,7 +176,17 @@ export function ReplView() {
           </button>
         </div>
       )}
-      <div ref={containerRef} data-testid="terminal" />
+      <PythonRepl
+        ref={replRef}
+        data-testid="terminal"
+        createWorker={createWorker}
+        terminalOptions={{ cursorBlink: true }}
+        fit={fit}
+        copyOnSelect={copyOnSelect}
+        onStatus={setStatus}
+        onCrash={setCrashMessage}
+        onCopy={showToast}
+      />
       {toast !== null && (
         <div
           role="status"

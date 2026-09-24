@@ -42,6 +42,7 @@
   },
   "dependencies": {
     "@cp949/runo-pyodide-core": "workspace:*",
+    "@cp949/runo-pyodide-react": "workspace:*",
     "@cp949/runo-pyodide-repl": "workspace:*",
     "@cp949/runo-pyodide-terminal": "workspace:*",
     "@xterm/xterm": "6.0.0",
