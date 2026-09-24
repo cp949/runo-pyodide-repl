@@ -1,9 +1,6 @@
 import { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
 import {
-  createInterruptBuffer,
-  SIGNAL,
-  createInterruptSender,
   DEFAULT_PYODIDE_INDEX_URL,
   RunRejectedError,
   type RunRejectedReason,
@@ -163,9 +160,6 @@ export function createRepl(options: ReplOptions): ReplHandle {
     writeNotice(readline, NOT_ISOLATED_WARNING, "warning");
     emitStatus("not-isolated");
   } else {
-    // 프레임에 넣는 것과 같은 SharedArrayBuffer 뷰를 송신기도 쓴다. reset()이 새 세션에도 같은 버퍼를 싣는다.
-    const interruptBuffer = createInterruptBuffer();
-    const interruptSender = createInterruptSender(interruptBuffer);
     // 마지막으로 적용한 값(sticky). 무인자 reset()·reset({})·reset({ topLevelAwait: undefined })는 이 값을 그대로 쓴다.
     let topLevelAwait = options.topLevelAwait === true;
     // 벤더 `Readline`은 활성 읽기가 없을 때만 부른다(읽기 중 Ctrl+C는 벤더가 같은 프롬프트를 다시 그린다).
@@ -174,14 +168,13 @@ export function createRepl(options: ReplOptions): ReplHandle {
       if (!session?.pythonRunning()) return;
       // tty 로컬 에코 흉내. 개행 없이 꼬리에 남아 다음 프롬프트·`input()` 프롬프트가 이어 그려진다(`t^Cx: `).
       session.echoCtrlC();
-      interruptSender.send();
+      // 눌림은 지금 세션의 buffer에 쓴다. buffer·송신기는 세션마다 새로 만든다(`session.ts`).
+      session.interrupt();
     });
     const spawnSession = () => {
       session = startSession({
         readline,
         terminal: options.terminal,
-        interruptBuffer,
-        interruptSender,
         createWorker: options.createWorker,
         indexURL,
         topLevelAwait,
@@ -209,8 +202,6 @@ export function createRepl(options: ReplOptions): ReplHandle {
         else readline.cancelRead();
         // 새 worker 생성이 실패해도 끝난 옛 세션을 가리키지 않게 한다(runner `restart()`와 같다).
         session = undefined;
-        // 옛 세션이 남겼을 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않게 한다.
-        Atomics.store(interruptBuffer, SIGNAL, 0);
         // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006).
         if (options.terminal.buffer.active.cursorX !== 0)
           readline.write("\r\n");

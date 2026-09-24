@@ -313,14 +313,18 @@ const waitCancelled = (
 
 type Session = ReturnType<typeof startSession>;
 
-/** 프레임의 interrupt buffer 슬롯 세 개. main 송신기가 쓰는 것과 같은 SharedArrayBuffer 뷰다. */
-function slots(session: Pick<Session, "fakeWorker">) {
-  const buffer = session.fakeWorker.frame().interruptBuffer;
+/** interrupt buffer 슬롯 세 개의 지금 값. */
+function slotsOf(buffer: Int32Array) {
   return {
     signal: Atomics.load(buffer, SIGNAL),
     ack: Atomics.load(buffer, ACK),
     seq: Atomics.load(buffer, SEQ),
   };
+}
+
+/** 프레임의 interrupt buffer 슬롯 세 개. main 송신기가 쓰는 것과 같은 SharedArrayBuffer 뷰다. */
+function slots(session: Pick<Session, "fakeWorker">) {
+  return slotsOf(session.fakeWorker.frame().interruptBuffer);
 }
 
 /** 지금까지 터미널에 쓴 `^C` 에코 횟수. */
@@ -1596,7 +1600,7 @@ describe("비격리 페이지", () => {
 });
 
 describe("reset()(RD-010)", () => {
-  test("reset은 cancelRead → rpc dispose(port.close) → worker.terminate 순서로 옛 세션을 끝내고, SIGNAL을 지우며 송신기도 멈춘다", async () => {
+  test("reset은 cancelRead → rpc dispose(port.close) → worker.terminate 순서로 옛 세션을 끝내고, 새 buffer로 시작하며 옛 송신기도 멈춘다", async () => {
     const cancelReadSpy = vi.spyOn(Readline.prototype, "cancelRead");
     const closeSpy = vi.spyOn(MessagePort.prototype, "close");
 
@@ -1614,7 +1618,13 @@ describe("reset()(RD-010)", () => {
 
     session.handle.reset();
 
-    expect(Atomics.load(buffer, SIGNAL)).toBe(0);
+    // 옛 buffer는 아무도 지우지 않는다(옛 worker가 자기 buffer만 읽으므로 새 세션과 섞이지 않는다). 새 세션은 깨끗한 buffer로 시작한다.
+    expect(Atomics.load(buffer, SIGNAL)).toBe(2);
+    expect(slotsOf(must(session.workers[1]).frame().interruptBuffer)).toEqual({
+      signal: 0,
+      ack: 0,
+      seq: 0,
+    });
     expect(cancelReadSpy).toHaveBeenCalledTimes(1);
     expect(closeSpy).toHaveBeenCalledTimes(1);
     expect(must(cancelReadSpy.mock.invocationCallOrder[0])).toBeLessThan(
@@ -1624,12 +1634,13 @@ describe("reset()(RD-010)", () => {
       must(oldWorker.terminate.mock.invocationCallOrder[0]),
     );
 
-    // 송신기가 멈췄으면 잠시 뒤에도 SIGNAL이 되살아나지 않는다(재전송 없음, TRP-009 계승).
+    // 송신기가 멈췄으면 소실을 흉내 내도(SIGNAL만 0) 잠시 뒤에 되살아나지 않는다(재전송 없음, TRP-009 계승).
+    Atomics.store(buffer, SIGNAL, 0);
     await settle();
     expect(Atomics.load(buffer, SIGNAL)).toBe(0);
   });
 
-  test("reset은 같은 interruptBuffer를 새 프레임에 싣고 createWorker를 다시 부르며, 옛 worker만 terminate된다", () => {
+  test("reset은 새 interruptBuffer를 새 프레임에 싣고 createWorker를 다시 부르며, 옛 worker만 terminate된다", () => {
     const session = startResettableSession();
     const oldWorker = must(session.workers[0]);
     const buffer = oldWorker.frame().interruptBuffer;
@@ -1639,9 +1650,29 @@ describe("reset()(RD-010)", () => {
     expect(session.createWorkerSpy).toHaveBeenCalledTimes(2);
     expect(session.workers).toHaveLength(2);
     const newWorker = must(session.workers[1]);
-    expect(newWorker.frame().interruptBuffer.buffer).toBe(buffer.buffer);
+    // 옛 worker는 terminate 뒤에도 한동안 살아 같은 buffer의 SIGINT를 가로챌 수 있다(TRP-049). 세션마다 다른 SharedArrayBuffer여야 한다.
+    const newBuffer = newWorker.frame().interruptBuffer;
+    expect(newBuffer.buffer).toBeInstanceOf(SharedArrayBuffer);
+    expect(newBuffer.buffer).not.toBe(buffer.buffer);
     expect(oldWorker.terminate).toHaveBeenCalledTimes(1);
     expect(newWorker.terminate).not.toHaveBeenCalled();
+  });
+
+  test("리셋 뒤 Ctrl+C는 새 buffer에만 SIGINT를 쓰고 옛 buffer 슬롯은 리셋 시점 값 그대로다", async () => {
+    const session = startResettableSession();
+    const oldBuffer = must(session.workers[0]).frame().interruptBuffer;
+    // 옛 세션이 SIGINT를 받은 채(소비되지 않음) 리셋된다.
+    session.fake.type("\x03");
+    await waitFor(() => Atomics.load(oldBuffer, SIGNAL) === 2);
+    const oldAtReset = slotsOf(oldBuffer);
+
+    session.handle.reset();
+    const newBuffer = must(session.workers[1]).frame().interruptBuffer;
+    session.fake.type("\x03");
+    await settle();
+
+    expect(slotsOf(newBuffer)).toEqual({ signal: 2, ack: 0, seq: 1 });
+    expect(slotsOf(oldBuffer)).toEqual(oldAtReset);
   });
 
   test("reset은 새 sink 세트·메일박스로 시작해 이전 꼬리·메일박스 값을 물려받지 않는다", async () => {

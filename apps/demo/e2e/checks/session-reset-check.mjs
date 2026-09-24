@@ -3,7 +3,7 @@
 //
 // 사용법(dev, `pnpm --filter demo dev`가 떠 있어야 함):
 //   node session-reset-check.mjs [devURL] [previewURL]
-// ONLY=<절 이름,…>로 dev 절만 분리 실행할 수 있다(reset·cursor·ctrll·carry·ccreset·exit·crash·strict).
+// ONLY=<절 이름,…>로 dev 절만 분리 실행할 수 있다(reset·cursor·ctrll·carry·ccreset·ccafter·exit·crash·strict).
 // preview는 devURL·previewURL 둘 다 있을 때만 돈다(`pnpm --filter demo build && pnpm --filter demo preview`).
 // 결과 파일 label은 url 포트 4173이면 preview, 그 밖은 dev(RD-018 DELTA-02 결정과 같은 규칙).
 import { open, hasFg, same, show } from "../lib.mjs";
@@ -265,6 +265,78 @@ async function runDev(url) {
         throw new Error(`${i}번째: 배너 뒤에 잔재가 있다 — ${show(afterBanner)}`);
       }
     }
+  });
+
+  // ── ccafter: 실행 중 리셋 직후 새 세션의 첫 Ctrl+C가 옛 worker에 가로채이지 않는다(N=8) ──
+  // 배경: Chromium은 `worker.terminate()` 뒤에도 Python 루프 중인 worker를 최대 약 2초 살려 둔다(TRP-049).
+  // 옛 worker가 새 세션과 같은 interrupt buffer를 공유하면 그 창 안의 첫 SIGINT를 ack하고 `KeyboardInterrupt`를
+  // 삼킨다. 삼키는 루프를 돌리는 채로 리셋하고, 곧바로 새 세션에서 첫 Ctrl+C를 눌러 "먹음"/"유실"을 센다.
+  // 판정은 이벤트·상태로만 한다(9.7): 눌림이 유실되면 옛 worker가 ack해 재전송이 없으므로 루프가 스스로 끝나지
+  // 않는 영구 상태다 — `waitFor` 제한 시간은 그 정지를 감지하는 용도이고 판정선이 아니다(9.7 4). 시간 값(ms)은
+  // 판정이 아니라 관찰로만 남긴다(9.7 6).
+  await step("ccafter: 삼키는 루프 실행 중 리셋 → 새 세션 첫 Ctrl+C N=8 유실 0", async () => {
+    const N = 8;
+    const STALL_MS = 15000;
+    // gb 출력 행 뒤에 KeyboardInterrupt 행이 생기고 새 프롬프트(`>>>`, 커서 있음)가 마지막 텍스트 행일 때 참이다.
+    const interruptedAfter = async (marker) => {
+      const all = await rows();
+      const idx = all.lastIndexOf(marker);
+      if (idx < 0) return false;
+      if (!all.slice(idx + 1).some((r) => r.includes("KeyboardInterrupt"))) return false;
+      let last = all.length - 1;
+      while (last >= 0 && all[last] === "") last -= 1;
+      return last > idx && all[last] === ">>>" && (await cursorRow()) === last;
+    };
+    let lost = 0;
+    const lostRounds = [];
+    for (let i = 0; i < N; i += 1) {
+      await clear();
+      // 삼키는 루프: KeyboardInterrupt를 받아도 안쪽 루프를 다시 돈다. `\n`은 Python 문자열 이스케이프라 한 줄로 친다.
+      await type(
+        `exec("print('ga${i}')\\nwhile True:\\n    try:\\n        while True: pass\\n    except KeyboardInterrupt: pass")`,
+      );
+      await enter();
+      await waitFor(async () => (await rows()).includes(`ga${i}`), `${i}번째 삼키는 루프 시작(ga${i} 출력 행)`);
+      const tClick = Date.now();
+      await resetAndWait();
+      const tReady = Date.now();
+      if ((await statusText()) !== "ready") {
+        throw new Error(`${i}번째: 리셋 뒤 status = ${await statusText()}(ready 아님) — 회차 판정 불가`);
+      }
+      // 옛 worker가 사는 창(약 2초) 안에 눌러야 하므로 이 구간에 고정 대기를 넣지 않는다.
+      await type(`exec("print('gb${i}')\\nwhile True: pass")`);
+      await enter();
+      await waitFor(async () => (await rows()).includes(`gb${i}`), `${i}번째 새 세션 실행 시작(gb${i} 출력 행)`);
+      const tPress = Date.now();
+      await ctrlC();
+      let eaten = true;
+      try {
+        await waitFor(() => interruptedAfter(`gb${i}`), `${i}번째 첫 Ctrl+C 중단`, STALL_MS);
+      } catch {
+        eaten = false;
+      }
+      if (!eaten) {
+        lost += 1;
+        lostRounds.push(i);
+        // 유실 회차 복구: 옛 worker는 이미 닫혔으니 두 번째 눌림이 먹어야 한다. 안 먹으면 리셋으로 복구한다.
+        await ctrlC();
+        try {
+          await waitFor(() => interruptedAfter(`gb${i}`), `${i}번째 복구 Ctrl+C 중단`, STALL_MS);
+          console.log(`  회차 ${i} 복구: 두 번째 Ctrl+C로 중단`);
+        } catch {
+          console.log(`  회차 ${i} 복구: 두 번째 Ctrl+C도 실패 → 리셋으로 복구`);
+          await resetAndWait();
+        }
+      }
+      const pe = h.pageErrors.length;
+      console.log(`회차 ${i}: ${eaten ? "먹음" : "유실"}, pageErrors=${pe}`);
+      const obs = `클릭→ready ${tReady - tClick}ms, ready→Ctrl+C ${tPress - tReady}ms, 클릭→Ctrl+C ${tPress - tClick}ms`;
+      console.log(`  관찰: ${obs}`);
+      h.notes[`ccafter: 회차 ${i} 관찰(정보용)`] = `${eaten ? "먹음" : "유실"}, ${obs}, pageErrors=${pe}`;
+    }
+    h.notes["ccafter: 유실 수"] = `유실 ${lost}/${N}${lost > 0 ? ` (회차 ${lostRounds.join(",")})` : ""}`;
+    console.log(`ccafter: 유실 ${lost}/${N}`);
+    if (lost > 0) throw new Error(`유실 ${lost}/${N} — 회차 ${lostRounds.join(",")}`);
   });
 
   // ── exit: exit() → 종료 Alert → 무응답 → 리셋으로 복구 ──

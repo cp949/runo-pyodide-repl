@@ -1,8 +1,8 @@
 /**
  * main 쪽 core 세션(00-architecture.md 4.2). worker 하나에 대응하는 공통 자원·게이트를 소유한다: MessageChannel·stdin 메일박스·
  * 초기화 프레임·RPC(core 핸들러 + driver 핸들러 합성)·`readInput` 처리·"Python 실행 중" 게이트·크래시·종료. 화면 상호작용은
- * driver(`MainDriver`)가 낸다. 세션은 `reset()`(RD-010)이 통째로 교체하는 단위다. 핸들(`createRepl`)이 소유하는
- * `interruptBuffer`·`interruptSender`는 세션을 넘어 산다.
+ * driver(`MainDriver`)가 낸다. 세션은 `reset()`(RD-010)이 통째로 교체하는 단위다. `interruptBuffer`·`interruptSender`는
+ * 호출자가 소유하며 세션마다 새로 만든다(옛 worker가 같은 buffer의 SIGINT를 가로채지 못하게, TRP-049).
  */
 import { postInitFrame } from "../protocol/init-frame";
 import type { InitFrame } from "../protocol/init-frame";
@@ -23,9 +23,9 @@ export interface CoreSessionOptions {
   createWorker: () => Worker;
   /** 끝 `/`가 붙은 pyodide CDN 위치. */
   indexURL: string;
-  /** 핸들 소유. 리셋이 새 세션에도 같은 버퍼를 싣는다. 초기화 프레임에 그대로 싣는다. */
+  /** 호출자 소유. 세션마다 새로 만든다(리셋이 옛 buffer를 물려주지 않는다, TRP-049). 초기화 프레임에 그대로 싣는다. */
   interruptBuffer: Int32Array;
-  /** 핸들 소유. */
+  /** 호출자 소유. `interruptBuffer`와 짝이다(세션마다 새로 만든다). */
   interruptSender: InterruptSender;
   /** 화면 상호작용. 옵션은 초기화 프레임 `driver` 필드로, 핸들러는 core 핸들러와 합성돼 RPC에 등록된다. */
   driver: MainDriver;
