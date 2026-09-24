@@ -28,11 +28,11 @@
   환경에서는 `e2e/run.mjs`가 "이미 죽었다"로 조용히 오판할 수 있다(`pending-traps/01.md` 계열,
   아래 함정 절 참고).
 
-## 명령 표(28항목, `apps/demo/package.json`)
+## 명령 표(29항목, `apps/demo/package.json`)
 
 | 이름 | 실행 |
 | --- | --- |
-| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 18종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
+| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 19종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
 | `e2e:measure` | `node e2e/run.mjs measure` — dev만 기동, 측정 5종(`boot-press` 제외) 순차 실행 |
 | `e2e:check` | `node e2e/run.mjs check` — `checks/`·`measure/`·`node/`의 `.mjs`를 `node --check`로 정적 구문 검사만(eslint·tsc는 `e2e/**` 계속 무시, 아래 "정적 검사" 참고) |
 | `e2e:repl-check` | `node e2e/checks/repl-check.mjs normal`(`cdn-blocked`·`not-isolated`는 인자로 직접 지정) |
@@ -54,6 +54,7 @@
 | `e2e:selection-copy` | `node e2e/checks/selection-copy-check.mjs` |
 | `e2e:type-ahead` | `node e2e/checks/type-ahead-check.mjs` |
 | `e2e:run-source` | `node e2e/checks/run-source-check.mjs`(REPL 화면의 `source`·`run-source`·`source-result` 요소로 `runSource(code)`를 조작, RD-022a) |
+| `e2e:bg-output` | `node e2e/checks/bg-output-check.mjs`(열린 읽기 위 배경 출력 조율, RD-022b. 배경 출력은 Python BroadcastChannel 수신기, `input()` 중 출력은 `lib.mjs` `injectRpcNotice`로 합성) |
 | `e2e:boot-press` | `node e2e/measure/boot-press.mjs` |
 | `e2e:press-loss` | `node e2e/measure/press-loss.mjs` |
 | `e2e:burst-matrix` | `node e2e/measure/burst-matrix.mjs` |

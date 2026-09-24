@@ -658,6 +658,67 @@ export async function toastText(page) {
   return page.evaluate(() => document.querySelector('[data-testid="copy-toast"]')?.textContent ?? null);
 }
 
+// RD-022b DELTA-04: main 쪽 RPC 알림 관찰·주입. 화면에 신호가 없는 제품 이벤트(배경 `input()`의 `readInput` 알림이 main에
+// 도착해 처리됨)를 조건 대기로 기다리고(9.7 "판정은 이벤트·상태로"), worker가 낼 수 없는 시점의 출력(`input()` 대기 중 worker는
+// 메일박스 `Atomics.wait`에 멈춰 있다)을 main 경로 그대로 흉내 낸다. 알림 모양은 `packages/pyodide-core/src/protocol/rpc.ts`
+// (`{ kind: "ntf", name, args }`)와 `CORE_MAIN_HANDLER_NAMES`(`write`·`readInput` 등)를 따른다.
+
+/**
+ * `open(url, { before: installRpcTap })`로 부른다(문서 스크립트보다 먼저 실행돼야 한다). `MessagePort.prototype.onmessage`
+ * 설정자를 감싸 모든 포트 핸들러가 **처리를 마친 뒤**(동기 부분) RPC 알림 이름을 `window.__rpcTap.notices`에 쌓고, 마지막으로
+ * 알림을 받은 포트를 `window.__rpcTap.port`에 둔다. RPC가 아닌 메시지(React 스케줄러의 `MessageChannel` 등)는 건드리지 않는다.
+ */
+export async function installRpcTap(page) {
+  await page.addInitScript(() => {
+    const desc = Object.getOwnPropertyDescriptor(MessagePort.prototype, "onmessage");
+    window.__rpcTap = { notices: [], port: null };
+    Object.defineProperty(MessagePort.prototype, "onmessage", {
+      configurable: true,
+      enumerable: desc.enumerable,
+      get() {
+        return desc.get.call(this);
+      },
+      set(fn) {
+        if (typeof fn !== "function") {
+          desc.set.call(this, fn);
+          return;
+        }
+        const port = this;
+        desc.set.call(this, function tapped(event) {
+          try {
+            return fn.call(this, event);
+          } finally {
+            const d = event.data;
+            if (d !== null && typeof d === "object" && d.kind === "ntf" && typeof d.name === "string") {
+              window.__rpcTap.notices.push(d.name);
+              window.__rpcTap.port = port;
+            }
+          }
+        });
+      },
+    });
+  });
+}
+
+/** `installRpcTap` 뒤: main이 처리한 RPC 알림 중 이름이 `name`인 것의 개수. */
+export const rpcNoticeCount = (page, name) =>
+  page.evaluate((n) => (window.__rpcTap?.notices ?? []).filter((x) => x === n).length, name);
+
+/**
+ * `installRpcTap` 뒤: 마지막으로 RPC 알림을 받은 포트에 worker → main 알림 하나를 합성해 보낸다(`dispatchEvent`, 실제 알림과 같은
+ * `onmessage` 핸들러를 지난다). 알림을 받은 포트가 아직 없으면 던진다.
+ */
+export async function injectRpcNotice(page, name, ...args) {
+  await page.evaluate(
+    ([n, a]) => {
+      const port = window.__rpcTap?.port;
+      if (!port) throw new Error("RPC 알림을 받은 포트가 없다(installRpcTap·세션 부팅 확인)");
+      port.dispatchEvent(new MessageEvent("message", { data: { kind: "ntf", name: n, args: a } }));
+    },
+    [name, args],
+  );
+}
+
 export const hasFg = (classes, n) => classes.includes(`xterm-fg-${n}`);
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 export const show = (v) => JSON.stringify(v);

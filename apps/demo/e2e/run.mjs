@@ -87,6 +87,8 @@ const SETS = [
   // 결과 파일 label에 모드가 들어가 `runner-check-normal-dev.json`·`runner-check-not-isolated-dev.json`으로 나뉜다.
   { file: "checks/runner-check.mjs", args: ["normal"], server: "dev" },
   { file: "checks/runner-check.mjs", args: ["not-isolated"], server: "static" },
+  // RD-022b: 열린 읽기 위 배경 출력 조율(REPL 화면). dev 전용(preview 재실행 없음).
+  { file: "checks/bg-output-check.mjs", server: "dev" },
   // RD-018 DELTA-05: 부팅 중 Ctrl+C 판정(N=30 기본값, boot-press.mjs는 measure/ 소속 파일이지만 baseline 세트다)
   { file: "measure/boot-press.mjs", server: "dev" },
 ];
