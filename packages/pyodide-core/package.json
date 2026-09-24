@@ -34,6 +34,7 @@
     "dev": "tsdown --watch",
     "lint": "eslint --max-warnings 0",
     "check-types": "tsc --noEmit",
+    "check-dist": "node ../../scripts/check-dist.mjs dist",
     "test": "vitest run"
   },
   "devDependencies": {

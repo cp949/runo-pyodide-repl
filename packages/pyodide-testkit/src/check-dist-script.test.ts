@@ -1,0 +1,122 @@
+// @vitest-environment node
+/**
+ * 루트 `scripts/check-dist.mjs`(빌드 산출물에 `coincident`·`reflected-ffi` 문자열이 없는지 검사) 시험. 스크립트를 자식
+ * 프로세스로 실행해 종료 코드와 메시지를 본다. 실제 패키지의 `dist`를 검사하는 것은 각 패키지의 `check-dist` 스크립트다(turbo
+ * `check-dist`가 `build` 뒤에 돌린다).
+ */
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, test } from "vitest";
+
+const SCRIPT = fileURLToPath(
+  new URL("../../../scripts/check-dist.mjs", import.meta.url),
+);
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
+});
+
+/** 임시 폴더를 만들고 `files`(상대 경로 → 내용)를 쓴다. */
+function makeDist(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "check-dist-"));
+  dirs.push(dir);
+  for (const [path, content] of Object.entries(files)) {
+    const full = join(dir, path);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, content);
+  }
+  return dir;
+}
+
+function run(...targets: string[]) {
+  const result = spawnSync(process.execPath, [SCRIPT, ...targets], {
+    encoding: "utf8",
+  });
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
+/** 스크립트가 없어서(MODULE_NOT_FOUND) 종료 코드 1이 나오는 경우와 구분하려고, 검사가 스스로 실패했다는 표식을 함께 본다. */
+const FAIL_MARK = "check-dist 실패";
+
+describe("check-dist 스크립트", () => {
+  test("금지 문자열이 없는 dist는 통과한다", () => {
+    const dist = makeDist({
+      "index.mjs": "export const a = 1;\n",
+      "index.d.mts": "export declare const a: number;\n",
+    });
+
+    const { status, output } = run(dist);
+
+    expect(status, output).toBe(0);
+  });
+
+  test("산출물 한 파일에 coincident 문자열이 있으면 실패하고 그 파일 이름을 알린다", () => {
+    const dist = makeDist({
+      "index.mjs": "export const a = 1;\n",
+      "worker.mjs": 'import coincident from "coincident";\n',
+    });
+
+    const { status, output } = run(dist);
+
+    expect(status).toBe(1);
+    expect(output).toContain(FAIL_MARK);
+    expect(output).toContain("worker.mjs");
+    expect(output).toContain("coincident");
+  });
+
+  test("하위 폴더 안의 파일도 검사한다", () => {
+    const dist = makeDist({
+      "index.mjs": "ok\n",
+      "chunks/deep/x.mjs": "// coincident\n",
+    });
+
+    expect(run(dist).output).toContain(FAIL_MARK);
+  });
+
+  test("소스맵(.map) 안의 문자열도 잡는다", () => {
+    const dist = makeDist({
+      "index.mjs": "ok\n",
+      "index.mjs.map": '{"sources":["../node_modules/coincident/index.js"]}',
+    });
+
+    expect(run(dist).output).toContain(FAIL_MARK);
+  });
+
+  test("대문자가 섞인 표기도 잡는다", () => {
+    const dist = makeDist({ "index.mjs": "// Coincident 브리지\n" });
+
+    expect(run(dist).output).toContain(FAIL_MARK);
+  });
+
+  test("reflected-ffi 문자열도 실패시킨다", () => {
+    const dist = makeDist({ "index.mjs": 'import "reflected-ffi";\n' });
+
+    expect(run(dist).output).toContain(FAIL_MARK);
+  });
+
+  test("dist 폴더가 없으면 건너뛰지 않고 실패한다", () => {
+    const dist = makeDist({});
+    rmSync(dist, { recursive: true });
+
+    const { status, output } = run(dist);
+
+    expect(status).toBe(1);
+    expect(output).toContain(FAIL_MARK);
+    expect(output).toContain("pnpm build");
+  });
+
+  test("dist 폴더가 비어 있으면 실패한다", () => {
+    const dist = makeDist({});
+
+    expect(run(dist).output).toContain(FAIL_MARK);
+  });
+
+  test("대상 폴더를 하나도 주지 않으면 실패한다", () => {
+    expect(run().output).toContain(FAIL_MARK);
+  });
+});

@@ -6,7 +6,9 @@
     "dev": "turbo run dev --filter=demo",
     "preview": "turbo run preview --filter=demo",
     "lint": "turbo run lint",
-    "test": "turbo run test",
+    "test": "turbo run test check-dist",
+    "check-dist": "turbo run check-dist",
+    "smoke:pack": "pnpm build && node scripts/pack-smoke.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types"
   },

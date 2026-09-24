@@ -6,6 +6,7 @@
   "exports": {
     "./thread": "./src/thread.ts",
     "./fake-terminal": "./src/fake-terminal.ts",
+    "./package-boundary": "./src/package-boundary.ts",
     "./ts-resolve-hook.mjs": "./src/ts-resolve-hook.mjs",
     "./package.json": "./package.json"
   },
