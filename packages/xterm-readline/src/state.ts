@@ -39,6 +39,10 @@ export class Layout {
 
 export class State {
   private prompt: string;
+  /** 생성자에 넘긴 프롬프트. `setPromptPrefix`가 접두를 바꿔도 이 값은 그대로다. */
+  private basePrompt: string;
+  /** 프롬프트 앞에 붙인 접두(열린 읽기 위 배경 출력의 미종결 조각). 없으면 빈 문자열. */
+  private prefix = "";
   private promptSize: Position;
   private line: LineBuffer = new LineBuffer();
   private tty: Tty;
@@ -59,6 +63,7 @@ export class State {
     history: History
   ) {
     this.prompt = prompt;
+    this.basePrompt = prompt;
     this.tty = tty;
     this.highlighter = highlighter;
     this.history = history;
@@ -77,6 +82,25 @@ export class State {
 
   public getTty(): Tty {
     return this.tty;
+  }
+
+  /** 현재 프롬프트 접두. 없으면 빈 문자열. */
+  public promptPrefix(): string {
+    return this.prefix;
+  }
+
+  /**
+   * 프롬프트 앞에 `prefix`를 붙인다. 비어 있지 않으면 접두와 기준 프롬프트 사이에 `\x1b[0m`을 넣어 접두의 SGR이
+   * 프롬프트로 새지 않게 한다. 빈 문자열이면 기준 프롬프트로 돌아간다. 화면에는 쓰지 않는다 — 다음 `refresh()`가
+   * 새 프롬프트로 그린다. `prefix`에 `\n`·`\r`이 없어야 한다(`\n`은 행 계산을, `\r`은 폭 계산을 어긋나게 한다).
+   * 폭보다 긴 접두는 감긴 프롬프트로 계산된다.
+   */
+  public setPromptPrefix(prefix: string): void {
+    this.prefix = prefix;
+    this.prompt =
+      prefix === "" ? this.basePrompt : prefix + "\x1b[0m" + this.basePrompt;
+    this.promptSize = this.tty.calculatePosition(this.prompt, new Position());
+    this.layout.promptSize = { ...this.promptSize };
   }
 
   public shouldHighlight(): boolean {
@@ -124,6 +148,31 @@ export class State {
     } else {
       this.refresh();
     }
+  }
+
+  /**
+   * 화면에 쓰지 않고 커서를 `pos`에 둔 뒤 `text`를 끼운다. 새 커서를 돌려준다. 입력줄이 화면에 없는 동안(`Readline`의
+   * `printAbove`·`printAboveRaw` 재그리기 대기) 공개 편집 API가 쓴다 — 결과는 재그리기 콜백의 `refresh()`가 그린다.
+   */
+  public insertOffscreen(pos: number, text: string): number {
+    this.editing = true;
+    this.line.pos = pos;
+    this.line.insert(text);
+    return this.line.pos;
+  }
+
+  /** `insertOffscreen`과 같은 조건에서 커서를 `pos`에 둔 뒤 앞 n글자를 지운다(그리지 않음). 새 커서를 돌려준다. */
+  public backspaceOffscreen(pos: number, n: number): number {
+    this.line.pos = pos;
+    if (this.line.backspace(n)) this.editing = true;
+    return this.line.pos;
+  }
+
+  /** `insertOffscreen`과 같은 조건에서 버퍼를 `text`로 바꾸고 커서를 끝에 둔다(`update`와 같되 그리지 않음). 새 커서를 돌려준다. */
+  public updateOffscreen(text: string): number {
+    this.line.update(text, text.length);
+    this.editing = false;
+    return this.line.pos;
   }
 
   /** 버퍼를 `text`로 바꾸고 다시 그린다. 커서는 `cursor`(생략하면 끝)에 둔다. */
