@@ -35,7 +35,16 @@ export type {
   WorkerDriver,
   WorkerDriverSession,
 } from "./worker/driver";
-export { runDriver } from "./worker/run-driver";
-export type { RunDriverOptions, RunOutcome } from "./worker/run-driver";
+export {
+  loadExecInConsole,
+  runDriver,
+  toRunOutcome,
+} from "./worker/run-driver";
+export type {
+  ExecInConsolePy,
+  RawOutcome,
+  RunDriverOptions,
+  RunOutcome,
+} from "./worker/run-driver";
 export { runWorker } from "./worker/run-worker";
 export type { RunWorkerOptions } from "./worker/run-worker";

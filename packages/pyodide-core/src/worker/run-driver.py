@@ -1,4 +1,6 @@
-# 실행 driver의 Python 쪽(RD-022). 코드 한 덩어리를 새 globals에서 `exec` 모드로 실행하고 결말을 분류한다.
+# 실행 driver의 Python 쪽(RD-022). 코드 한 덩어리를 `exec` 모드로 실행하고 결말을 분류한다. 두 함수로 나뉜다:
+# `exec_in_console`(컴파일 + `console.runcode` + 분류, runner와 REPL `runSource`가 공용)과 `run_code`(runner 전용: 새 stdin·
+# 새 globals를 만든 뒤 `exec_in_console`을 부른다).
 # REPL의 `ConsoleFuture`·`runsource` 경로를 거치지 않는다: `CodeRunner`를 직접 만들어 `console.runcode(source, runner)`를 부른다.
 # `sigint-handler.py`가 인스턴스 속성으로 바꿔 둔 `console.runcode` 래퍼(`active` task 기록)와 `console.formattraceback`(우리 프레임
 # 절단·`IdleInterrupt` → `KeyboardInterrupt` 한 줄)를 그대로 재사용한다.
@@ -87,10 +89,13 @@ def _result(kind, error_type=None, text=None, code=None):
     return to_js([kind, error_type, text, code], depth=1)
 
 
-async def run_code(console, source, filename, top_level_await):
-    _reset_stdin()
-    # 새 globals는 `console.globals` 교체로 만든다(`runcode`가 `self.globals`에서 실행한다). `sys.modules`는 그대로다.
-    console.globals = _new_globals(filename)
+async def exec_in_console(console, source, top_level_await, filename=None):
+    """runner와 REPL `runSource`가 함께 쓰는 실행·분류. 컴파일(`CodeRunner`) + `await console.runcode` + 결말 분류 + stderr 쓰기.
+    이름공간(`console.globals`)과 `sys.stdin`은 건드리지 않는다: 그 준비는 호출자 몫이다(runner는 `run_code`, REPL은 하지 않는다).
+    파일명은 `console.filename`이다. `runcode`·SIGINT 규칙 ①이 이 값과 `co_filename`의 일치에 의존하므로(TRP-020) 호출자가 따로 정하지
+    않는 것이 기본이고, `filename`은 `run_code`가 자기 인자를 그대로 넘기는 호환 경로다(실제 콘솔에서는 둘이 같다)."""
+    if filename is None:
+        filename = console.filename
     # `return_mode="none"`: 마지막 식을 값으로 돌려주거나 raise로 바꾸지 않는다. `dedent=False`: 첫 줄 들여쓰기를 없애지 않는다.
     # `dont_inherit=True`: 호출 모듈의 `__future__` 플래그를 사용자 코드가 물려받지 않는 방어다(pyodide 314.0.7의 `_base.py`·
     # `console.py`에는 `__future__`가 없어 지금은 결과가 같다).
@@ -130,3 +135,11 @@ async def run_code(console, source, filename, top_level_await):
             return _result("interrupted", None, text)
         return _result("error", _error_type(exc), text)
     return _result("ok")
+
+
+async def run_code(console, source, filename, top_level_await):
+    """runner 전용: 새 stdin·새 globals를 만든 뒤 `exec_in_console`로 실행한다."""
+    _reset_stdin()
+    # 새 globals는 `console.globals` 교체로 만든다(`runcode`가 `self.globals`에서 실행한다). `sys.modules`는 그대로다.
+    console.globals = _new_globals(filename)
+    return await exec_in_console(console, source, top_level_await, filename)

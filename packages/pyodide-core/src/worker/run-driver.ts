@@ -31,8 +31,8 @@ export interface RunSession extends WorkerDriverSession {
   end(): void;
 }
 
-/** Python `run_code`가 돌려주는 `[kind, error_type, traceback, code]`(None은 JS `undefined`). */
-type RawOutcome = [
+/** Python `run_code`·`exec_in_console`이 돌려주는 `[kind, error_type, traceback, code]`(None은 JS `undefined`). */
+export type RawOutcome = [
   string,
   string | undefined,
   string | undefined,
@@ -47,8 +47,20 @@ type RunCodePy = PyProxy &
     topLevelAwait: boolean,
   ) => Promise<RawOutcome>);
 
+/**
+ * 실행·분류 공용 함수 `exec_in_console(console, source, top_level_await, filename=None)`의 JS 모양. runner와 REPL `runSource`가
+ * 쓴다. 이름공간·`sys.stdin`은 바꾸지 않고 파일명은 `console.filename`이다(`filename`을 주면 그 값이 우선).
+ */
+export type ExecInConsolePy = PyProxy &
+  ((
+    console: PyodideConsoleProxy,
+    source: string,
+    topLevelAwait: boolean,
+    filename?: string,
+  ) => Promise<RawOutcome>);
+
 /** driver Python이 만든 결말을 검증하며 `RunOutcome`으로 바꾼다. 형식이 어긋나면 던진다(RPC 오류로 나간다). */
-function toOutcome([kind, errorType, traceback, code]: RawOutcome): RunOutcome {
+export function toRunOutcome([kind, errorType, traceback, code]: RawOutcome): RunOutcome {
   switch (kind) {
     case "ok":
       return { kind };
@@ -87,7 +99,7 @@ export function createRunSession(options: RunDriverOptions): RunSession {
         if (!runCodePy || !pyconsole) throw new Error("콘솔이 아직 없다");
         running = true;
         try {
-          return toOutcome(
+          return toRunOutcome(
             await runCodePy(
               pyconsole,
               source,
@@ -116,18 +128,36 @@ export function createRunSession(options: RunDriverOptions): RunSession {
   };
 }
 
-/** driver Python을 별도 namespace(빈 dict)에서 정의해 사용자 globals를 오염시키지 않는다. 함수는 세션 동안 쓴다. */
-function loadRunCode(pyodide: PyodideInterface): RunCodePy {
+/**
+ * driver Python을 별도 namespace(빈 dict)에서 정의하고 함수 하나를 꺼낸다. 사용자 globals를 오염시키지 않는다. 호출마다
+ * 소스를 새로 실행하므로 소비자가 세션마다 한 번만 부르고 함수는 세션 동안 쓴다.
+ */
+function loadDriverFunction<T extends PyProxy>(
+  pyodide: PyodideInterface,
+  name: string,
+): T {
   const namespace = pyodide.toPy({}) as PyProxy & { get(name: string): unknown };
   try {
     pyodide.runPython(RUN_DRIVER_SOURCE, {
       globals: namespace,
       filename: "<run-driver>",
     });
-    return namespace.get("run_code") as RunCodePy;
+    return namespace.get(name) as T;
   } finally {
     namespace.destroy();
   }
+}
+
+function loadRunCode(pyodide: PyodideInterface): RunCodePy {
+  return loadDriverFunction<RunCodePy>(pyodide, "run_code");
+}
+
+/**
+ * 실행·분류 공용 함수를 올린다(REPL `runSource`용). `run_code`와 달리 `console.globals`·`sys.stdin`을 바꾸지 않는다. 함수는
+ * 세션 동안 쓰고 세션이 끝날 때 `destroy()`한다.
+ */
+export function loadExecInConsole(pyodide: PyodideInterface): ExecInConsolePy {
+  return loadDriverFunction<ExecInConsolePy>(pyodide, "exec_in_console");
 }
 
 export const runDriver: WorkerDriver<RunDriverOptions> = {
