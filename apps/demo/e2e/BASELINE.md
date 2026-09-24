@@ -9,14 +9,14 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 
 - `pnpm --filter demo e2e:baseline` — 서버 3개(5173 dev · 4173 preview · 4174 비격리 정적)를
   이 실행기가 비어 있으면 스스로 기동하고(이미 떠 있으면 "기존 사용"으로 표기하고 그대로 쓰며 종료
-  시에도 내리지 않는다) 판정 17종의 dev 전부 + preview 부분 + `boot-press` N=30을 순서대로 돌린 뒤
+  시에도 내리지 않는다) 판정 18종의 dev 전부 + preview 부분 + `boot-press` N=30을 순서대로 돌린 뒤
   `apps/demo/e2e/results/summary.json`을 쓰고 이 실행기가 띄운 서버만 정리한다.
 - 판정 규칙: `summary.json`의 `failed`(`baseline.json`의 `deviations`·`unrun` 접두어에 해당하는
   이름은 제외) **0건** + 총 `pageerror`(`pageErrors` 필드, `expectedPageErrors`에 등록된 의도적
   forced 오류는 뺀 값) **0** + `ok: true`. "미실행"(`unrun`)은 실패가 아니다 — 담당 RD가
   아직 없어 그 확인 코드 자체가 스크립트에 없다는 뜻이다(2026-09-24 RD-016 완료로 현재 목록은 비어 있다).
 - `pnpm --filter demo e2e:<이름>` 단독 실행은 서버(주로 5173)가 이미 떠 있어야 한다
-  (`e2e/README.md` "실행 전제", 26항목 목록은 같은 문서).
+  (`e2e/README.md` "실행 전제", 27항목 목록은 같은 문서).
 - `pnpm --filter demo e2e:measure` — dev만 기동, 측정 5종(`boot-press` 제외, 참고값은 4절,
   이 실행기는 exit code만 본다).
 - `e2e:baseline`·`e2e:measure`는 사용자가 지시할 때만 돌린다(`docs/agents/rubber-workflow.md` "검증 실행 예산").
@@ -53,6 +53,8 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 | `tab-check.mjs` | C1~C15(C12 왕복 지연 포함) 76개 = 기존 C1~C14 68개 + RD-016 C15 8개(a·b·c·d×2·e×2·f) | `C1·C3·C8·C11` 30/30 | 통과. RD-016(2026-09-24): C15 절 8개 추가, C9c를 `from os import pa` → `path` 채움으로 재정의, C5e 제목 정정(왕복 + 큐), C12에 `import os.pa` 지연 기록 추가(판정 없음, 웜 N=20 중앙값·최대는 결과 JSON `notes`). dev `ONLY=C5,C9,C12,C15` 20/20(C15 8개 포함, `pageErrors` 0)만 실측했고 76개 전체 재실행은 하지 않았다(L2). 편차 22 해소(2026-09-24)로 C11a에 `"sys" in globals()` False 단언 1개를 더했다(dev `ONLY=C11` 7/7, 총 개수는 그대로 68). preview 30/30은 재측정하지 않았다(L2) |
 | `selection-copy-check.mjs` | S01~S12 등 14개 | `S01,S02,S05,S07` 4/4 | 통과 |
 | `type-ahead-check.mjs` | 초기·T01~T09(T08·T09a·T09b 포함, T10 제외)·T11·T12·콘솔/`pageerror` 확인 14개(T10 상한 4096은 벤더 단위 시험이 고정해 브라우저 셀 없음) | 미실행(dev 전용) | 통과 13/13(2026-09-24 RD-019 dev L1 1회, `pageErrors` 0. T11은 Tab이 마지막 키인 입력만 판정 — Tab 뒤 이어진 키는 응답 적용 조건으로 완성이 버려진다). T12(실행 중 `if 1:`+Shift+Enter+`pass` → `>>> if 1:` / `    pass`, 커서 열 8)는 2026-09-24 L1 `ONLY=T12` 1회만 통과 2/2(초기 포함, `pageErrors` 0. 나머지 셀은 위 RD-019 기록 유지) |
+| `runner-check.mjs normal`(실행창 `?view=runner`) | 초기 3개(격리·ready 빈 화면·터미널/worker 1개) + R01~R13 13개 = 16개. R01 `input("이름: ")`, R02 Ctrl+C `interrupted`, R03 `stop` `interrupted`, R04 삼키는 루프 + `stop` → `restarted`·`restarting` → `ready`, R05 실행 중 `run` → `busy`, R06 실행 중 키·붙여넣기 폐기(다음 `input()`에도 없음), R07 `ready` Ctrl+C 무동작, R08 드래그 복사, R09 `sys.exit(3)`, R10 `1/0` 트레이스백, R11 두 번째 run `NameError`·`__main__`, R12 미종결 줄 뒤 새 줄, R13 콘솔 무결 | 미실행(dev 전용) | **통과 16/16**(2026-09-24 RD-022 DELTA-07 L1 전체 1회, `pageErrors` 0, `problemLogs` 0). R04→R05→R06 순서 의존(R04가 `stop()` 폴백으로 재시작한 worker에서 R05·R06이 첫 interrupt를 보낸다)을 포함한다 |
+| `runner-check.mjs not-isolated`(4174 비격리 정적) | N01~N05 5개(경고 문구·노랑·상태 `not-isolated`·`run` → `unavailable`·worker 없음) | 미실행(정적 서버 전용) | 통과 5/5(2026-09-24 DELTA-07 L1 1회, `pageErrors` 0) |
 | `measure/boot-press.mjs`(baseline 세트 소속, DELTA-05가 배선) | 부팅 중 Ctrl+C N=30 | 미실행(baseline dev 전용) | 통과 30/30 |
 
 [^repl-log]: `repl-check.mjs`는 dev에서 `normal`·`cdn-blocked`·`not-isolated`(4174) 세 모드를 각각

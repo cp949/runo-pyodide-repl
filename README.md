@@ -61,7 +61,7 @@ dev·preview·정적 배포 모두 필요하다. `apps/demo/vite.config.ts`가 `
 
 ```bash
 pnpm exec playwright install chromium   # 최초 1회
-pnpm --filter demo e2e:baseline         # 서버를 스스로 띄우고 판정 16종 + boot-press N=30을 돌려 기준선과 대조
+pnpm --filter demo e2e:baseline         # 서버를 스스로 띄우고 판정 18종 + boot-press N=30을 돌려 기준선과 대조
 ```
 
 자세한 실행법·개별 스크립트 목록·기준 인터프리터 버전 차이는 `apps/demo/e2e/README.md`(기준선 표는

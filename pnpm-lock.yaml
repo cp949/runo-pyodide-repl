@@ -26,9 +26,15 @@ importers:
 
   apps/demo:
     dependencies:
+      '@cp949/runo-pyodide-core':
+        specifier: workspace:*
+        version: link:../../packages/pyodide-core
       '@cp949/runo-pyodide-repl':
         specifier: workspace:*
         version: link:../../packages/pyodide-repl
+      '@cp949/runo-pyodide-terminal':
+        specifier: workspace:*
+        version: link:../../packages/pyodide-terminal
       '@xterm/xterm':
         specifier: 6.0.0
         version: 6.0.0

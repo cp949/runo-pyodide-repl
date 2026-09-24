@@ -14,6 +14,7 @@
     "e2e:measure": "node e2e/run.mjs measure",
     "e2e:check": "node e2e/run.mjs check",
     "e2e:repl-check": "node e2e/checks/repl-check.mjs normal",
+    "e2e:runner-check": "node e2e/checks/runner-check.mjs normal",
     "e2e:prompt-join": "node e2e/checks/prompt-join-check.mjs",
     "e2e:trailing-newline": "node e2e/checks/trailing-newline-check.mjs",
     "e2e:carryover": "node e2e/checks/carryover-check.mjs",
@@ -38,7 +39,9 @@
     "e2e:keys-after-enter": "node e2e/measure/keys-after-enter-probe.mjs"
   },
   "dependencies": {
+    "@cp949/runo-pyodide-core": "workspace:*",
     "@cp949/runo-pyodide-repl": "workspace:*",
+    "@cp949/runo-pyodide-terminal": "workspace:*",
     "@xterm/xterm": "6.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"

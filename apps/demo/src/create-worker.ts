@@ -7,3 +7,13 @@ export function createWorker(): Worker {
     type: "module",
   });
 }
+
+/**
+ * 실행창(`?view=runner`) worker 생성 경로. `createTerminalRunner`의 `createWorker` 옵션(재시작마다 다시 호출됨)으로 넘긴다.
+ * REPL worker와 별도 파일이라 별도 ES 모듈로 번들된다.
+ */
+export function createRunnerWorker(): Worker {
+  return new Worker(new URL("./runner.worker.ts", import.meta.url), {
+    type: "module",
+  });
+}

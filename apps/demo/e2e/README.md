@@ -28,14 +28,15 @@
   환경에서는 `e2e/run.mjs`가 "이미 죽었다"로 조용히 오판할 수 있다(`pending-traps/01.md` 계열,
   아래 함정 절 참고).
 
-## 명령 표(26항목, `apps/demo/package.json`)
+## 명령 표(27항목, `apps/demo/package.json`)
 
 | 이름 | 실행 |
 | --- | --- |
-| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 17종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
+| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 18종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
 | `e2e:measure` | `node e2e/run.mjs measure` — dev만 기동, 측정 5종(`boot-press` 제외) 순차 실행 |
 | `e2e:check` | `node e2e/run.mjs check` — `checks/`·`measure/`·`node/`의 `.mjs`를 `node --check`로 정적 구문 검사만(eslint·tsc는 `e2e/**` 계속 무시, 아래 "정적 검사" 참고) |
 | `e2e:repl-check` | `node e2e/checks/repl-check.mjs normal`(`cdn-blocked`·`not-isolated`는 인자로 직접 지정) |
+| `e2e:runner-check` | `node e2e/checks/runner-check.mjs normal`(실행창 `?view=runner`, `not-isolated`는 인자로 직접 지정하고 4174 정적 서버를 쓴다) |
 | `e2e:prompt-join` | `node e2e/checks/prompt-join-check.mjs` |
 | `e2e:trailing-newline` | `node e2e/checks/trailing-newline-check.mjs` |
 | `e2e:carryover` | `node e2e/checks/carryover-check.mjs` |

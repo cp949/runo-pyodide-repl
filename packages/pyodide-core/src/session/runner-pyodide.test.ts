@@ -9,7 +9,7 @@
  * ms 상한 단언은 없다(`docs/design/09-testing.md` 9.7).
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { spawnWorkerLike } from "@repo/pyodide-testkit/thread";
+import { spawnWorkerLike, type WorkerLike } from "@repo/pyodide-testkit/thread";
 import type { OutputChunk } from "./driver";
 import {
   createRunner,
@@ -228,6 +228,208 @@ describe("createRunner + 실제 pyodide", () => {
 
       // null 응답은 메일박스 cancel이고 worker의 stdin 콜백이 그것을 KeyboardInterrupt로 바꾼다(EOFError가 아니다).
       expect(outcome).toMatchObject({ kind: "interrupted" });
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+/**
+ * 옛 worker가 `terminate()` 뒤에도 한동안 살아 있는 상황(브라우저 재현). Chromium은 Python 루프처럼 스크립트가 끝나지 않는 worker의
+ * `terminate()`를 즉시 반영하지 않고 최대 약 2초 뒤에 강제로 끝낸다(실측: `_works/…-rd-022-…/verify/probe-buffer2-delta03a.mjs`의 `worker
+ * close` 이벤트가 `terminate()`로부터 약 2초). 그 사이 옛 worker의 SIGINT 폴링이 새 worker와 같은 눌림을 두고 경쟁하면 눌림 하나가 옛
+ * worker에 가로채여 새 worker의 첫 interrupt가 사라진다(node의 `worker.terminate()`는 즉시라 이 구간이 없다). 이 공장의 worker는
+ * `terminate()`를 무시한다(시험이 끝나면 `spawnWorkerLike`가 실제로 끝낸다). `crash()`는 살아 있는 worker에 `error` 이벤트를 보낸다.
+ */
+function lingeringWorkers() {
+  const workers: {
+    frame: { interruptBuffer: Int32Array } | undefined;
+    fireError(message: string): void;
+  }[] = [];
+  return {
+    workers,
+    createWorker: (): Worker => {
+      const real: WorkerLike = spawnWorkerLike(RUN_WORKER_ROLE);
+      const listeners = new Set<(event: { message: string }) => void>();
+      const entry: (typeof workers)[number] = {
+        frame: undefined,
+        fireError: (message) => {
+          for (const listener of [...listeners]) listener({ message });
+        },
+      };
+      workers.push(entry);
+      const worker: WorkerLike = {
+        postMessage: (message, transfer) => {
+          entry.frame ??= message as { interruptBuffer: Int32Array };
+          real.postMessage(message, transfer);
+        },
+        // 옛 worker가 살아 있다: 종료를 요청받아도 아무것도 하지 않는다.
+        terminate: () => {},
+        addEventListener: (type, listener) => {
+          if (type === "error") listeners.add(listener);
+          real.addEventListener(type, listener);
+        },
+        removeEventListener: (type, listener) => {
+          if (type === "error") listeners.delete(listener);
+          real.removeEventListener(type, listener);
+        },
+      };
+      return worker as unknown as Worker;
+    },
+  };
+}
+
+/** 정지 감지용 상한(판정선이 아니다). 눌림을 잃은 실행은 끝나지 않으므로 이 시간 뒤 "정지"로 판정해 시험을 실패시킨다. */
+const STALL_MS = 15_000;
+const STALLED = Symbol("stalled");
+
+function stall(): Promise<typeof STALLED> {
+  return new Promise((resolve) => setTimeout(() => resolve(STALLED), STALL_MS));
+}
+
+const SWALLOW_SOURCE = [
+  'print("삼킨다", flush=True)',
+  "while True:",
+  "    try:",
+  "        while True:",
+  "            pass",
+  "    except KeyboardInterrupt:",
+  "        pass",
+].join("\n");
+
+const SPIN_SOURCE = 'print("돈다", flush=True)\nwhile True:\n    pass';
+
+/** 새 run마다 `돈다`가 한 번씩 찍히므로 stdout에서 센다. */
+function spinCount(started: Started): number {
+  return started.stdout().split("돈다").length - 1;
+}
+
+/** `KeyboardInterrupt`를 삼키는 루프를 `stop()`해 1000ms 폴백(terminate → 새 worker)으로 재시작하고 `ready`까지 기다린다. */
+async function fallbackRestart(started: Started): Promise<void> {
+  const result = started.runner.run(SWALLOW_SOURCE);
+  await started.waitOutput("삼킨다");
+  expect(await started.runner.stop()).toBe("restarted");
+  expect(await result).toStrictEqual({ kind: "restarted" });
+  await started.waitStatus("ready");
+}
+
+/** 무한 루프를 `interrupt()`로 끝내기를 `rounds`번 반복한다. 눌림이 사라지면(가로채이면) 그 회차에서 실패한다. */
+async function expectInterruptRounds(
+  started: Started,
+  rounds: number,
+): Promise<void> {
+  for (let round = 1; round <= rounds; round++) {
+    const result = started.runner.run(SPIN_SOURCE);
+    await until(() => spinCount(started) >= round);
+    started.runner.interrupt();
+    const outcome = await Promise.race([result, stall()]);
+    expect(outcome, `${round}번째 interrupt() 결과`).toMatchObject({
+      kind: "interrupted",
+    });
+  }
+}
+
+describe("재시작한 worker의 첫 interrupt(옛 worker가 종료 전까지 살아 있을 때)", () => {
+  test(
+    "대조: 옛 worker가 terminate()로 즉시 끝나는 환경(node)에서는 폴백 뒤 interrupt()가 원래도 먹는다",
+    async () => {
+      const started = await start();
+      await fallbackRestart(started);
+
+      await expectInterruptRounds(started, 5);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "stop() 폴백 뒤 새 worker의 stop()은 폴백 없이 실행을 끝낸다",
+    async () => {
+      const lingering = lingeringWorkers();
+      const started = await start({ createWorker: lingering.createWorker });
+      await fallbackRestart(started);
+
+      for (let round = 1; round <= 4; round++) {
+        const result = started.runner.run(SPIN_SOURCE);
+        await until(() => spinCount(started) >= round);
+        expect(await started.runner.stop(), `${round}번째 stop()`).toBe(
+          "stopped",
+        );
+        expect(await result).toMatchObject({ kind: "interrupted" });
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "stop() 폴백 뒤 새 worker의 interrupt()(Ctrl+C)는 옛 worker에 가로채이지 않는다",
+    async () => {
+      const lingering = lingeringWorkers();
+      const started = await start({ createWorker: lingering.createWorker });
+      await fallbackRestart(started);
+
+      await expectInterruptRounds(started, 5);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "폴백을 연달아 두 번 겪어도 새 worker의 interrupt()는 옛 worker 둘에 가로채이지 않는다",
+    async () => {
+      const lingering = lingeringWorkers();
+      const started = await start({ createWorker: lingering.createWorker });
+      await fallbackRestart(started);
+      await fallbackRestart(started);
+
+      await expectInterruptRounds(started, 5);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "stop() 폴백 뒤 reset()으로 만든 worker의 interrupt()도 옛 worker에 가로채이지 않는다",
+    async () => {
+      const lingering = lingeringWorkers();
+      const started = await start({ createWorker: lingering.createWorker });
+      await fallbackRestart(started);
+      started.runner.reset();
+      await started.waitStatus("restarting");
+      await started.waitStatus("ready");
+
+      await expectInterruptRounds(started, 5);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "실행 중 reset()으로 만든 worker의 interrupt()는 옛 worker에 가로채이지 않는다",
+    async () => {
+      const lingering = lingeringWorkers();
+      const started = await start({ createWorker: lingering.createWorker });
+      const running = started.runner.run(SWALLOW_SOURCE);
+      await started.waitOutput("삼킨다");
+      started.runner.reset();
+      expect(await running).toStrictEqual({ kind: "restarted" });
+      await started.waitStatus("ready");
+
+      await expectInterruptRounds(started, 5);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "크래시로 끝난 실행 뒤 reset()으로 만든 worker의 interrupt()는 살아 있던 옛 worker에 가로채이지 않는다",
+    async () => {
+      const lingering = lingeringWorkers();
+      const started = await start({ createWorker: lingering.createWorker });
+      const running = started.runner.run(SWALLOW_SOURCE);
+      await started.waitOutput("삼킨다");
+      // worker 스레드는 살아 있는 채로 `error` 이벤트만 온 경우(worker 전역 오류).
+      lingering.workers[0]!.fireError("시험용 worker 오류");
+      await expect(running).rejects.toMatchObject({ reason: "crashed" });
+      await started.waitStatus("crashed");
+      started.runner.reset();
+      await started.waitStatus("ready");
+
+      await expectInterruptRounds(started, 5);
     },
     TEST_TIMEOUT_MS,
   );

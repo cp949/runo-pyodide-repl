@@ -83,6 +83,10 @@ const SETS = [
   { file: "checks/selection-copy-check.mjs", server: "dev", trailingArgs: ["preview"] },
   // RD-019: 읽기가 없는 구간 키 버퍼링(type-ahead). dev 전용(preview 재실행 없음).
   { file: "checks/type-ahead-check.mjs", server: "dev" },
+  // RD-022: 실행창(`?view=runner`, `createTerminalRunner`). normal은 dev, not-isolated는 4174 헤더 없는 정적 서버(`repl-check`와 같은 규칙).
+  // 결과 파일 label에 모드가 들어가 `runner-check-normal-dev.json`·`runner-check-not-isolated-dev.json`으로 나뉜다.
+  { file: "checks/runner-check.mjs", args: ["normal"], server: "dev" },
+  { file: "checks/runner-check.mjs", args: ["not-isolated"], server: "static" },
   // RD-018 DELTA-05: 부팅 중 Ctrl+C 판정(N=30 기본값, boot-press.mjs는 measure/ 소속 파일이지만 baseline 세트다)
   { file: "measure/boot-press.mjs", server: "dev" },
 ];
