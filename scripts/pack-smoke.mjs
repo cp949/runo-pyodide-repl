@@ -83,10 +83,14 @@ const ENTRY_POINTS = [
     { createRepl: "function", DEFAULT_PYODIDE_INDEX_URL: "string" },
   ],
   ["@cp949/runo-pyodide-repl/worker", { runReplWorker: "function" }],
-  // 컴포넌트(`PythonRunner`·`PythonRepl`)는 DELTA-03·04에서 추가하며 이름을 채운다.
   [
     "@cp949/runo-pyodide-react",
-    { usePythonRunner: "function", RunRejectedError: "function" },
+    {
+      PythonRepl: "function",
+      PythonRunner: "function",
+      usePythonRunner: "function",
+      RunRejectedError: "function",
+    },
   ],
 ];
 
@@ -294,14 +298,22 @@ async function main(tmp) {
       `import { createRepl, type ReplHandle, type ReplOptions } from "@cp949/runo-pyodide-repl";`,
       `import { runReplWorker } from "@cp949/runo-pyodide-repl/worker";`,
       `import * as reactPackage from "@cp949/runo-pyodide-react";`,
-      `import type { UsePythonRunnerOptions, UsePythonRunnerResult } from "@cp949/runo-pyodide-react";`,
+      `import type { PythonReplHandle, PythonReplProps, PythonRunnerHandle, PythonRunnerProps, UsePythonRunnerOptions, UsePythonRunnerResult } from "@cp949/runo-pyodide-react";`,
       `import type { PyodideInterface } from "pyodide";`,
       ``,
       `// core worker 타입이 소비자의 pyodide 타입으로 해석되는지(any로 무너지지 않는지) 본다.`,
       `const makeConsole: (pyodide: PyodideInterface) => PyodideConsoleProxy = (pyodide) =>`,
       `  createCoreConsole(pyodide, { write() {}, writeError() {} } as never);`,
       `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createTerminalSinks, createTerminalRunner, createRepl, runReplWorker, reactPackage];`,
-      `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, TerminalRunnerHandle, TerminalRunnerOptions, ReplHandle, ReplOptions, UsePythonRunnerOptions, UsePythonRunnerResult];`,
+      `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, TerminalRunnerHandle, TerminalRunnerOptions, ReplHandle, ReplOptions, PythonReplHandle, PythonReplProps, PythonRunnerHandle, PythonRunnerProps, UsePythonRunnerOptions, UsePythonRunnerResult];`,
+      // 컴포넌트 props가 소비자의 xterm·react 타입으로 해석되는지(any로 무너지지 않는지, 필수 옵션·init 전용 옵션이 맞는지) 본다.
+      `export const runnerProps: PythonRunnerProps = { createWorker: () => new Worker("worker.js"), terminalOptions: { cols: 80, rows: 24, cursorBlink: true }, fit: false, onStatus: (status) => void status.length };`,
+      `// @ts-expect-error createWorker는 필수다`,
+      `export const missingWorker: PythonRunnerProps = {};`,
+      `export const replProps: PythonReplProps = { createWorker: () => new Worker("worker.js"), terminalOptions: { cols: 80, rows: 24, cursorBlink: true }, fit: false, topLevelAwait: true, onStatus: (status) => void status.length };`,
+      `// @ts-expect-error createWorker는 필수다`,
+      `export const missingReplWorker: PythonReplProps = {};`,
+      `export const replRun = (handle: PythonReplHandle) => handle.runSource("1 + 1");`,
       ``,
     ].join("\n"),
   );

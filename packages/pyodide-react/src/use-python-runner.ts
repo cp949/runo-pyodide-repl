@@ -16,7 +16,12 @@ import {
   type StopResult,
 } from "@cp949/runo-pyodide-core";
 import { useState } from "react";
-import { useCoreHandle, useLatest, useRunnerDelegates } from "./use-lifecycle";
+import {
+  initialRunnerStatus,
+  useCoreHandle,
+  useLatest,
+  useRunnerDelegates,
+} from "./use-lifecycle";
 
 export interface UsePythonRunnerOptions {
   /** worker를 만들 때마다 부른다. 마운트 때 것을 쓴다. */
@@ -49,16 +54,11 @@ export interface UsePythonRunnerResult {
   readonly busy: boolean;
 }
 
-/** `createRunner`의 첫 상태와 같은 규칙(격리 여부)이다. 첫 렌더의 `status`가 핸들 생성 전에도 맞도록 쓴다. */
-function initialStatus(): RunnerStatus {
-  return globalThis.crossOriginIsolated === true ? "loading" : "not-isolated";
-}
-
 export function usePythonRunner(
   options: UsePythonRunnerOptions,
 ): UsePythonRunnerResult {
   const latest = useLatest(options);
-  const [status, setStatus] = useState<RunnerStatus>(initialStatus);
+  const [status, setStatus] = useState<RunnerStatus>(initialRunnerStatus);
 
   const handleRef = useCoreHandle<RunnerHandle>(() => {
     const mount = latest.current;

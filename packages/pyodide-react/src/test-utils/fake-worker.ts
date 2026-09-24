@@ -29,6 +29,8 @@ export interface FakeWorker {
   worker: Worker;
   /** `runCode` 요청 대기열. 시험이 결말을 정한다. */
   pending: PendingRun[];
+  /** main이 보낸 초기화 프레임(`pyodide.indexURL`·`driver` 옵션). 아직 오지 않았으면 `undefined`. */
+  init(): InitFrame | undefined;
   terminated(): boolean;
   /** `ready` 알림(부팅 완료). 초기화 프레임이 도착한 뒤에만 부를 수 있다. */
   ready(): void;
@@ -40,6 +42,11 @@ export interface FakeWorker {
   loadFailed(message: string): void;
   /** `input()` 읽기 요청(`readInput` 알림). */
   readInput(): void;
+  /**
+   * REPL worker의 `readLine` 요청(프롬프트가 열림). main의 응답(줄 문자열·`null`·`{ source }`)으로 resolve하는 promise를 돌려준다.
+   * `outcome`은 바로 앞 `{ source }` 실행의 결말이다. 초기화 프레임이 도착한 뒤에만 부를 수 있다.
+   */
+  readLine(prompt?: string, outcome?: RunOutcome): Promise<unknown>;
 }
 
 export interface FakeWorkerFactory {
@@ -60,10 +67,12 @@ export function createFakeWorkerFactory(): FakeWorkerFactory {
     const errorListeners = new Set<(event: { message?: string }) => void>();
     const pending: PendingRun[] = [];
     let rpc: Rpc | undefined;
+    let initFrame: InitFrame | undefined;
     let terminated = false;
     const worker = {
       postMessage: (message: unknown) => {
         const frame = message as InitFrame;
+        initFrame = frame;
         rpc = createRpc(frame.rpcPort, {
           runCode: (code: string) =>
             new Promise<RunOutcome>((resolve, reject) => {
@@ -91,6 +100,7 @@ export function createFakeWorkerFactory(): FakeWorkerFactory {
     workers.push({
       worker,
       pending,
+      init: () => initFrame,
       terminated: () => terminated,
       ready: () => rpc!.notify("ready", CLEAN_READY),
       dispatchError: (message) => {
@@ -99,6 +109,15 @@ export function createFakeWorkerFactory(): FakeWorkerFactory {
       write: (text) => rpc!.notify("write", text),
       loadFailed: (message) => rpc!.notify("loadFailed", message),
       readInput: () => rpc!.notify("readInput", true),
+      readLine: (prompt = ">>> ", outcome) => {
+        const request =
+          outcome === undefined
+            ? rpc!.call("readLine", prompt, undefined, true)
+            : rpc!.call("readLine", prompt, undefined, true, outcome);
+        // 언마운트로 rpc가 정리되면 reject된다. 시험이 기다리지 않은 요청이 처리되지 않은 rejection이 되지 않게 한다.
+        request.catch(() => {});
+        return request;
+      },
     });
     return worker;
   };

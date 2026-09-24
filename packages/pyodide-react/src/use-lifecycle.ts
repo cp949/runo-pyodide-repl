@@ -7,6 +7,7 @@
 import {
   RunRejectedError,
   type RunResult,
+  type RunnerStatus,
   type StopResult,
 } from "@cp949/runo-pyodide-core";
 import {
@@ -16,6 +17,11 @@ import {
   useState,
   type RefObject,
 } from "react";
+
+/** `createRunner`의 첫 상태와 같은 규칙(격리 여부)이다. 핸들 생성 전에도 첫 렌더의 `status`가 맞도록 쓴다. */
+export function initialRunnerStatus(): RunnerStatus {
+  return globalThis.crossOriginIsolated === true ? "loading" : "not-isolated";
+}
 
 /**
  * 렌더마다 최신 값을 담는 ref. 콜백을 core에 한 번만 넘기고 부를 때 `.current`를 읽어 항상 최신 함수를 호출한다.
@@ -63,7 +69,7 @@ export interface RunnerDelegates {
   reset(): void;
 }
 
-function rejectDisposed(): Promise<never> {
+export function rejectDisposed(): Promise<never> {
   return Promise.reject(
     new RunRejectedError(
       "disposed",
