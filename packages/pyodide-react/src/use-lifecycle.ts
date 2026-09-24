@@ -15,12 +15,36 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type RefObject,
 } from "react";
 
 /** `createRunner`의 첫 상태와 같은 규칙(격리 여부)이다. 핸들 생성 전에도 첫 렌더의 `status`가 맞도록 쓴다. */
 export function initialRunnerStatus(): RunnerStatus {
   return globalThis.crossOriginIsolated === true ? "loading" : "not-isolated";
+}
+
+/** 격리 여부는 페이지 수명 동안 바뀌지 않으므로 구독할 것이 없다. */
+function subscribeNever(): () => void {
+  return () => {};
+}
+
+/** 서버는 격리 여부를 모른다. 격리된 브라우저의 첫 상태와 같은 값을 골라 정상 경로의 깜빡임을 없앤다. */
+function serverRunnerStatus(): RunnerStatus {
+  return "loading";
+}
+
+/**
+ * 핸들이 첫 상태를 통지하기 전의 `status`. 일반 렌더는 `initialRunnerStatus()`이고 서버 렌더와 하이드레이션 첫 렌더는
+ * `"loading"`이다(`useSyncExternalStore`의 서버 스냅샷). 서버와 격리된 클라이언트의 첫 렌더가 달라 하이드레이션이
+ * 어긋나는 것을 막는다. 마운트 effect의 `createRunner`가 동기로 통지하는 첫 상태가 이 값을 덮는다.
+ */
+export function useInitialRunnerStatus(): RunnerStatus {
+  return useSyncExternalStore(
+    subscribeNever,
+    initialRunnerStatus,
+    serverRunnerStatus,
+  );
 }
 
 /**

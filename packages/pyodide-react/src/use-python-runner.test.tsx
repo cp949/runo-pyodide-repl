@@ -7,7 +7,8 @@ import { RunRejectedError as CoreRunRejectedError } from "@cp949/runo-pyodide-co
 import { RunRejectedError as ReplRunRejectedError } from "@cp949/runo-pyodide-repl";
 import { RunRejectedError as TerminalRunRejectedError } from "@cp949/runo-pyodide-terminal";
 import { StrictMode, act, useLayoutEffect } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import {
   afterEach,
   beforeEach,
@@ -389,6 +390,47 @@ describe("usePythonRunner: status", () => {
     factory.workers[0]!.ready();
     await until(() => probe.api.status === "ready");
   });
+});
+
+describe("usePythonRunner: SSR 하이드레이션", () => {
+  /** `status`를 그리는 소비자. 서버 문자열과 하이드레이션 결과를 비교한다. */
+  function StatusView({ statuses }: { statuses?: RunnerStatus[] }) {
+    const { status } = usePythonRunner(options());
+    statuses?.push(status);
+    return <span>{status}</span>;
+  }
+
+  /** 서버 렌더: Node 서버처럼 `crossOriginIsolated`가 없다. */
+  function renderOnServer(): string {
+    vi.stubGlobal("crossOriginIsolated", undefined);
+    const html = renderToString(<StatusView />);
+    return html;
+  }
+
+  test("서버 렌더의 status는 격리 여부를 모르므로 loading이다", () => {
+    expect(renderOnServer()).toBe("<span>loading</span>");
+  });
+
+  test.each([
+    [true, "loading"],
+    [false, "not-isolated"],
+  ] as const)(
+    "격리=%s 클라이언트 하이드레이션은 불일치 없이 서버와 같은 첫 렌더를 거쳐 %s 상태가 된다",
+    (isolated, settled) => {
+      container.innerHTML = renderOnServer();
+      vi.stubGlobal("crossOriginIsolated", isolated);
+      const statuses: RunnerStatus[] = [];
+      const onRecoverableError = vi.fn();
+      act(() => {
+        root = hydrateRoot(container, <StatusView statuses={statuses} />, {
+          onRecoverableError,
+        });
+      });
+      expect(onRecoverableError).not.toHaveBeenCalled();
+      expect(statuses[0]).toBe("loading");
+      expect(container.textContent).toBe(settled);
+    },
+  );
 });
 
 describe("usePythonRunner: 상태 콜백 안 재진입(TRP-051)", () => {

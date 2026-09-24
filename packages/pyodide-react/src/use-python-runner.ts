@@ -17,8 +17,8 @@ import {
 } from "@cp949/runo-pyodide-core";
 import { useState } from "react";
 import {
-  initialRunnerStatus,
   useCoreHandle,
+  useInitialRunnerStatus,
   useLatest,
   useRunnerDelegates,
 } from "./use-lifecycle";
@@ -58,7 +58,10 @@ export function usePythonRunner(
   options: UsePythonRunnerOptions,
 ): UsePythonRunnerResult {
   const latest = useLatest(options);
-  const [status, setStatus] = useState<RunnerStatus>(initialRunnerStatus);
+  // 핸들이 통지한 마지막 상태. 첫 통지 전에는 `useInitialRunnerStatus()`를 쓴다(SSR 하이드레이션 일치).
+  const [notified, setStatus] = useState<RunnerStatus | null>(null);
+  const initialStatus = useInitialRunnerStatus();
+  const status = notified ?? initialStatus;
 
   const handleRef = useCoreHandle<RunnerHandle>(() => {
     const mount = latest.current;
