@@ -46,6 +46,13 @@ export interface ReadlineOptions {
    * 기본 처리도 생략됨). 활성 읽기 유무와 무관하게 항상 불린다.
    */
   onKeyEvent?: (event: KeyboardEvent) => boolean;
+  /**
+   * false면 활성 읽기가 없는 구간(실행 중·`read()` write 콜백 대기 중·부팅 중)에 들어온 입력을 쌓지 않고
+   * 버린다(키·붙여넣기·IME 조합 완성 덩어리·Shift+Enter). Ctrl+C·Ctrl+L 단독 입력은 그대로 즉시 처리한다.
+   * 활성 읽기 중 `printAbove` 재그리기 동안 쌓는 `queued`는 이 옵션의 대상이 아니다. 기본값은 true
+   * (type-ahead 동작). `=== false`일 때만 끈다.
+   */
+  typeAhead?: boolean;
 }
 
 export interface ReadOptions {
@@ -92,6 +99,8 @@ export class Readline implements ITerminalAddon {
   private state: State;
   private skipBlankHistory: boolean;
   private onKeyEvent?: (event: KeyboardEvent) => boolean;
+  /** false면 활성 읽기가 없을 때 들어온 입력을 `pushTypeAhead`에서 버린다. `options.typeAhead === false`일 때만 false. */
+  private typeAheadEnabled: boolean;
   /** `printAbove`가 재그리기 콜백을 기다리는 동안 true. 이 사이 들어온 키는 벤더가 바로 처리하지 않고 `queued`에 쌓는다. */
   private redrawing = false;
   /**
@@ -123,6 +132,7 @@ export class Readline implements ITerminalAddon {
     this.history.restoreFromLocalStorage();
     this.skipBlankHistory = options.skipBlankHistory ?? false;
     this.onKeyEvent = options.onKeyEvent;
+    this.typeAheadEnabled = options.typeAhead !== false;
   }
 
   /**
@@ -563,6 +573,9 @@ export class Readline implements ITerminalAddon {
    * 합계가 상한을 넘으면 그 항목만 버린다(앞에 쌓인 것은 유지, 알림 없음).
    */
   private pushTypeAhead(entry: string | Input) {
+    // typeAhead: false면 쌓지 않고 버린다. 활성 읽기 없는 구간의 입력(onData 키·붙여넣기·IME, Shift+Enter)은
+    // 모두 dispatch를 거쳐 여기로 오므로 이 한 곳에서 막는다. onKeyEvent는 KeyboardEvent에만 불려 붙여넣기·IME를 못 막는다.
+    if (!this.typeAheadEnabled) return;
     const length = typeof entry === "string" ? entry.length : 1;
     if (this.typeAheadLength + length > TYPE_AHEAD_LIMIT) return;
     this.typeAhead.push(entry);

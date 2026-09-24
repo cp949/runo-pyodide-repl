@@ -11,7 +11,7 @@
  */
 import { describe, expect, test, vi } from "vitest";
 import { InputType, type Input } from "./keymap";
-import { Readline } from "./readline";
+import { Readline, type ReadlineOptions } from "./readline";
 import { VTerm } from "./vterm";
 
 class StubTerminal {
@@ -90,9 +90,9 @@ class StubTerminal {
   }
 }
 
-function setup(cols = 20, rows = 8) {
+function setup(cols = 20, rows = 8, options: ReadlineOptions = {}) {
   const term = new StubTerminal(cols, rows);
-  const readline = new Readline({ persist: false });
+  const readline = new Readline({ persist: false, ...options });
   readline.activate(term as unknown as Parameters<Readline["activate"]>[0]);
   return { term, readline };
 }
@@ -484,4 +484,187 @@ describe("type-ahead 제어 키 재생(pty 대조 값)", () => {
     expect(r.screen).toBe(">>>");
     expect(r.cursorCol).toBe(4);
   });
+});
+
+// `ReadlineOptions.typeAhead`(RD-022 DELTA-04): 기본 `true`(위 시험 전부), `false`면 활성 읽기가 없는 구간에 들어온 입력을
+// 쌓지 않고 버린다. 입력은 전부 `dispatch`를 거치므로(`onData` 키·붙여넣기·IME 조합 완성 덩어리, Shift+Enter) 그 한
+// 곳(`pushTypeAhead`)에서 막는다. Ctrl+C·Ctrl+L 단독 입력은 `isImmediateKey`라 그대로 처리된다.
+describe("typeAhead 옵션", () => {
+  /** 실행창처럼 키 무시 모드로 만든다. */
+  function setupOff() {
+    return setup(20, 8, { typeAhead: false });
+  }
+
+  test("typeAhead가 false면 읽기 없는 구간에 친 문자는 다음 read()에 나타나지 않는다", () => {
+    const { term, readline } = setupOff();
+
+    term.type("abc");
+    void readline.read(">>> ");
+
+    expect(readline.getLine()).toBe("");
+    expect(readline.getCursor()).toBe(0);
+    expect(term.vt.screen()).toBe(">>>");
+  });
+
+  test("typeAhead가 false면 읽기 없는 구간의 붙여넣기(다중 문자 onData)는 버려진다", () => {
+    const { term, readline } = setupOff();
+
+    // 줄 바꿈이 섞인 붙여넣기 덩어리도 통째로 버린다.
+    term.feed("hello world");
+    term.feed("a\rb");
+    void readline.read(">>> ");
+
+    expect(readline.getLine()).toBe("");
+    expect(term.vt.screen()).toBe(">>>");
+  });
+
+  test("typeAhead가 false면 읽기 없는 구간의 IME 조합 완성 덩어리(한글·이모지)도 버려진다", () => {
+    const { term, readline } = setupOff();
+
+    term.feed("한글");
+    term.feed("😀");
+    void readline.read(">>> ");
+
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("typeAhead가 false면 읽기 없는 구간의 Shift+Enter는 버려진다", () => {
+    const { term, readline } = setupOff();
+
+    term.type("a");
+    term.pressShiftEnter();
+    term.type("b");
+    void readline.read(">>> ");
+
+    // 문자와 개행 모두 재생되지 않는다.
+    expect(readline.getLine()).toBe("");
+    expect(term.vt.screen()).toBe(">>>");
+  });
+
+  test("typeAhead가 false면 방향키·Backspace 같은 제어 키도 쌓이지 않는다", () => {
+    const { term, readline } = setupOff();
+
+    for (const key of ["a", "\x1b[D", "\x7f", "\x15"]) term.feed(key);
+    void readline.read(">>> ");
+
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("typeAhead가 false여도 read() write 콜백 대기 중에 친 키는 버려진다", () => {
+    const { term, readline } = setupOff();
+    term.asyncWrite = true;
+
+    void readline.read(">>> ");
+    // 콜백 전이라 activeRead가 없다.
+    term.type("ab");
+    term.pressShiftEnter();
+    term.flush();
+
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("typeAhead가 false여도 활성 읽기 중 친 키는 정상으로 입력줄에 들어간다", () => {
+    const { term, readline } = setupOff();
+
+    void readline.read(">>> ");
+    term.type("ab");
+    term.feed("cd");
+    term.pressShiftEnter();
+
+    expect(readline.getLine()).toBe("abcd\n");
+    expect(readline.getCursor()).toBe(5);
+  });
+
+  test("typeAhead가 false여도 읽기가 Enter로 끝난 뒤 이어 친 키는 다음 read()에 나타나지 않는다", async () => {
+    const { term, readline } = setupOff();
+
+    const first = readline.read(">>> ");
+    // Enter 이후 c·d는 활성 읽기가 없는 구간의 입력이다.
+    term.type("ab\rcd");
+    expect(await first).toBe("ab");
+
+    void readline.read(">>> ");
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("typeAhead가 false여도 printAbove 재그리기 중 친 키는 queued로 순서대로 반영된다", () => {
+    const { term, readline } = setupOff();
+    term.asyncWrite = true;
+
+    void readline.read(">>> ");
+    term.flush();
+    void readline.printAbove("cand");
+    // 재그리기 콜백 전에 친 키는 활성 읽기가 있으므로 버려지지 않고 queued가 잡는다.
+    term.type("ab");
+    term.flush();
+
+    expect(readline.getLine()).toBe("ab");
+  });
+
+  test("typeAhead가 false여도 cancelRead() 뒤 활성 읽기 없이 친 키는 다음 read()에 나타나지 않는다", async () => {
+    const { term, readline } = setupOff();
+
+    const pending = readline.read(">>> ");
+    const rejected = expect(pending).rejects.toThrow("read cancelled");
+    readline.cancelRead();
+    await rejected;
+    term.type("x");
+    void readline.read(">>> ");
+
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("typeAhead가 false여도 읽기 없는 구간의 Ctrl+C는 ctrlCHandler를 부른다", () => {
+    const { term, readline } = setupOff();
+    const onCtrlC = vi.fn();
+    readline.setCtrlCHandler(onCtrlC);
+
+    term.type("abc");
+    term.feed(CTRL_C);
+
+    expect(onCtrlC).toHaveBeenCalledTimes(1);
+    void readline.read(">>> ");
+    expect(readline.getLine()).toBe("");
+  });
+
+  test("typeAhead가 false여도 읽기 없는 구간의 Ctrl+L은 즉시 화면을 지운다", () => {
+    const { term, readline } = setupOff();
+
+    readline.print("hello");
+    expect(term.vt.screen()).toBe("hello");
+    term.feed(CTRL_L);
+
+    expect(term.vt.screen()).toBe("");
+  });
+
+  test("typeAhead가 false여도 읽기 없는 구간의 Ctrl+C 다중 토큰 덩어리는 ctrlCHandler를 부르지 않고 버려진다", () => {
+    const { term, readline } = setupOff();
+    const onCtrlC = vi.fn();
+    readline.setCtrlCHandler(onCtrlC);
+
+    term.feed("ab" + CTRL_C + "cd");
+
+    expect(onCtrlC).not.toHaveBeenCalled();
+    void readline.read(">>> ");
+    expect(readline.getLine()).toBe("");
+  });
+
+  test.each([
+    ["옵션 생략", {}],
+    ["typeAhead: true", { typeAhead: true }],
+    ["typeAhead: undefined", { typeAhead: undefined }],
+  ] as [string, ReadlineOptions][])(
+    "%s이면 기존처럼 읽기 없는 구간의 문자·붙여넣기·Shift+Enter를 쌓았다가 다음 read()에서 재생한다",
+    (_name, options) => {
+      const { term, readline } = setup(20, 8, options);
+
+      term.type("a");
+      term.feed("bc");
+      term.pressShiftEnter();
+      term.type("d");
+      void readline.read(">>> ");
+
+      expect(readline.getLine()).toBe("abc\nd");
+    },
+  );
 });
