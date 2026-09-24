@@ -32,12 +32,17 @@ export interface ReplReader {
   ): Promise<string | null>;
 }
 
-/** 세션(sink 세트)마다 하나. 순서: rewindTail(flush) → 꼬리 재조회 → resetTail → readline.read(합성 프롬프트). */
+/**
+ * 세션(sink 세트)마다 하나. 순서: rewindTail(flush) → 꼬리 재조회 → resetTail → readline.read(합성 프롬프트).
+ * `onOpen`은 `readline.read()`를 연 직후 그 읽기 promise와 프롬프트 앞에 붙인 꼬리를 알린다(`runSource`가 읽기가 그려진 시점과 지워진
+ * 꼬리를 아는 데 쓴다, `source-bridge.ts`).
+ */
 export function createReplReader(
   readline: Pick<Readline, "read">,
   term: RewindTerminal,
   sinks: Pick<TerminalSinks, "tail" | "resetTail">,
-  readOptions: ReadOptionsProvider
+  readOptions: ReadOptionsProvider,
+  onOpen?: (read: Promise<string | null>, tail: string) => void
 ): ReplReader {
   return {
     async read(prompt, pending, cancelable) {
@@ -45,10 +50,12 @@ export function createReplReader(
       // flush를 기다리는 사이에 온 출력을 반영하려고 꼬리를 다시 읽는다.
       const tail = sinks.tail();
       sinks.resetTail();
-      return readline.read(tail === "" ? prompt : `${tail}\x1b[0m${prompt}`, {
-        cancelable,
-        ...readOptions(pending),
-      });
+      const read = readline.read(
+        tail === "" ? prompt : `${tail}\x1b[0m${prompt}`,
+        { cancelable, ...readOptions(pending) },
+      );
+      onOpen?.(read, tail);
+      return read;
     },
   };
 }

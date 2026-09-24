@@ -9,6 +9,9 @@ import type { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
 import type { InterruptSender, MainDriver, OutputChunk } from "@cp949/runo-pyodide-core";
 import type { ReplDriverOptions } from "./driver-options";
+import type { ReadLineOutcome, ReadLineReply } from "./repl-protocol";
+import type { SourceLink } from "./run-source";
+import { createSourceBridge, type SourcePrompt } from "./terminal/source-bridge";
 import { createAutoIndent } from "./terminal/auto-indent";
 import { createBlockHistory } from "./terminal/block-history";
 import { mergeReadOptions } from "./terminal/read-options";
@@ -36,6 +39,8 @@ export interface ReplMainDriverOptions {
    * 이 함수가 늦게 참조해도 된다.
    */
   complete: (source: string, pending: string | undefined) => Promise<SourceCompletion>;
+  /** 핸들이 소유한 `runSource` 슬롯과 만나는 창구. 세션을 넘어 사는 슬롯을 이 세션의 읽기 흐름에 잇는다(RD-022a). */
+  source: SourceLink;
 }
 
 export interface ReplMainDriver {
@@ -45,6 +50,10 @@ export interface ReplMainDriver {
   output(chunk: OutputChunk): void;
   /** 세션의 sink로 `^C`를 에코한다(tty 로컬 에코 흉내, 꼬리 추적에 반영). */
   echoCtrlC(): void;
+  /** 지금 `runSource`를 받아들일 수 있는가(`wait`·`open`·`busy`). 부작용이 없고 `runSource()` 판정과 `busy` 게터가 함께 쓴다. */
+  sourcePrompt(): SourcePrompt;
+  /** 열린 읽기를 가져가 `{ source }`로 응답하도록 준비한다(확정 10·11). 받아들일 수 없으면 아무것도 하지 않고 `false`. */
+  sendSource(code: string): boolean;
 }
 
 export function createReplMainDriver(
@@ -88,12 +97,28 @@ export function createReplMainDriver(
     complete,
     interruptCompletion: () => interruptSender.send(),
   });
-  const replReader = createReplReader(readline, liveTerminal, sinks, (pending) =>
-    mergeReadOptions(
-      blockHistory.readOptions(pending),
-      autoIndent.readOptions(pending),
-      tabReader.readOptions(pending),
-    ),
+  // `runSource` 조율(RD-022a): 열린 읽기를 가져가고 복원하며 결말을 슬롯에 알린다.
+  const bridge = createSourceBridge({
+    readline,
+    terminal: liveTerminal,
+    sinks,
+    tabRequesting: () => tabReader.requesting,
+    link: options.source,
+  });
+  const replReader = createReplReader(
+    readline,
+    liveTerminal,
+    sinks,
+    (pending) =>
+      // `runSource`가 가져간 줄의 복원이 자동 들여쓰기 프리필보다 우선한다.
+      bridge.restoreOptions(
+        mergeReadOptions(
+          blockHistory.readOptions(pending),
+          autoIndent.readOptions(pending),
+          tabReader.readOptions(pending),
+        ),
+      ),
+    (read, tail) => bridge.readOpened(read, tail),
   );
   // stdin 리더도 같은 뷰를 받는다: `rewindTail`의 flush 콜백이 해제된 터미널의 buffer를 읽지 않게(TRP-004).
   const inputReader = createInputReader(readline, liveTerminal, sinks);
@@ -124,20 +149,28 @@ export function createReplMainDriver(
       writeOutput: (text: string) => sinks.writeOutput(text),
       writeError: (text: string) => sinks.writeError(text),
       // 꼬리 + 프롬프트를 그리고 Enter까지 한 줄을 읽어 응답한다. 취소(Ctrl+C)는 `null` 응답이고, worker의 루프가
-      // `run(null)`로 `KeyboardInterrupt`를 낸다. `pending`은 자동 들여쓰기 프리필의 재료다(RD-013).
+      // `run(null)`로 `KeyboardInterrupt`를 낸다. `pending`은 자동 들여쓰기 프리필의 재료다(RD-013). `outcome`은 바로 앞
+      // `{ source }` 응답으로 실행한 코드의 결말이다(RD-022a). 응답은 줄·`null`·`{ source }`(`runSource`가 읽기를 가져간 경우,
+      // 또는 대기하던 코드를 첫 프롬프트에서 실행하는 경우)다.
       readLine: (
         prompt: string,
         pending: string | undefined,
         cancelable: boolean,
-      ): Promise<string | null> => {
+        outcome?: ReadLineOutcome,
+      ): Promise<ReadLineReply> => {
         // 요청이 온 순간 worker는 실행을 멈추고 줄을 기다린다. 보낸 눌림의 재전송은 여기서 멈춘다(03-ctrl-c.md 2.3).
         interruptSender.cancel();
         // 요청이 도착했다 = worker가 다음 줄을 기다린다. 앞 취소의 방어 구간이 여기서 끝난다.
         cancelSettling = false;
         // 거절은 가드 바깥에서 한다. 거절된 promise를 가드가 활성 읽기로 추적하면 진짜 활성 REPL 읽기를 잃는다.
         if (reading) return Promise.reject(new Error("이미 읽는 중"));
+        // 결말 도착·대기 슬롯 실행 판정. 대기하던 코드는 읽기를 열지 않고 바로 응답한다(`readLinePending`을 세우지 않는다 = worker가
+        // 곧 실행하므로 게이트는 "실행 중"이다).
+        const claimed = bridge.request({ pending, outcome });
+        if (claimed !== undefined) return Promise.resolve(claimed);
         reading = true;
         readLinePending = true;
+        bridge.readStarting();
         return guard.readLine(prompt, pending, cancelable).then(
           (line) => {
             reading = false;
@@ -160,7 +193,14 @@ export function createReplMainDriver(
             // reset()의 cancelRead()로 끝난 옛 읽기는 응답 없이 조용히 끝낸다(확정 10) — 이 세션의 worker는
             // 이미 종료 중이라 응답을 기다리지 않는다. 영영 풀리지 않는 promise를 돌려 rpc가 응답을 보내지 않게 한다.
             if (error instanceof ReadCancelledError)
-              return new Promise<string | null>(() => {});
+              return new Promise<ReadLineReply>(() => {});
+            // `runSource`가 `takeRead()`로 가져간 읽기: 줄 대신 코드를 응답한다. `readLinePending`은 위에서 내렸으므로 worker가
+            // 실행하는 동안 core 게이트가 "실행 중"이다(Ctrl+C·감시 타이머가 평소 명령 실행과 같다). `isReadCancelled`에는 넣지 않는다.
+            const source = bridge.taken(error);
+            if (source !== undefined) {
+              tabReader.readEnded("");
+              return source;
+            }
             throw error;
           },
         );
@@ -178,10 +218,12 @@ export function createReplMainDriver(
     // 알림이 도착했다 = worker가 사용자 코드 안에서 입력을 기다린다. 앞 취소의 방어 구간이 여기서 끝난다.
     inputRequested: () => {
       cancelSettling = false;
+      bridge.inputRequested();
     },
     // 재개 지점이므로 앞 취소의 방어도 함께 내린다(`input()` 취소 뒤 계산 중단이 막히지 않게).
     inputResumed: () => {
       cancelSettling = false;
+      bridge.inputResumed();
     },
     // 호환 경고는 core 세션이 이미 냈다(문제가 있을 때만). 여기서는 버전 정보 로그만 남긴다.
     onReady: (payload) => {
@@ -216,5 +258,7 @@ export function createReplMainDriver(
     echoCtrlC() {
       sinks.write("^C");
     },
+    sourcePrompt: () => bridge.prompt(),
+    sendSource: (code) => bridge.send(code),
   };
 }

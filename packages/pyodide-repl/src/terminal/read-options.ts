@@ -6,7 +6,7 @@ import type { ReadOptions } from "@cp949/runo-xterm-readline";
 
 export type ReplReadOptions = Pick<
   ReadOptions,
-  "prefill" | "onKey" | "historyEntry"
+  "prefill" | "prefillCursor" | "onKey" | "historyEntry"
 >;
 
 export type ReadOptionsProvider = (

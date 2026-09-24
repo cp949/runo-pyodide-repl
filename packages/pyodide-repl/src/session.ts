@@ -13,6 +13,8 @@ import {
   type InterruptSender,
 } from "@cp949/runo-pyodide-core";
 import { createReplMainDriver } from "./repl-main-driver";
+import type { SourceLink } from "./run-source";
+import type { SourcePrompt } from "./terminal/source-bridge";
 import type { SourceCompletion } from "./worker/complete-source";
 
 export interface StartSessionOptions {
@@ -30,6 +32,8 @@ export interface StartSessionOptions {
   indexURL: string;
   /** 초기화 프레임 `driver` 필드에 그대로 싣는다. 값을 바꾸려면 새 세션(RD-012). */
   topLevelAwait: boolean;
+  /** 핸들이 소유한 `runSource` 슬롯의 창구. 세션을 넘어 사는 슬롯을 이 세션의 읽기 흐름에 잇는다. */
+  source: SourceLink;
   /** 상태가 바뀔 때 부른다. */
   onStatus: (status: ReplStatus) => void;
   /** worker `error` 이벤트 또는 `crashed` 알림(첫 신호만) 뒤 부른다. */
@@ -41,6 +45,10 @@ export interface ReplSession {
   pythonRunning(): boolean;
   /** 세션의 sink로 `^C`를 에코한다(핸들의 Ctrl+C 핸들러가 부른다. tty 로컬 에코 흉내, 꼬리 추적에 반영). */
   echoCtrlC(): void;
+  /** 지금 `runSource`를 받아들일 수 있는가. 부작용이 없다(`repl-main-driver.ts`). */
+  sourcePrompt(): SourcePrompt;
+  /** 열린 읽기를 가져가 `{ source }`로 응답하도록 준비한다. 받아들일 수 없으면 `false`. */
+  sendSource(code: string): boolean;
   /**
    * 이 세션에서 실행할 코드가 더 없어진 지점(`exit()`·로드 실패). 게이트를 닫고 재전송을 멈춘다. 닫지 않으면
    * 잔류 SIGNAL 2를 아무도 소비하지 않아 송신기가 5ms마다 영원히 점검한다(RD-012h(a)).
@@ -65,6 +73,7 @@ export function startSession(options: StartSessionOptions): ReplSession {
     createWorker,
     indexURL,
     topLevelAwait,
+    source,
     onStatus,
     onCrash,
   } = options;
@@ -76,9 +85,10 @@ export function startSession(options: StartSessionOptions): ReplSession {
     terminal,
     interruptSender,
     topLevelAwait,
-    complete: (source, pending) => {
+    source,
+    complete: (code, pending) => {
       if (!ref.core) throw new Error("세션이 아직 시작되지 않았다");
-      return ref.core.call<SourceCompletion>("complete", source, pending);
+      return ref.core.call<SourceCompletion>("complete", code, pending);
     },
   });
   const session = startCoreSession({
@@ -96,6 +106,8 @@ export function startSession(options: StartSessionOptions): ReplSession {
   return {
     pythonRunning: () => session.pythonRunning(),
     echoCtrlC: () => repl.echoCtrlC(),
+    sourcePrompt: () => repl.sourcePrompt(),
+    sendSource: (code) => repl.sendSource(code),
     endSession: () => session.endSession(),
     terminate: () => session.terminate(),
     get ended() {

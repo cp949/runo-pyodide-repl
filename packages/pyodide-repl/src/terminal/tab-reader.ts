@@ -43,6 +43,8 @@ export interface TabReader {
   readOptions(pending: string | undefined): Pick<ReplReadOptions, "onKey">;
   /** 현재 세대의 읽기가 끝났다(Enter → 문자열, Ctrl+C 취소 → `null`). */
   readEnded(line: string | null): void;
+  /** `complete` 왕복이 진행 중인가(`runSource`가 이 동안 `busy`로 거부한다). 읽기만 하는 값이다. */
+  readonly requesting: boolean;
 }
 
 type TabReaderReadline = Pick<
@@ -184,6 +186,9 @@ export function createTabReader(
       ended = true;
       if (line === null && requesting) deps.interruptCompletion();
       queuedTabs = [];
+    },
+    get requesting() {
+      return requesting;
     },
   };
 }

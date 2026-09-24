@@ -5,7 +5,11 @@ import {
   SIGNAL,
   createInterruptSender,
   DEFAULT_PYODIDE_INDEX_URL,
+  RunRejectedError,
+  type RunRejectedReason,
+  type RunResult,
 } from "@cp949/runo-pyodide-core";
+import { endRun, rejection, createSourceSlot, type SourceEnd } from "./run-source";
 import { startSession, type ReplSession } from "./session";
 import {
   createSelectionCopy,
@@ -14,6 +18,12 @@ import {
 } from "@cp949/runo-pyodide-terminal/internal";
 
 export type { CopyResult };
+
+/**
+ * `runSource()`의 거부 오류·결과 유니온. core의 같은 클래스·타입이다(`createRunner`와 `instanceof`가 성립한다, 14.3.2).
+ */
+export { RunRejectedError };
+export type { RunRejectedReason, RunResult };
 
 /** 기본 pyodide CDN 위치. 끝 `/`를 포함한다(`00-architecture.md` 4.1). 값은 core가 `pyodide/package.json`에서 유도한다. */
 export { DEFAULT_PYODIDE_INDEX_URL };
@@ -75,6 +85,21 @@ export interface ReplHandle {
   readonly crossOriginIsolated: boolean;
   /** 드래그 자동 복사 on/off를 바꾼다. 리셋 없음(`reset()`과 무관). `dispose()` 뒤 no-op(RD-017). */
   setCopyOnSelect(on: boolean): void;
+  /**
+   * 코드를 REPL globals에서 실행하고 결말을 돌려준다(RD-022a). 입력 줄 에코 없이 출력만 화면에 내고, 치던 한 줄(텍스트·커서)은 보존해
+   * 실행이 끝나면 `>>> pri`처럼 다시 그린 뒤(그 읽기가 화면에 그려진 뒤) resolve한다. `input()`·Ctrl+C·Tab은 평소 명령 실행과 같다.
+   * history에 남기지 않는다. 결과 유니온은 `createRunner`와 같다(`ok`·`error`·`interrupted`·`exit`·`restarted`). `exit`(`SystemExit`)여도
+   * 세션은 유지된다.
+   *
+   * 실행하지 못하면 `RunRejectedError`로 reject한다: `disposed`(`dispose()` 뒤), `unavailable`(`not-isolated`·`load-failed`·`crashed`·
+   * `terminated`), `busy`(블록 입력 중·Python 실행 중·`input()` 대기 중·다른 `runSource` 진행·대기 중·Tab 왕복 중·프롬프트가 그려지기
+   * 전). `code`가 문자열이 아니면 `TypeError`. `loading`(최초·리셋 직후)이면 슬롯을 차지하고 첫 `>>> `에서 실행한다. 대기 중 `reset()`은
+   * 유지하고 `load-failed`는 `unavailable`, 실행 중 `reset()`은 `{ kind: "restarted" }`, 실행 중·대기 중 크래시는 `crashed`, 실행 중·대기
+   * 중 `dispose()`는 `disposed`다. 이미 정해진 결말을 그리는 도중의 사건은 그 결말을 바꾸지 않는다.
+   */
+  runSource(code: string): Promise<RunResult>;
+  /** 지금 `runSource()`를 부르면 `busy`로 거부되는가. 판정은 `runSource()`와 같은 함수다. `dispose()` 뒤는 `false`다(`disposed`로 거부된다). */
+  readonly busy: boolean;
 }
 
 function normalizeIndexUrl(url: string): string {
@@ -102,6 +127,28 @@ export function createRepl(options: ReplOptions): ReplHandle {
 
   let disposed = false;
   let session: ReplSession | undefined;
+  // `runSource`의 실행 슬롯. 세션을 넘어 산다(대기 중인 코드는 `reset()`을 넘겨 새 worker의 첫 `>>> `에서 실행된다).
+  const slot = createSourceSlot();
+  // 마지막으로 알린 상태(`runSource` 거부 판정의 재료). 알림 전에 갱신한다.
+  let status: ReplStatus = isolated ? "loading" : "not-isolated";
+  // 상태가 슬롯을 끝내는 사건: 크래시는 `crashed`, 로드 실패·`exit()`는 `unavailable`.
+  const statusEnd = (next: ReplStatus): SourceEnd | undefined =>
+    next === "crashed"
+      ? "crashed"
+      : next === "load-failed" || next === "terminated"
+        ? "unavailable"
+        : undefined;
+  /**
+   * 상태를 알린다. 소비자 콜백이 안에서 `runSource`·`reset`·`dispose`를 부를 수 있으므로 슬롯·상태를 콜백 앞에 확정하고 슬롯의 결과는
+   * 콜백 뒤에 낸다(TRP-051).
+   */
+  const emitStatus = (next: ReplStatus) => {
+    status = next;
+    const end = statusEnd(next);
+    const run = end === undefined ? undefined : slot.take();
+    onStatus(next);
+    if (run !== undefined && end !== undefined) endRun(run, end);
+  };
   // isolated일 때만 있다. not-isolated에서 reset()은 no-op(ReplHandle.reset 문서).
   let resetSession:
     | ((next?: { topLevelAwait?: boolean }) => void)
@@ -110,7 +157,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
   if (!isolated) {
     // SharedArrayBuffer가 없어 초기화 프레임을 만들 수 없다(ADR-0004, TRP-002). 폴백은 없다.
     writeNotice(readline, NOT_ISOLATED_WARNING, "warning");
-    onStatus("not-isolated");
+    emitStatus("not-isolated");
   } else {
     // 프레임에 넣는 것과 같은 SharedArrayBuffer 뷰를 송신기도 쓴다. reset()이 새 세션에도 같은 버퍼를 싣는다.
     const interruptBuffer = createInterruptBuffer();
@@ -134,17 +181,21 @@ export function createRepl(options: ReplOptions): ReplHandle {
         createWorker: options.createWorker,
         indexURL,
         topLevelAwait,
-        onStatus,
+        source: slot,
+        onStatus: emitStatus,
         onCrash: options.onCrash,
       });
     };
     spawnSession();
-    onStatus("loading");
+    emitStatus("loading");
 
     resetSession = (next) => {
       // boolean이 명시된 경우에만 바꾼다. 생략·undefined는 마지막 값을 유지한다(sticky).
       if (typeof next?.topLevelAwait === "boolean")
         topLevelAwait = next.topLevelAwait;
+      // 실행 중이던 runSource는 `restarted`로 끝난다. 대기 중인 것은 유지해 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았다).
+      // 슬롯은 콜백이 불리기 전에 비운다(TRP-051). 이미 결말이 도착한 것은 그 결말로 끝난다(`endRun`).
+      const run = slot.waiting ? undefined : slot.take();
       // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
       // rpc.dispose() → worker.terminate()(session.terminate()).
       session?.terminate();
@@ -154,14 +205,38 @@ export function createRepl(options: ReplOptions): ReplHandle {
       if (options.terminal.buffer.active.cursorX !== 0) readline.write("\r\n");
       writeNotice(readline, RESET_NOTICE, "info");
       spawnSession();
-      onStatus("loading");
+      emitStatus("loading");
+      if (run !== undefined) endRun(run, "restarted");
     };
   }
+
+  /** `runSource()`의 거부 판정. `busy` 게터가 같은 함수를 쓴다(부작용 없음). */
+  const judge = ():
+    | { kind: "wait" | "open" }
+    | { kind: "reject"; reason: RunRejectedReason } => {
+    if (disposed) return { kind: "reject", reason: "disposed" };
+    if (
+      status === "not-isolated" ||
+      status === "load-failed" ||
+      status === "crashed" ||
+      status === "terminated"
+    ) {
+      return { kind: "reject", reason: "unavailable" };
+    }
+    // 대기 중인 것도 슬롯을 차지한다.
+    if (slot.occupied) return { kind: "reject", reason: "busy" };
+    const prompt = session?.sourcePrompt() ?? "busy";
+    return prompt === "busy"
+      ? { kind: "reject", reason: "busy" }
+      : { kind: prompt };
+  };
 
   return {
     dispose() {
       if (disposed) return;
       disposed = true;
+      // 실행 중·대기 중이던 runSource는 `disposed`로 끝난다(이미 결말이 도착한 것은 그 결말로). 슬롯은 정리 앞에서 비운다.
+      const run = slot.take();
       // 게이트를 닫고 재전송을 멈춘다. 이후 도착하는 키·알림은 눌림을 보내지 않는다.
       session?.endSession();
       // 알림 핸들러가 dispose된 줄 편집기에 쓰지 않도록 RPC를 먼저 끊는다. `cancelRead()`가 추가로 앞서지만
@@ -171,6 +246,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
       selectionCopy.dispose();
       // 벤더 dispose가 멱등이라 term.dispose()가 addon을 다시 dispose해도 안전하다.
       readline.dispose();
+      if (run !== undefined) endRun(run, "disposed");
     },
     reset(options) {
       if (disposed) return;
@@ -182,6 +258,22 @@ export function createRepl(options: ReplOptions): ReplHandle {
     setCopyOnSelect(on) {
       if (disposed) return;
       selectionCopy.setCopyOnSelect(on);
+    },
+    runSource(code) {
+      if (typeof code !== "string") {
+        return Promise.reject(new TypeError("runSource 인자 오류 — code: 문자열 필요"));
+      }
+      const verdict = judge();
+      if (verdict.kind === "reject") return Promise.reject(rejection(verdict.reason));
+      // 첫 프롬프트 전(`loading`)이면 슬롯이 기다린다. 첫 `readLine` 요청이 오면 그 요청에 `{ source }`로 응답한다.
+      if (verdict.kind === "wait") return slot.occupy(code, "waiting");
+      // 프롬프트가 열려 있다: 열린 읽기를 가져가고 줄을 보존한다. `judge()`가 `open`이면 가져갈 수 있다.
+      if (!session?.sendSource(code)) return Promise.reject(rejection("busy"));
+      return slot.occupy(code, "sent");
+    },
+    get busy() {
+      const verdict = judge();
+      return verdict.kind === "reject" && verdict.reason === "busy";
     },
   };
 }
