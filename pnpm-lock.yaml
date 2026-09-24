@@ -200,9 +200,6 @@ importers:
       jsdom:
         specifier: 30.1.0
         version: 30.1.0
-      pyodide:
-        specifier: 'catalog:'
-        version: 314.0.7
       tsdown:
         specifier: 0.23.0
         version: 0.23.0(typescript@6.0.3)

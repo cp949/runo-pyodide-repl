@@ -59,8 +59,13 @@ const ENTRY_POINTS = [
       composeRpcHandlers: "function",
     },
   ],
-  // `.`는 RD-022 DELTA-06 전까지 빈 모듈이다. 그래도 import가 성립하는지(exports·dist 배치)는 본다.
-  ["@cp949/runo-pyodide-terminal", {}],
+  [
+    "@cp949/runo-pyodide-terminal",
+    {
+      createTerminalRunner: "function",
+      RunRejectedError: "function",
+    },
+  ],
   [
     "@cp949/runo-pyodide-terminal/internal",
     {
@@ -269,7 +274,7 @@ async function main(tmp) {
       `import { startCoreSession, composeRpcHandlers as composeMain, type MainDriver } from "@cp949/runo-pyodide-core";`,
       `import { runWorker, createCoreConsole, type WorkerDriver, type PyodideConsoleProxy } from "@cp949/runo-pyodide-core/worker";`,
       `import { createTerminalSinks, type TerminalSinks } from "@cp949/runo-pyodide-terminal/internal";`,
-      `import type * as TerminalMain from "@cp949/runo-pyodide-terminal";`,
+      `import { createTerminalRunner, type TerminalRunnerHandle, type TerminalRunnerOptions } from "@cp949/runo-pyodide-terminal";`,
       `import { createRepl, type ReplHandle, type ReplOptions } from "@cp949/runo-pyodide-repl";`,
       `import { runReplWorker } from "@cp949/runo-pyodide-repl/worker";`,
       `import type { PyodideInterface } from "pyodide";`,
@@ -277,8 +282,8 @@ async function main(tmp) {
       `// core worker 타입이 소비자의 pyodide 타입으로 해석되는지(any로 무너지지 않는지) 본다.`,
       `const makeConsole: (pyodide: PyodideInterface) => PyodideConsoleProxy = (pyodide) =>`,
       `  createCoreConsole(pyodide, { write() {}, writeError() {} } as never);`,
-      `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createTerminalSinks, createRepl, runReplWorker];`,
-      `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, typeof TerminalMain, ReplHandle, ReplOptions];`,
+      `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createTerminalSinks, createTerminalRunner, createRepl, runReplWorker];`,
+      `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, TerminalRunnerHandle, TerminalRunnerOptions, ReplHandle, ReplOptions];`,
       ``,
     ].join("\n"),
   );

@@ -1,0 +1,958 @@
+/**
+ * `createTerminalRunner` 시험(RD-022 DELTA-06). 실제 벤더 `Readline`·실제 sink·실제 선택 복사를 가짜 터미널
+ * (`@repo/pyodide-testkit/fake-terminal`)에 붙이고, core `createRunner`만 가짜로 둔다. 가짜 core는 내부 팩토리
+ * `createTerminalRunnerWith`로 주입한다(공개 옵션에는 시험 전용 필드가 없다).
+ * 가짜 core는 실제 `createRunner`의 계약 중 실행창이 기대는 부분만 흉내낸다: 상태 알림, `run` 슬롯(`busy`),
+ * `inputProvider(prompt, signal)` 호출과 signal abort(`interrupt`·`stop`·`reset`·`dispose`), 결과·거부 그대로 전달.
+ * 실제 core와의 결합은 마지막 절이 비격리(jsdom은 `crossOriginIsolated`가 없다) 경로로 본다. 실제 pyodide 왕복은 브라우저 L1이 본다.
+ */
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  RunRejectedError,
+  type OutputChunk,
+  type RunResult,
+  type RunnerHandle,
+  type RunnerOptions,
+  type RunnerStatus,
+  type StopResult,
+} from "@cp949/runo-pyodide-core";
+import {
+  createFakeTerminal,
+  type FakeTerminal,
+  type FakeTerminalOptions,
+} from "@repo/pyodide-testkit/fake-terminal";
+import {
+  createTerminalRunner,
+  createTerminalRunnerWith,
+  type TerminalRunnerOptions,
+} from "./terminal-runner";
+
+/** 매크로태스크 한 번. `rewindTail`의 await 사슬(마이크로태스크 여러 번)이 끝나기를 기다린다. */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+const YELLOW = "\x1b[33m";
+const RED = "\x1b[31m";
+const RESET = "\x1b[0m";
+
+/** 가짜 core `RunnerHandle`과 시험이 사건을 일으키는 조작 손잡이. */
+function createFakeCore(initial: RunnerStatus = "ready") {
+  let options!: RunnerOptions;
+  let status: RunnerStatus = initial;
+  let activeRun:
+    | { resolve(result: RunResult): void; reject(error: unknown): void }
+    | undefined;
+  let inputController: AbortController | undefined;
+  let disposed = false;
+  const calls = {
+    run: [] as string[],
+    stop: 0,
+    interrupt: 0,
+    reset: 0,
+    dispose: 0,
+  };
+
+  const setStatus = (next: RunnerStatus) => {
+    status = next;
+    options.onStatus?.(next);
+  };
+  const abortInput = () => inputController?.abort();
+
+  const handle: RunnerHandle = {
+    run(code) {
+      calls.run.push(code);
+      return new Promise<RunResult>((resolve, reject) => {
+        if (disposed) {
+          reject(new RunRejectedError("disposed"));
+          return;
+        }
+        if (
+          status === "not-isolated" ||
+          status === "load-failed" ||
+          status === "crashed"
+        ) {
+          reject(new RunRejectedError("unavailable"));
+          return;
+        }
+        if (activeRun || status === "waiting-input") {
+          reject(new RunRejectedError("busy"));
+          return;
+        }
+        activeRun = { resolve, reject };
+        if (status === "ready") setStatus("running");
+      });
+    },
+    stop() {
+      calls.stop += 1;
+      abortInput();
+      return Promise.resolve<StopResult>("stopped");
+    },
+    interrupt() {
+      calls.interrupt += 1;
+      abortInput();
+    },
+    reset() {
+      calls.reset += 1;
+      abortInput();
+      const run = activeRun;
+      activeRun = undefined;
+      run?.resolve({ kind: "restarted" });
+    },
+    dispose() {
+      calls.dispose += 1;
+      disposed = true;
+      abortInput();
+      const run = activeRun;
+      activeRun = undefined;
+      run?.reject(new RunRejectedError("disposed"));
+    },
+    get status() {
+      return status;
+    },
+  };
+
+  return {
+    handle,
+    calls,
+    /** `createTerminalRunnerWith`에 넘기는 core 팩토리. 옵션을 붙잡고, 첫 상태를 동기로 알린다(실제 core와 같다). */
+    factory: (given: RunnerOptions): RunnerHandle => {
+      options = given;
+      if (initial === "not-isolated" || initial === "loading") {
+        given.onStatus?.(initial);
+      }
+      return handle;
+    },
+    /** terminal이 core에 넘긴 옵션. */
+    get options() {
+      return options;
+    },
+    setStatus,
+    /** 실행 중인 run을 끝낸다. */
+    finishRun(result: RunResult = { kind: "ok" }) {
+      const run = activeRun;
+      activeRun = undefined;
+      run?.resolve(result);
+      if (status === "running" || status === "waiting-input") setStatus("ready");
+    },
+    /** Python이 `input()`을 부른 상황: core가 provider를 부르고 상태를 `waiting-input`으로 바꾼다. */
+    requestInput(prompt = ""): {
+      result: Promise<string | null>;
+      controller: AbortController;
+    } {
+      if (!options.inputProvider) throw new Error("inputProvider가 없다");
+      const controller = new AbortController();
+      inputController = controller;
+      setStatus("waiting-input");
+      const result = options.inputProvider(prompt, controller.signal);
+      void result.finally(() => {
+        if (inputController === controller) inputController = undefined;
+        if (status === "waiting-input") setStatus(activeRun ? "running" : "ready");
+      });
+      return { result, controller };
+    },
+    /** stdout·stderr 조각이 도착했다. */
+    output(chunk: OutputChunk) {
+      options.onOutput(chunk);
+    },
+  };
+}
+
+type FakeCore = ReturnType<typeof createFakeCore>;
+
+interface SetupOptions {
+  terminal?: FakeTerminalOptions;
+  /** 미리 만든 가짜 터미널. `terminal` 옵션 대신 쓴다(옵션 콜백이 터미널을 봐야 할 때). */
+  fake?: FakeTerminal;
+  initial?: RunnerStatus;
+  runner?: Partial<TerminalRunnerOptions>;
+}
+
+/** 실제 `Readline`·sink·선택 복사 + 가짜 core로 실행창을 만든다. */
+function setup(setupOptions: SetupOptions = {}) {
+  const fake: FakeTerminal =
+    setupOptions.fake ?? createFakeTerminal(setupOptions.terminal);
+  const core: FakeCore = createFakeCore(setupOptions.initial ?? "ready");
+  const statuses: RunnerStatus[] = [];
+  const handle = createTerminalRunnerWith(
+    {
+      terminal: fake.term,
+      createWorker: () => {
+        throw new Error("가짜 core는 worker를 만들지 않는다");
+      },
+      onStatus: (status) => statuses.push(status),
+      ...setupOptions.runner,
+    },
+    core.factory,
+  );
+  /** 화면에 쓰인 원문 전체. */
+  const screen = () => fake.written.join("");
+  /** `input()` 요청을 시작하고 읽기가 그려질 때까지 기다린다. 읽기 Promise는 객체에 담아 돌려준다(pending-traps/09). */
+  const startInput = async (prompt = "") => {
+    const request = core.requestInput(prompt);
+    await tick();
+    return request;
+  };
+  return { fake, core, handle, statuses, screen, startInput };
+}
+
+/** `navigator.clipboard.writeText` 대역. jsdom에는 클립보드가 없다. */
+function stubClipboard() {
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText },
+    configurable: true,
+  });
+  return writeText;
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(navigator, "clipboard");
+  localStorage.clear();
+});
+
+describe("키 정책: 읽기 밖 입력은 무시한다(typeAhead: false)", () => {
+  test("running 중 친 문자는 화면에 나타나지 않고 다음 input() 읽기에도 들어가지 않는다", async () => {
+    const { fake, core, handle, screen, startInput } = setup();
+    void handle.run("code");
+    expect(handle.status).toBe("running");
+
+    fake.type("abc");
+    expect(screen()).not.toContain("abc");
+
+    const { result } = await startInput();
+    fake.type("\r");
+    await expect(result).resolves.toBe("");
+    core.finishRun();
+  });
+
+  test("running 중 붙여넣기(다중 문자·개행 포함)도 버려진다", async () => {
+    const { fake, core, handle, screen, startInput } = setup();
+    void handle.run("code");
+
+    fake.paste("hello\nworld");
+    expect(screen()).not.toContain("hello");
+
+    const { result } = await startInput();
+    fake.type("\r");
+    await expect(result).resolves.toBe("");
+    core.finishRun();
+  });
+
+  test("ready에서 친 문자도 버려진다", async () => {
+    const { fake, core, screen, startInput } = setup();
+
+    fake.type("abc");
+    fake.paste("xyz");
+    expect(screen()).toBe("");
+
+    core.setStatus("running");
+    const { result } = await startInput();
+    fake.type("\r");
+    await expect(result).resolves.toBe("");
+  });
+
+  test("waiting-input 중에는 한 줄을 편집하고 Enter로 전달한다", async () => {
+    const { fake, screen, startInput } = setup();
+    const { result } = await startInput("이름: ");
+
+    fake.type("ab");
+    fake.type("\x7f"); // Backspace
+    fake.type("c\r");
+
+    await expect(result).resolves.toBe("ac");
+    // 프롬프트(직전 출력 꼬리가 아니라 core가 넘긴 prompt 인자는 무시하고 자체 꼬리를 쓴다)와 입력이 화면에 그려졌다.
+    expect(screen()).toContain("ac");
+  });
+
+  test("Enter로 제출한 입력줄은 history에 남지 않아 다음 읽기에서 ↑로 되살아나지 않는다", async () => {
+    const { fake, startInput } = setup();
+    const first = await startInput();
+    fake.type("first\r");
+    await first.result;
+    await tick();
+
+    const second = await startInput();
+    fake.type("\x1b[A"); // ↑
+    fake.type("\r");
+
+    await expect(second.result).resolves.toBe("");
+  });
+
+  test("history를 localStorage에 저장하지 않는다(persist: false)", async () => {
+    const { fake, startInput } = setup();
+    const { result } = await startInput();
+
+    fake.type("secret\r");
+    await result;
+
+    expect(localStorage.getItem("history")).toBeNull();
+  });
+});
+
+describe("Ctrl+C: 상태별 분기 4종", () => {
+  test("선택이 있으면 복사하고 선택을 지우며 실행은 중단하지 않는다", async () => {
+    const writeText = stubClipboard();
+    const onCopy = vi.fn();
+    const { fake, core, handle, screen } = setup({ runner: { onCopy } });
+    void handle.run("code");
+    fake.select("복사할 글");
+
+    const passedToXterm = fake.keyDown({ key: "c", ctrlKey: true });
+    await tick();
+
+    expect(passedToXterm).toBe(false);
+    expect(writeText).toHaveBeenCalledWith("복사할 글");
+    expect(onCopy).toHaveBeenCalledWith({ ok: true, chars: 5 });
+    expect(fake.clearSelectionCalls).toBe(1);
+    expect(core.calls.interrupt).toBe(0);
+    expect(screen()).not.toContain("^C");
+  });
+
+  test("running이면 ^C를 표시하고 interrupt를 보낸다", async () => {
+    const { fake, core, handle, screen } = setup();
+    void handle.run("code");
+    expect(handle.status).toBe("running");
+
+    fake.type("\x03");
+
+    expect(screen()).toContain("^C");
+    expect(core.calls.interrupt).toBe(1);
+  });
+
+  test("running 중 ^C 표시는 꼬리에 남아 다음 input() 프롬프트에 이어 그려진다", async () => {
+    const { fake, core, handle, startInput } = setup();
+    void handle.run("code");
+    core.output({ stream: "stdout", text: "t" });
+    fake.type("\x03");
+
+    const { result } = await startInput();
+    fake.type("x\r");
+
+    await expect(result).resolves.toBe("x");
+    // `t^C`가 프롬프트다(tty 로컬 에코 흉내, REPL과 같다).
+    expect(fake.written.join("")).toContain("t^Cx");
+  });
+
+  test("waiting-input이고 읽기가 열려 있으면 벤더가 읽기를 취소하고 interrupt는 따로 보내지 않는다", async () => {
+    const { fake, core, screen, startInput } = setup();
+    const { result } = await startInput("x: ");
+    expect(core.handle.status).toBe("waiting-input");
+
+    fake.type("ab");
+    fake.type("\x03");
+
+    await expect(result).resolves.toBeNull();
+    expect(core.calls.interrupt).toBe(0);
+    expect(screen()).not.toContain("^C");
+  });
+
+  test("waiting-input이지만 읽기가 아직 그려지기 전이면 runner.interrupt로 읽기를 취소한다", async () => {
+    const { fake, core } = setup({ terminal: { asyncWrite: true } });
+    // write 콜백이 오기 전이라 벤더에 활성 읽기가 없다. 이 구간의 Ctrl+C는 핸들러로 온다.
+    const { result } = core.requestInput("x: ");
+    await tick();
+    expect(core.handle.status).toBe("waiting-input");
+
+    fake.type("\x03");
+
+    expect(core.calls.interrupt).toBe(1);
+    await expect(result).resolves.toBeNull();
+    fake.flush();
+  });
+
+  test("inputProvider를 직접 준 waiting-input에서도 Ctrl+C는 runner.interrupt로 읽기를 취소한다", async () => {
+    let seenSignal: AbortSignal | undefined;
+    const inputProvider = vi.fn((_prompt: string, signal: AbortSignal) => {
+      seenSignal = signal;
+      return new Promise<string | null>(() => {});
+    });
+    const { fake, core } = setup({ runner: { inputProvider } });
+    core.requestInput("x: ");
+
+    fake.type("\x03");
+
+    expect(core.calls.interrupt).toBe(1);
+    expect(seenSignal?.aborted).toBe(true);
+  });
+
+  test("ready에서는 아무 일도 하지 않는다(^C 표시 없음·interrupt 없음)", () => {
+    const { fake, core, screen } = setup();
+
+    fake.type("\x03");
+
+    expect(core.handle.status).toBe("ready");
+    expect(core.calls.interrupt).toBe(0);
+    expect(screen()).toBe("");
+  });
+
+  test("loading·restarting·crashed 같은 그 밖의 상태에서도 무동작이다", () => {
+    const { fake, core, screen } = setup();
+    for (const status of ["loading", "restarting", "crashed"] as const) {
+      core.setStatus(status);
+      fake.type("\x03");
+    }
+
+    expect(core.calls.interrupt).toBe(0);
+    expect(screen()).toBe("");
+  });
+});
+
+describe("run 시작 시 화면 준비: 커서 줄바꿈·clearOnRun", () => {
+  test("커서가 행 머리가 아니면 \\r\\n을 한 번 쓴다", () => {
+    const { fake, handle } = setup();
+    fake.screen.cursorX = 3;
+
+    void handle.run("code");
+
+    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(1);
+  });
+
+  test("커서가 행 머리이면 줄바꿈을 쓰지 않는다", () => {
+    const { fake, handle } = setup();
+    fake.screen.cursorX = 0;
+
+    void handle.run("code");
+
+    expect(fake.written).toEqual([]);
+  });
+
+  test("clearOnRun이 기본이면 화면을 지우지 않는다", () => {
+    const { fake, handle, screen } = setup();
+    fake.screen.cursorX = 3;
+
+    void handle.run("code");
+
+    expect(screen()).not.toContain("\x1b[2J");
+  });
+
+  test("clearOnRun이면 화면을 지우고 줄바꿈은 쓰지 않는다", () => {
+    const { fake, handle, screen } = setup({ runner: { clearOnRun: true } });
+    fake.screen.cursorX = 3;
+
+    void handle.run("code");
+
+    expect(screen()).toContain("\x1b[2J");
+    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(0);
+  });
+
+  test("clearOnRun이 참인 값만 켠다(=== true)", () => {
+    const { fake, handle, screen } = setup({
+      runner: { clearOnRun: "yes" as unknown as boolean },
+    });
+    fake.screen.cursorX = 3;
+
+    void handle.run("code");
+
+    expect(screen()).not.toContain("\x1b[2J");
+  });
+
+  test("거부되는 run(busy)은 화면을 건드리지 않는다", async () => {
+    const { fake, handle } = setup({ runner: { clearOnRun: true } });
+    void handle.run("first");
+    fake.written.length = 0;
+    fake.screen.cursorX = 3;
+
+    await expect(handle.run("second")).rejects.toMatchObject({ reason: "busy" });
+
+    expect(fake.written).toEqual([]);
+  });
+
+  test("로딩 대기 중인 run이 슬롯을 잡고 있을 때 두 번째 run은 busy로 거부되고 화면을 건드리지 않는다", async () => {
+    const { fake, core, handle } = setup({
+      initial: "loading",
+      runner: { clearOnRun: true },
+    });
+    void handle.run("first"); // ready가 될 때까지 대기한다(가짜 core도 슬롯을 잡는다)
+    fake.written.length = 0;
+    fake.screen.cursorX = 3;
+
+    await expect(handle.run("second")).rejects.toMatchObject({ reason: "busy" });
+
+    expect(fake.written).toEqual([]);
+    expect(core.calls.run).toEqual(["first", "second"]);
+  });
+
+  test("끝난 run 뒤 재시작 대기 중에 부른 run은 슬롯이 비어 있으므로 화면을 준비한다", async () => {
+    const { fake, core, handle } = setup();
+    const first = handle.run("first");
+    core.finishRun();
+    await first;
+    core.setStatus("restarting");
+    fake.screen.cursorX = 3;
+
+    void handle.run("second"); // 새 worker가 준비되면 실행된다(가짜 core도 슬롯을 잡는다)
+
+    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(1);
+  });
+
+  test("worker가 없는 상태(unavailable)의 run도 화면을 건드리지 않는다", async () => {
+    const { fake, core, handle } = setup({ runner: { clearOnRun: true } });
+    core.setStatus("crashed");
+    fake.screen.cursorX = 3;
+
+    await expect(handle.run("x")).rejects.toMatchObject({
+      reason: "unavailable",
+    });
+
+    expect(fake.written).toEqual([]);
+  });
+
+  test("실행 시작에 꼬리를 비워 이전 실행의 미종결 줄이 다음 input() 프롬프트가 되지 않는다", async () => {
+    const { fake, core, handle, startInput } = setup();
+    void handle.run("first");
+    core.output({ stream: "stdout", text: "a" });
+    core.finishRun();
+    fake.screen.cursorX = 1;
+    const before = fake.written.length;
+
+    void handle.run("second");
+    const { result } = await startInput();
+    fake.type("z\r");
+
+    await expect(result).resolves.toBe("z");
+    // 프롬프트는 빈 꼬리라 입력줄 재그리기가 `a`를 다시 그리지 않는다(`az`가 아니라 `z`).
+    const drawn = fake.written.slice(before);
+    expect(drawn).toContain("z");
+    expect(drawn.join("")).not.toContain("a");
+  });
+
+  test("run의 결과와 거부를 core 그대로 돌려준다", async () => {
+    const { core, handle } = setup();
+    const running = handle.run("code");
+    core.finishRun({ kind: "exit", code: 3 });
+    await expect(running).resolves.toEqual({ kind: "exit", code: 3 });
+
+    const restarted = handle.run("code");
+    core.handle.reset();
+    await expect(restarted).resolves.toEqual({ kind: "restarted" });
+
+    const disposed = handle.run("code");
+    core.handle.dispose();
+    await expect(disposed).rejects.toMatchObject({
+      name: "RunRejectedError",
+      reason: "disposed",
+    });
+  });
+});
+
+describe("clear()", () => {
+  test("화면을 지우는 시퀀스를 쓴다", () => {
+    const { handle, screen } = setup();
+
+    handle.clear();
+
+    expect(screen()).toContain("\x1b[2J");
+  });
+
+  test("sink 꼬리를 비워 지운 뒤 input() 프롬프트가 지워진 출력을 되살리지 않는다", async () => {
+    const { fake, core, handle, startInput } = setup();
+    core.output({ stream: "stdout", text: "abc" });
+    handle.clear();
+    const before = fake.written.length;
+
+    await startInput();
+
+    expect(fake.written.slice(before).join("")).not.toContain("abc");
+  });
+
+  test("입력을 기다리는 중(읽기가 열린 동안)에는 아무것도 하지 않는다", async () => {
+    const { fake, handle, startInput } = setup();
+    await startInput("x: ");
+    const before = fake.written.length;
+
+    handle.clear();
+
+    expect(fake.written).toHaveLength(before);
+  });
+});
+
+describe("출력 연결", () => {
+  test("stdout은 그대로, stderr는 빨강으로 화면에 쓰고 onOutput에도 알린다", () => {
+    const onOutput = vi.fn();
+    const { core, screen } = setup({ runner: { onOutput } });
+
+    core.output({ stream: "stdout", text: "out" });
+    core.output({ stream: "stderr", text: "err" });
+
+    expect(screen()).toBe(`out${RED}err${RESET}`);
+    expect(onOutput).toHaveBeenNthCalledWith(1, { stream: "stdout", text: "out" });
+    expect(onOutput).toHaveBeenNthCalledWith(2, { stream: "stderr", text: "err" });
+  });
+
+  test("input()의 프롬프트는 직전 출력의 꼬리로 그려진다", async () => {
+    const { fake, core, startInput } = setup();
+    core.output({ stream: "stdout", text: "이름: " });
+    const { result } = await startInput("이름: ");
+
+    fake.type("홍\r");
+
+    await expect(result).resolves.toBe("홍");
+    // Enter 때 프롬프트와 입력이 한 조각으로 다시 그려진다.
+    expect(fake.written).toContain("이름: 홍");
+  });
+
+  test("pyodide 로드 실패 메시지를 빨강 한 줄로 낸다", () => {
+    const { core, screen } = setup();
+
+    core.options.onLoadFailed?.("네트워크 오류");
+
+    expect(screen()).toBe(`${RED}pyodide 로드 실패: 네트워크 오류${RESET}\r\n`);
+  });
+});
+
+describe("상태·크래시 전달", () => {
+  test("core 상태 알림을 onStatus로 그대로 전달하고 status 게터는 core 상태를 읽는다", () => {
+    const { core, handle, statuses } = setup();
+
+    core.setStatus("running");
+    core.setStatus("waiting-input");
+    core.setStatus("ready");
+
+    expect(statuses).toEqual(["running", "waiting-input", "ready"]);
+    expect(handle.status).toBe("ready");
+  });
+
+  test("onCrash와 crashed 상태를 그대로 전달한다", () => {
+    const onCrash = vi.fn();
+    const { core, handle, statuses } = setup({ runner: { onCrash } });
+    core.options.onCrash?.("worker 죽음");
+    core.setStatus("crashed");
+
+    expect(onCrash).toHaveBeenCalledWith("worker 죽음");
+    expect(statuses).toContain("crashed");
+    expect(handle.status).toBe("crashed");
+  });
+
+  test("core에 넘기는 옵션(filename·topLevelAwait·pyodide·createWorker)을 그대로 전달한다", () => {
+    const createWorker = vi.fn(() => ({}) as Worker);
+    const { core } = setup({
+      runner: {
+        createWorker,
+        filename: "app.py",
+        topLevelAwait: true,
+        pyodide: { indexURL: "https://example.test/pyodide/" },
+      },
+    });
+
+    expect(core.options.createWorker).toBe(createWorker);
+    expect(core.options.filename).toBe("app.py");
+    expect(core.options.topLevelAwait).toBe(true);
+    expect(core.options.pyodide).toEqual({
+      indexURL: "https://example.test/pyodide/",
+    });
+  });
+
+  test("stop·reset은 core로 넘기고 결과를 그대로 돌려준다", async () => {
+    const { core, handle } = setup();
+
+    await expect(handle.stop()).resolves.toBe("stopped");
+    handle.reset();
+
+    expect(core.calls.stop).toBe(1);
+    expect(core.calls.reset).toBe(1);
+  });
+});
+
+describe("inputProvider 옵션", () => {
+  test("주면 core에 그대로 넘기고 xterm 읽기는 열지 않는다", async () => {
+    const inputProvider = vi.fn(() => new Promise<string | null>(() => {}));
+    const { fake, core, screen } = setup({ runner: { inputProvider } });
+    expect(core.options.inputProvider).toBe(inputProvider);
+
+    core.requestInput("x: ");
+    await tick();
+    fake.type("abc\r");
+
+    expect(inputProvider).toHaveBeenCalledWith("x: ", expect.any(AbortSignal));
+    // 읽기가 없으므로 아무것도 그려지지 않고 입력은 버려진다.
+    expect(screen()).toBe("");
+  });
+
+  test("주지 않으면 기본 provider(xterm 읽기)를 core에 넘긴다", () => {
+    const { core } = setup();
+
+    expect(typeof core.options.inputProvider).toBe("function");
+  });
+});
+
+describe("입력 읽기의 signal abort", () => {
+  test("abort되면 진행 중 읽기를 cancelRead로 끝내고 null을 돌려주며 입력줄 뒤에 줄바꿈을 낸다", async () => {
+    const { fake, startInput } = setup();
+    const { result, controller } = await startInput("x: ");
+    fake.type("ab");
+    const before = fake.written.length;
+
+    controller.abort();
+
+    await expect(result).resolves.toBeNull();
+    expect(fake.written.slice(before)).toEqual(["\r\n"]);
+  });
+
+  test("abort 뒤 친 키는 죽은 읽기에 들어가지 않고, 다음 읽기는 그 키를 받지 않는다", async () => {
+    const { fake, startInput } = setup();
+    const first = await startInput();
+    first.controller.abort();
+    await first.result;
+
+    fake.type("zz\r");
+    const second = await startInput();
+    fake.type("y\r");
+
+    await expect(second.result).resolves.toBe("y");
+  });
+
+  test("이미 abort된 signal로 불리면 읽기를 열지 않고 null을 돌려준다", async () => {
+    const { fake, core } = setup();
+    const controller = new AbortController();
+    controller.abort();
+    const before = fake.written.length;
+
+    const result = await core.options.inputProvider!("x: ", controller.signal);
+
+    expect(result).toBeNull();
+    expect(fake.written).toHaveLength(before);
+  });
+
+  test("읽기가 정상으로 끝난 뒤의 abort는 줄바꿈을 더 쓰지 않는다(리스너 제거)", async () => {
+    const { fake, startInput } = setup();
+    const { result, controller } = await startInput();
+    fake.type("a\r");
+    await result;
+    const before = fake.written.length;
+
+    controller.abort();
+
+    expect(fake.written).toHaveLength(before);
+  });
+
+  test("긴 꼬리를 정리(flush 대기)하는 사이 abort되면 읽기를 열지 않아 이어 친 키가 죽은 읽기에 들어가지 않는다", async () => {
+    const { fake, core } = setup({ terminal: { asyncWrite: true } });
+    // 꼬리가 폭의 절반 이상이면 `rewindTail`이 write 콜백(flush)을 기다린다.
+    core.output({ stream: "stdout", text: "x".repeat(50) });
+    const { result, controller } = core.requestInput("x: ");
+    await tick();
+
+    controller.abort();
+    fake.flush();
+    await tick();
+    fake.flush();
+    await expect(result).resolves.toBeNull();
+    const before = fake.written.length;
+    fake.type("q\r");
+
+    // 읽기가 열리지 않았으므로 키는 버려지고 아무것도 그려지지 않는다.
+    expect(fake.written).toHaveLength(before);
+  });
+
+  test("dispose 뒤 도착한 flush 콜백은 해제된 터미널의 buffer를 읽지 않는다(TRP-004)", async () => {
+    const { fake, core, handle } = setup({ terminal: { asyncWrite: true } });
+    core.output({ stream: "stdout", text: "x".repeat(50) });
+    core.requestInput("x: ");
+    await tick();
+
+    handle.dispose();
+    fake.term.dispose();
+    fake.flush();
+    await tick();
+
+    expect(fake.disposedBufferReads).toBe(0);
+  });
+
+  test("Ctrl+C로 사용자가 취소한 읽기는 줄바꿈을 한 번만 쓴다(벤더가 쓴 것)", async () => {
+    const { fake, startInput } = setup();
+    const { result } = await startInput();
+    const before = fake.written.length;
+
+    fake.type("\x03");
+
+    await expect(result).resolves.toBeNull();
+    expect(fake.written.slice(before).filter((text) => text === "\r\n")).toHaveLength(
+      1,
+    );
+  });
+});
+
+describe("비격리", () => {
+  let precondition: boolean;
+  beforeEach(() => {
+    precondition = globalThis.crossOriginIsolated !== true;
+  });
+
+  test("가짜 core가 not-isolated를 알리면 경고 안내를 노랑 한 줄로 낸 뒤 onStatus로 알린다", () => {
+    const fake = createFakeTerminal();
+    let writtenAtStatus = -1;
+    const statuses: RunnerStatus[] = [];
+    setup({
+      fake,
+      initial: "not-isolated",
+      runner: {
+        onStatus: (status) => {
+          statuses.push(status);
+          writtenAtStatus = fake.written.length;
+        },
+      },
+    });
+
+    expect(fake.written).toHaveLength(1);
+    expect(fake.written[0]).toContain(YELLOW);
+    expect(fake.written[0]).toContain("cross-origin isolation");
+    expect(fake.written[0]?.endsWith(`${RESET}\r\n`)).toBe(true);
+    expect(statuses).toEqual(["not-isolated"]);
+    // 안내가 상태 알림보다 먼저다(알림 시점에 이미 안내가 쓰여 있다).
+    expect(writtenAtStatus).toBe(1);
+  });
+
+  test("실제 core createRunner는 jsdom(비격리)에서 worker 없이 not-isolated가 되고 run은 unavailable로 거부된다", async () => {
+    expect(precondition).toBe(true);
+    const fake = createFakeTerminal();
+    const createWorker = vi.fn(() => {
+      throw new Error("worker를 만들면 안 된다");
+    });
+    const onStatus = vi.fn();
+    const handle = createTerminalRunner({
+      terminal: fake.term,
+      createWorker,
+      onStatus,
+    });
+
+    expect(handle.status).toBe("not-isolated");
+    expect(onStatus).toHaveBeenCalledWith("not-isolated");
+    expect(fake.written.join("")).toContain("cross-origin isolation");
+    const before = fake.written.length;
+    await expect(handle.run("1")).rejects.toBeInstanceOf(RunRejectedError);
+    await expect(handle.run("1")).rejects.toMatchObject({ reason: "unavailable" });
+    expect(fake.written).toHaveLength(before);
+    expect(createWorker).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  test("옵션이 틀려 core가 던지면 붙인 Readline·선택 복사를 정리하고 그대로 던진다", () => {
+    const fake = createFakeTerminal({ withElement: true });
+    const removeSpy = vi.spyOn(fake.term.element!, "removeEventListener");
+
+    expect(() =>
+      createTerminalRunner({
+        terminal: fake.term,
+        createWorker: () => ({}) as Worker,
+        filename: "",
+      }),
+    ).toThrow();
+
+    expect(removeSpy).toHaveBeenCalledWith("mousedown", expect.any(Function));
+    // Readline이 떼어졌으므로 입력이 와도 아무 일도 없다.
+    fake.type("abc");
+    expect(fake.written).toEqual([]);
+  });
+});
+
+describe("dispose()", () => {
+  test("runner를 dispose하고 Readline을 떼되 Terminal은 dispose하지 않는다", () => {
+    const { fake, core, handle } = setup();
+    const terminalDispose = vi.spyOn(fake.term, "dispose");
+
+    handle.dispose();
+
+    expect(core.calls.dispose).toBe(1);
+    expect(terminalDispose).not.toHaveBeenCalled();
+    // Readline이 떼어져 있어 키·붙여넣기가 무시된다(핸들러 없음). Ctrl+C도 핸들러를 부르지 않는다.
+    core.setStatus("running");
+    fake.type("\x03");
+    expect(core.calls.interrupt).toBe(0);
+    // 파괴되지 않은 터미널은 계속 쓸 수 있다.
+    expect(() => fake.term.write("still alive")).not.toThrow();
+  });
+
+  test("두 번 불러도 안전하다", () => {
+    const { core, handle } = setup();
+
+    handle.dispose();
+    handle.dispose();
+
+    expect(core.calls.dispose).toBe(1);
+  });
+
+  test("열린 읽기는 null로 끝나고 화면에 줄바꿈을 더 쓰지 않는다", async () => {
+    const { fake, handle, startInput } = setup();
+    const { result } = await startInput("x: ");
+    const before = fake.written.length;
+
+    handle.dispose();
+
+    await expect(result).resolves.toBeNull();
+    expect(fake.written).toHaveLength(before);
+  });
+
+  test("dispose 뒤 run은 disposed로 거부되고 화면을 건드리지 않는다", async () => {
+    const { fake, handle } = setup({ runner: { clearOnRun: true } });
+    handle.dispose();
+    fake.screen.cursorX = 3;
+
+    await expect(handle.run("x")).rejects.toMatchObject({ reason: "disposed" });
+
+    expect(fake.written).toEqual([]);
+  });
+
+  test("dispose 뒤 run은 해제된 터미널의 buffer를 읽지 않는다", async () => {
+    const { fake, handle } = setup();
+    handle.dispose();
+    fake.term.dispose();
+
+    await expect(handle.run("x")).rejects.toMatchObject({ reason: "disposed" });
+
+    expect(fake.disposedBufferReads).toBe(0);
+  });
+
+  test("dispose 뒤 clear·setCopyOnSelect는 아무 일도 하지 않는다", () => {
+    const { fake, handle } = setup();
+    handle.dispose();
+
+    handle.clear();
+    handle.setCopyOnSelect(true);
+
+    expect(fake.written).toEqual([]);
+  });
+
+  test("선택 복사 리스너를 뗀다", () => {
+    const writeText = stubClipboard();
+    const { fake, handle } = setup({ terminal: { withElement: true } });
+    handle.dispose();
+    fake.select("abc");
+
+    fake.term.element!.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+    document.dispatchEvent(new MouseEvent("mouseup"));
+
+    expect(writeText).not.toHaveBeenCalled();
+  });
+});
+
+describe("선택 복사", () => {
+  test("드래그 선택 자동 복사는 기본으로 켜져 있고 setCopyOnSelect(false)로 끈다", async () => {
+    const writeText = stubClipboard();
+    const { fake, handle } = setup({ terminal: { withElement: true } });
+    const drag = () => {
+      fake.term.element!.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    };
+    fake.select("abc");
+
+    drag();
+    expect(writeText).toHaveBeenCalledTimes(1);
+
+    handle.setCopyOnSelect(false);
+    drag();
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  test("copyOnSelect: false 옵션이면 처음부터 자동 복사하지 않는다", () => {
+    const writeText = stubClipboard();
+    const { fake } = setup({
+      terminal: { withElement: true },
+      runner: { copyOnSelect: false },
+    });
+    fake.select("abc");
+
+    fake.term.element!.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+    document.dispatchEvent(new MouseEvent("mouseup"));
+
+    expect(writeText).not.toHaveBeenCalled();
+  });
+});

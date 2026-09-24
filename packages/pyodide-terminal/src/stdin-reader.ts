@@ -16,8 +16,11 @@ export interface InputReader {
   /**
    * 직전 출력의 꼬리를 프롬프트로 그 자리에 다시 그리고 Enter까지 한 줄을 돌려준다. 꼬리가 없으면 프롬프트 없이 읽는다.
    * `cancelable`이면 읽기 중 Ctrl+C가 `^C` 없이 줄만 바꾸고 `null`로 끝난다(취소 → worker에서 `KeyboardInterrupt`).
+   * `signal`이 주어지고 꼬리 정리(flush 대기)가 끝난 시점에 이미 abort됐으면 읽기를 시작하지 않고 `null`을 돌려준다
+   * (실행창의 `InputProvider`가 그 사이에 abort되면 죽은 읽기가 남지 않게 한다). 읽는 도중의 abort는 호출자가
+   * `Readline.cancelRead()`로 끝낸다.
    */
-  read(cancelable: boolean): Promise<string | null>;
+  read(cancelable: boolean, signal?: AbortSignal): Promise<string | null>;
 }
 
 /**
@@ -31,8 +34,10 @@ export function createInputReader(
   sinks: Pick<TerminalSinks, "tail" | "resetTail">,
 ): InputReader {
   return {
-    async read(cancelable) {
+    async read(cancelable, signal) {
       await rewindTail(term, sinks.tail());
+      // flush를 기다리는 사이에 abort됐으면 읽기를 열지 않는다(열면 아무도 끝내지 않는 읽기가 남는다).
+      if (signal?.aborted) return null;
       // flush를 기다리는 사이에 온 출력을 반영하려고 꼬리를 다시 읽는다.
       const tail = sinks.tail();
       sinks.resetTail();

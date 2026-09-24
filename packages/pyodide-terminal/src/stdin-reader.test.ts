@@ -227,6 +227,40 @@ describe.each([
     expect(lastPrompt()).toBe("x: ");
   });
 
+  test("꼬리 정리를 기다리는 사이 signal이 abort되면 읽기를 열지 않고 null을 돌려준다", async () => {
+    const { fake, sinks, reader, lastPrompt } = setup();
+    sinks.write("x: ");
+    const controller = new AbortController();
+
+    const line = reader.read(true, controller.signal);
+    controller.abort();
+    fake.flush();
+    await tick();
+    fake.flush();
+
+    await expect(line).resolves.toBeNull();
+    // 읽기를 열었다면 프롬프트가 벤더 `read`로 넘어갔을 것이다.
+    expect(lastPrompt()).toBeUndefined();
+    // 죽은 읽기가 열려 있지 않으므로 이어 친 줄이 어디에도 들어가지 않는다.
+    fake.type("abc\r");
+    expect(fake.written.join("")).not.toContain("abc");
+  });
+
+  test("abort되지 않은 signal은 읽기에 영향이 없다", async () => {
+    const { fake, sinks, reader, lastPrompt } = setup();
+    sinks.write("x: ");
+    const controller = new AbortController();
+    const line = reader.read(true, controller.signal);
+    fake.flush();
+    await tick();
+    fake.flush();
+
+    fake.type("abc\r");
+
+    expect(lastPrompt()).toBe("x: ");
+    await expect(line).resolves.toBe("abc");
+  });
+
   test("새 sink 세트는 빈 프롬프트로 시작한다(세션 리셋의 단위 성질)", async () => {
     const { fake, readline, sinks, lastPrompt } = setup();
     sinks.write("x: ");
