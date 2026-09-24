@@ -89,6 +89,10 @@ const SETS = [
   { file: "checks/runner-check.mjs", args: ["not-isolated"], server: "static" },
   // RD-022b: 열린 읽기 위 배경 출력 조율(REPL 화면). dev 전용(preview 재실행 없음).
   { file: "checks/bg-output-check.mjs", server: "dev" },
+  // RD-024: `@cp949/runo-pyodide-react` 컴포넌트 확인. StrictMode worker 수(dev 서버의 `<StrictMode>` 필요)·`?fit=1` 리사이즈. dev 전용.
+  // 각 스크립트가 화면 두 개(REPL·`?view=runner`)를 새 브라우저로 열어 결과 파일을 `-repl-dev`·`-runner-dev`로 나눠 쓴다.
+  { file: "checks/react-strictmode-check.mjs", server: "dev" },
+  { file: "checks/react-fit-check.mjs", server: "dev" },
   // RD-018 DELTA-05: 부팅 중 Ctrl+C 판정(N=30 기본값, boot-press.mjs는 measure/ 소속 파일이지만 baseline 세트다)
   { file: "measure/boot-press.mjs", server: "dev" },
 ];

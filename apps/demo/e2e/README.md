@@ -28,7 +28,7 @@
   환경에서는 `e2e/run.mjs`가 "이미 죽었다"로 조용히 오판할 수 있다(`pending-traps/01.md` 계열,
   아래 함정 절 참고).
 
-## 명령 표(29항목, `apps/demo/package.json`)
+## 명령 표(31항목, `apps/demo/package.json`)
 
 | 이름 | 실행 |
 | --- | --- |
@@ -55,6 +55,8 @@
 | `e2e:type-ahead` | `node e2e/checks/type-ahead-check.mjs` |
 | `e2e:run-source` | `node e2e/checks/run-source-check.mjs`(REPL 화면의 `source`·`run-source`·`source-result` 요소로 `runSource(code)`를 조작, RD-022a) |
 | `e2e:bg-output` | `node e2e/checks/bg-output-check.mjs`(열린 읽기 위 배경 출력 조율, RD-022b. 배경 출력은 Python BroadcastChannel 수신기, `input()` 중 출력은 `lib.mjs` `injectRpcNotice`로 합성) |
+| `e2e:react-strictmode` | `node e2e/checks/react-strictmode-check.mjs`(RD-024, REPL·`?view=runner` 두 화면의 StrictMode worker·xterm 수, dev 서버 전용. `ONLY=REPL`·`ONLY=RUNNER`로 화면 하나만) |
+| `e2e:react-fit` | `node e2e/checks/react-fit-check.mjs`(RD-024, `?fit=1` 두 화면의 창 크기 → `cols` 변화·이후 입력. `ONLY=REPL`·`ONLY=RUNNER`) |
 | `e2e:boot-press` | `node e2e/measure/boot-press.mjs` |
 | `e2e:press-loss` | `node e2e/measure/press-loss.mjs` |
 | `e2e:burst-matrix` | `node e2e/measure/burst-matrix.mjs` |

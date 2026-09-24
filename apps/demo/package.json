@@ -33,6 +33,8 @@
     "e2e:type-ahead": "node e2e/checks/type-ahead-check.mjs",
     "e2e:run-source": "node e2e/checks/run-source-check.mjs",
     "e2e:bg-output": "node e2e/checks/bg-output-check.mjs",
+    "e2e:react-strictmode": "node e2e/checks/react-strictmode-check.mjs",
+    "e2e:react-fit": "node e2e/checks/react-fit-check.mjs",
     "e2e:boot-press": "node e2e/measure/boot-press.mjs",
     "e2e:press-loss": "node e2e/measure/press-loss.mjs",
     "e2e:burst-matrix": "node e2e/measure/burst-matrix.mjs",
