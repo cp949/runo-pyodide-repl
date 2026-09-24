@@ -8,6 +8,7 @@
 import { Readline } from "@cp949/runo-xterm-readline";
 import { describe, expect, test, vi } from "vitest";
 import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
+import { VtScreen, attachVtScreen } from "@repo/pyodide-testkit/vt-screen";
 import { createAutoIndent } from "./auto-indent";
 import { createReadGuard } from "./read-guard";
 import { createReplReader } from "./repl-reader";
@@ -77,9 +78,11 @@ function createGuarded() {
       return read.promise;
     },
   );
+  const inputDeferred = vi.fn<() => void>();
   const guard = createReadGuard({
     readLine: rawReadLine,
     readInput: rawReadInput,
+    inputDeferred,
   });
   // noUncheckedIndexedAccess가 켜져 있어 인덱스 접근은 undefined일 수 있다. 없으면 바로 실패시킨다.
   const at = (reads: Deferred[], kind: string) => (index: number) => {
@@ -91,6 +94,7 @@ function createGuarded() {
     guard,
     rawReadLine,
     rawReadInput,
+    inputDeferred,
     replReadAt: at(replReads, "REPL"),
     inputReadAt: at(inputReads, "stdin"),
   };
@@ -238,6 +242,52 @@ describe("createReadGuard: stdin 읽기는 활성 REPL 읽기가 끝난 뒤에 �
   });
 });
 
+describe("createReadGuard: 미뤄지는 stdin 읽기 알림(`inputDeferred`, RD-022b)", () => {
+  test("활성 REPL 읽기가 있으면 readInput 도착 즉시(동기로) inputDeferred를 한 번 부른다", () => {
+    const { guard, inputDeferred } = createGuarded();
+    void guard.readLine(">>> ", undefined, true);
+
+    void guard.readInput(true);
+
+    // 동기로 확인한다. REPL 읽기가 끝난 뒤에는 벤더 접두가 이미 사라져 넘겨받을 수 없다.
+    expect(inputDeferred).toHaveBeenCalledTimes(1);
+  });
+
+  test("활성 REPL 읽기가 없으면 inputDeferred를 부르지 않는다", async () => {
+    const { guard, inputDeferred, rawReadInput } = createGuarded();
+
+    void guard.readInput(true);
+    await tick();
+
+    expect(inputDeferred).not.toHaveBeenCalled();
+    expect(rawReadInput).toHaveBeenCalledTimes(1);
+  });
+
+  test("끝난 REPL 읽기 뒤에 온 readInput은 inputDeferred를 부르지 않는다", async () => {
+    const { guard, inputDeferred, replReadAt } = createGuarded();
+    void guard.readLine(">>> ", undefined, true);
+    replReadAt(0).resolve("x = 41");
+    await tick();
+
+    void guard.readInput(true);
+
+    expect(inputDeferred).not.toHaveBeenCalled();
+  });
+
+  test("옛 REPL 읽기가 끝나는 처리보다 새 REPL 읽기가 먼저 열렸으면 새 읽기를 활성으로 본다", async () => {
+    const { guard, inputDeferred, replReadAt } = createGuarded();
+    void guard.readLine(">>> ", undefined, true);
+    // 옛 읽기의 끝 처리(마이크로태스크)가 돌기 전에 새 읽기가 열린다.
+    replReadAt(0).resolve("a = 1");
+    void guard.readLine(">>> ", undefined, true);
+    await tick();
+
+    void guard.readInput(true);
+
+    expect(inputDeferred).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe.each([
   { mode: "동기", asyncWrite: false },
   { mode: "비동기", asyncWrite: true },
@@ -265,6 +315,8 @@ describe.each([
           cancelable: boolean,
         ) => replReader.read(prompt, pending, cancelable),
         readInput: (cancelable: boolean) => inputReader.read(cancelable),
+        // `createRepl`(repl-main-driver)과 같은 연결: 미뤄지는 stdin 읽기가 REPL 줄의 접두를 프롬프트로 넘겨받는다(RD-022b).
+        inputDeferred: () => sinks.moveAbovePrefixToTail(),
       });
       /** write 콜백을 배출하고 대기 중인 마이크로태스크·타이머를 지나가게 한다. 비동기 모드는 flush 전에 읽기가 시작되지 않는다. */
       async function settle() {
@@ -275,7 +327,7 @@ describe.each([
       }
       /** 지금까지 `readline.read`가 받은 프롬프트. */
       const prompts = () => read.mock.calls.map(([prompt]) => prompt);
-      return { fake, sinks, guard, prompts, settle };
+      return { fake, readline, sinks, guard, prompts, settle };
     }
 
     test("REPL 읽기 중 배경 input()이 들어와도 REPL 줄은 REPL 읽기가, 그다음 줄은 stdin 읽기가 받는다", async () => {
@@ -301,6 +353,35 @@ describe.each([
       await settle();
       expect(input()).toEqual({ state: "resolved", value: "hello" });
       expect(fake.written).toContain("bg> hello");
+    });
+
+    test("배경 input()의 프롬프트는 REPL 줄에서 떼어져 미뤄진 stdin 읽기의 프롬프트가 되고 그 뒤 꼬리는 비어 있다(RD-022b)", async () => {
+      const { fake, readline, sinks, guard, settle } = setup();
+      const vt = new VtScreen(80, 24);
+      attachVtScreen(fake, vt);
+      const repl = observe(guard.readLine(">>> ", undefined, true));
+      await settle();
+      fake.type("x = 41");
+
+      sinks.write("bg> ");
+      await settle();
+      expect(vt.screen()).toBe("bg> >>> x = 41");
+      const input = observe(guard.readInput(true));
+      await settle();
+      // 접두를 REPL 줄에서 떼어 꼬리로 옮겼다.
+      expect(vt.screen()).toBe(">>> x = 41");
+      expect(readline.abovePrefix()).toBe("");
+      expect(sinks.tail()).toBe("bg> ");
+
+      fake.type("\r");
+      await settle();
+      expect(repl()).toEqual({ state: "resolved", value: "x = 41" });
+      // stdin 읽기가 꼬리를 프롬프트로 가져갔다. 다음 읽기가 물려받을 꼬리는 없다.
+      expect(sinks.tail()).toBe("");
+      fake.type("hello\r");
+      await settle();
+      expect(input()).toEqual({ state: "resolved", value: "hello" });
+      expect(vt.lines()).toEqual([">>> x = 41", "bg> hello"]);
     });
   },
 );

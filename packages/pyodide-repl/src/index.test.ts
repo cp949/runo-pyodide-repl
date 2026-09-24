@@ -1021,6 +1021,8 @@ describe.each([
     expect(outcome().state).toBe("pending");
 
     // 사용자가 REPL 줄을 친다. 이 줄은 REPL 응답이 되고 stdin 읽기는 그 뒤에 배경 프롬프트(`bg> `)로 시작한다.
+    // 배경 출력의 재그리기(write 콜백)를 먼저 끝낸다. 비동기 모드에서 남겨 두면 친 키가 벤더 큐에 쌓인다(실 xterm은 콜백이 스스로 온다).
+    fake.flush();
     const before = flushRequestCount(fake);
     fake.type("x = 41\r");
     await drainReadStart(fake, before);

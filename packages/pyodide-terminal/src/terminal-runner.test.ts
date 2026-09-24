@@ -21,6 +21,7 @@ import {
   type FakeTerminal,
   type FakeTerminalOptions,
 } from "@repo/pyodide-testkit/fake-terminal";
+import { VtScreen, attachVtScreen } from "@repo/pyodide-testkit/vt-screen";
 import {
   createTerminalRunner,
   createTerminalRunnerWith,
@@ -659,6 +660,71 @@ describe("출력 연결", () => {
     core.options.onLoadFailed?.("네트워크 오류");
 
     expect(screen()).toBe(`${RED}pyodide 로드 실패: 네트워크 오류${RESET}\r\n`);
+  });
+});
+
+describe("input() 대기 중 배경 출력(RD-022b)", () => {
+  /** 화면을 `VtScreen`으로 해석하는 가짜 터미널로 실행창을 만들고 실행 중 `input("x: ")` 읽기에 `ab`를 친 상태로 둔다. */
+  async function setupWaitingInput() {
+    const fake = createFakeTerminal();
+    const vt = new VtScreen(80, 24);
+    attachVtScreen(fake, vt);
+    const context = setup({ fake });
+    void context.handle.run("code");
+    context.core.output({ stream: "stdout", text: "x: " });
+    const request = await context.startInput("x: ");
+    fake.type("ab");
+    return { ...context, vt, request };
+  }
+
+  test("stdout 행은 입력줄 위에 쓰이고 프롬프트·입력은 그 아래에 다시 그려지며 Enter 값은 그대로다", async () => {
+    const { fake, core, vt, request } = await setupWaitingInput();
+    expect(vt.screen()).toBe("x: ab");
+
+    core.output({ stream: "stdout", text: "tick\n" });
+    expect(vt.screen()).toBe("tick\nx: ab");
+
+    fake.type("c\r");
+    await expect(request.result).resolves.toBe("abc");
+    expect(vt.lines()).toEqual(["tick", "x: abc"]);
+    core.finishRun();
+  });
+
+  test("stderr 행도 같은 경로로 입력줄 위에 쓰이고 onOutput에는 조각 그대로 알린다", async () => {
+    const onOutput = vi.fn();
+    const fake = createFakeTerminal();
+    const vt = new VtScreen(80, 24);
+    attachVtScreen(fake, vt);
+    const { core, handle, startInput } = setup({ fake, runner: { onOutput } });
+    void handle.run("code");
+    core.output({ stream: "stdout", text: "x: " });
+    const { result } = await startInput("x: ");
+    fake.type("ab");
+
+    core.output({ stream: "stderr", text: "warn\n" });
+
+    expect(vt.screen()).toBe("warn\nx: ab");
+    expect(onOutput).toHaveBeenLastCalledWith({ stream: "stderr", text: "warn\n" });
+    fake.type("\r");
+    await expect(result).resolves.toBe("ab");
+    core.finishRun();
+  });
+
+  test("개행 없는 조각은 프롬프트 앞 접두가 되고 Enter 뒤 다음 input() 프롬프트에 섞이지 않는다", async () => {
+    const { fake, core, vt, request, startInput } = await setupWaitingInput();
+
+    core.output({ stream: "stdout", text: "tick" });
+    expect(vt.screen()).toBe("tickx: ab");
+
+    fake.type("\r");
+    await expect(request.result).resolves.toBe("ab");
+    core.output({ stream: "stdout", text: "y: " });
+    const second = await startInput("y: ");
+    // `lines()`는 행 끝 공백을 자른다. 다음 프롬프트는 `y: `뿐이다(`tick`은 꼬리에 들어가지 않았다).
+    expect(vt.lines()).toEqual(["tickx: ab", "y:"]);
+    fake.type("\r");
+    await expect(second.result).resolves.toBe("");
+    core.finishRun();
   });
 });
 

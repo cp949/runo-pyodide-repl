@@ -128,6 +128,8 @@ export function createReplMainDriver(
     readLine: (prompt: string, pending: string | undefined, cancelable: boolean) =>
       replReader.read(prompt, pending, cancelable),
     readInput: (cancelable: boolean) => inputReader.read(cancelable),
+    // 미뤄지는 stdin 읽기는 배경 `input()`이 REPL 줄 앞 접두로 남긴 프롬프트를 넘겨받는다(RD-022b).
+    inputDeferred: () => sinks.moveAbovePrefixToTail(),
   });
   // 벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다. worker 루프는 응답을 받은 뒤에만 다시
   // 요청하므로 겹치는 요청은 오류로 거절한다.

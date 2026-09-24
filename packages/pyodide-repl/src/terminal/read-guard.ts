@@ -11,6 +11,8 @@
  * - REPL 읽기가 줄·취소·실패 어느 쪽으로 끝나도 stdin 읽기는 진행한다. 실패는 원본 promise 그대로 REPL 호출자에게 간다.
  * - 겹침 거절(`createRepl`의 `reading`)은 가드 바깥에서 검사한다. 거절된 요청을 가드가 추적하면 실제 활성 REPL 읽기를 잃어
  *   stdin 읽기가 앞당겨진다.
+ * - stdin 읽기를 미루는 순간(`readInput` 도착, 동기) `inputDeferred`를 부른다(RD-022b). 배경 `input()`이 먼저 쓴 프롬프트는 열린
+ *   REPL 읽기의 접두가 되어 있으므로, REPL 줄이 끝나 벤더가 접두를 잊기 전에 그것을 꼬리로 옮겨 stdin 읽기의 프롬프트로 쓴다.
  */
 const ignore = () => {};
 
@@ -26,6 +28,11 @@ export interface ReadGuardDeps<L, I> {
   ): Promise<L>;
   /** stdin 읽기(`stdin-reader`). 활성 REPL 읽기가 끝난 뒤 부른다. */
   readInput(cancelable: boolean): Promise<I>;
+  /**
+   * 활성 REPL 읽기가 있어 stdin 읽기를 미룰 때 `readInput` 도착 즉시(동기로) 한 번 부른다. REPL은 여기서 REPL 줄의 접두를
+   * 꼬리로 옮긴다(`TerminalSinks.moveAbovePrefixToTail`).
+   */
+  inputDeferred?(): void;
 }
 
 export interface ReadGuard<L, I> {
@@ -47,14 +54,22 @@ export function createReadGuard<L, I>(
 ): ReadGuard<L, I> {
   // 활성 REPL 읽기가 끝나면(줄·취소·실패 어느 쪽이든) 이행된다. 읽기가 없거나 끝났으면 이미 이행된 promise다.
   let replRead: Promise<void> = Promise.resolve();
+  // 활성 REPL 읽기가 끝나지 않았다. 끝난 옛 읽기의 처리가 뒤에 열린 새 읽기의 표시를 내리지 않게 `replRead`와 대조한다.
+  let replOpen = false;
   return {
     readLine(prompt, pending, cancelable) {
       const read = deps.readLine(prompt, pending, cancelable);
       // 가드 내부 체인만 실패를 삼킨다. 호출자가 받는 `read`는 그대로다.
-      replRead = read.then(ignore, ignore);
+      const settled = read.then(ignore, ignore);
+      replRead = settled;
+      replOpen = true;
+      void settled.then(() => {
+        if (replRead === settled) replOpen = false;
+      });
       return read;
     },
     async readInput(cancelable) {
+      if (replOpen) deps.inputDeferred?.();
       await replRead;
       return deps.readInput(cancelable);
     },
