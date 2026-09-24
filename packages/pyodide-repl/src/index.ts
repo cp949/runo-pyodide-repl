@@ -7,8 +7,11 @@ import {
   DEFAULT_PYODIDE_INDEX_URL,
 } from "@cp949/runo-pyodide-core";
 import { startSession, type ReplSession } from "./session";
-import { createSelectionCopy, type CopyResult } from "./terminal/selection-copy";
-import { writeNotice } from "./terminal/notice";
+import {
+  createSelectionCopy,
+  writeNotice,
+  type CopyResult,
+} from "@cp949/runo-pyodide-terminal/internal";
 
 export type { CopyResult };
 

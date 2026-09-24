@@ -14,9 +14,11 @@ import { createBlockHistory } from "./terminal/block-history";
 import { mergeReadOptions } from "./terminal/read-options";
 import { createReadGuard } from "./terminal/read-guard";
 import { createReplReader } from "./terminal/repl-reader";
-import type { RewindTerminal } from "./terminal/rewind-tail";
-import { createTerminalSinks } from "./terminal/sinks";
-import { createInputReader } from "./terminal/stdin-reader";
+import {
+  createInputReader,
+  createTerminalSinks,
+  type RewindTerminal,
+} from "@cp949/runo-pyodide-terminal/internal";
 import { createTabReader } from "./terminal/tab-reader";
 import type { SourceCompletion } from "./worker/complete-source";
 

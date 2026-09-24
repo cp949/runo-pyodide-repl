@@ -5,7 +5,7 @@
 새 구현에서 sink 4종은 worker→main **단방향 RPC 알림**(`notify`)으로 전달된다. 이전 구현은 조각마다 worker를 멈추는 동기 호출이었고, 그 동기성은 요구사항이 아니었다. 순서 보장은 같은 MessagePort의 FIFO에 의존한다(`01-protocols.md` 1절).
 
 ## 4.1 sink 4종(`createTerminalSinks(readline)`)
-sink 4종은 repl `terminal/sinks.ts`(REPL main driver가 세션마다 만든다)가 소유한다. `write`·`writeErrorRaw`는 core 세션이 `write`·`writeErrorRaw` 알림을 `{ stream: "stdout" | "stderr", text }`로 넘기는 `output` 콜백을 REPL main driver가 연결한 것이고(`stdout` → `write`, `stderr` → `writeErrorRaw`), `writeOutput`·`writeError`는 core가 아니라 REPL main driver의 RPC 핸들러가 부른다(`01-protocols.md` 1.2, `00-architecture.md` 4.1 core export). 꼬리 추적기 `createOutputTail`(`output-tail`)은 터미널에 의존하지 않는 순수 모듈이라 core `terminal/output-tail.ts`에 있고 `sinks.ts`가 import한다.
+sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL main driver가 세션마다 만든다)가 소유한다. `write`·`writeErrorRaw`는 core 세션이 `write`·`writeErrorRaw` 알림을 `{ stream: "stdout" | "stderr", text }`로 넘기는 `output` 콜백을 REPL main driver가 연결한 것이고(`stdout` → `write`, `stderr` → `writeErrorRaw`), `writeOutput`·`writeError`는 core가 아니라 REPL main driver의 RPC 핸들러가 부른다(`01-protocols.md` 1.2, `00-architecture.md` 4.1 core export). 꼬리 추적기 `createOutputTail`(`output-tail`)은 터미널에 의존하지 않는 순수 모듈이라 core `terminal/output-tail.ts`에 있고 `sinks.ts`가 import한다.
 
 | sink | 구현 | 개행 | 색 | 용도 |
 | --- | --- | --- | --- | --- |
@@ -25,7 +25,7 @@ sink 4종은 repl `terminal/sinks.ts`(REPL main driver가 세션마다 만든다
 - 모든 sink는 화면에 낸 바이트를 `output-tail`(core `terminal/output-tail.ts`)에 먹인다(`println`은 `text + '\n'`을 먹인다).
   `tail()`/`resetTail()`을 함께 노출한다. **sink 세트는 worker(세션)마다 새로 만든다** — 새 세션이 이전
   꼬리를 물려받지 않게.
-- **안내 줄**(`terminal/notice.ts`의 `writeNotice(readline, text, kind)`): 세션 밖에서 main이 찍는 개행으로 끝나는
+- **안내 줄**(`packages/pyodide-terminal/src/notice.ts`의 `writeNotice(readline, text, kind)`): 세션 밖에서 main이 찍는 개행으로 끝나는
   한 줄이다. 비격리 경고는 노랑(`warning`, `\x1b[33m…\x1b[0m`), RD-010의 리셋 안내는 청록(`info`, `\x1b[36m`)이다.
   sink 세트가 아니므로 꼬리에 먹이지 않는다. 끝 개행 없는 텍스트를 받아 `println`으로 개행을 붙이고 부분 줄은 내지
   않는다. `11-known-traps.md`의 TRAP-12 규칙(sink를 거치지 않는 출력 경로 금지)의 유일한 예외 함수이며, 세션이 없거나(비격리) 리셋으로

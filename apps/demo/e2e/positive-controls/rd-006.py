@@ -4,7 +4,7 @@
 변조 도구가 vitest 실행기(`tools/mutate.mjs`)가 아니라 브라우저 스크립트를 돌려야 해서 이 드라이버의 CONTROLS 표를 쓴다.
 
 사용: python3 rd-006.py <1|2|3>
-  1: terminal/stdin-reader.ts의 sinks.resetTail() 삭제      → stdin-input-check (M1·U1: 다음 REPL 프롬프트가 꼬리를 물려받음, L1은 통과해야 함)
+  1: pyodide-terminal/src/stdin-reader.ts의 sinks.resetTail() 삭제      → stdin-input-check (M1·U1: 다음 REPL 프롬프트가 꼬리를 물려받음, L1은 통과해야 함)
   2: worker/stdin-callback.ts의 requestInput을 wait() 뒤로 이동 → stdin-input-check (RM1: 읽기가 시작되지 않아 입력이 버려짐)
   3: terminal/read-guard.ts의 await replRead 삭제           → bg-input-guard-probe (REPL 읽기가 고아가 되어 프롬프트가 돌아오지 않음)
 dev 서버(5173)는 이 드라이버가 변조·원복 때마다 다시 띄운다(끝나면 dev 서버가 하나 남는다, TRP-007). 원복은 `git checkout -- <파일>`이고 대상 파일은
@@ -26,7 +26,7 @@ DEV_LOG = os.environ.get("DEV_LOG", os.path.join(tempfile.gettempdir(), "rd-006-
 
 CONTROLS = {
     "1": {
-        "file": "packages/pyodide-repl/src/terminal/stdin-reader.ts",
+        "file": "packages/pyodide-terminal/src/stdin-reader.ts",
         "find": "      sinks.resetTail();\n",
         "replace": "",
         # 꼬리가 세션 내내 남는 결함이라 전체를 돌리면 연쇄로 실패한다. 확인을 분리한다. L1은 꼬리가 없어 통과해야 한다(해당 확인만 실패한다는 대조).

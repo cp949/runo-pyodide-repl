@@ -56,14 +56,14 @@
   SGR 외 제어(`\b`, CSI 이동/지우기, OSC)는 걸러내지 않고 통과시킨다.
 - 꼬리 초기화 시점: println 계열 sink(`writeOutput`/`writeError`), 텍스트 안 `\n`, 읽기 시작(REPL·stdin),
   새 worker. 읽기는 Enter뿐 아니라 **취소(Ctrl+C)로도 `\r\n`을 내고 끝나므로** 취소 뒤에도 꼬리가 남지 않는다.
-- 폭 초과 처리(`rewindTail`, `terminal/rewind-tail.ts`): 꼬리가 터미널 폭을 넘으면 `read()` 앞에 `\x1b[nA`로 첫 행까지 커서를
+- 폭 초과 처리(`rewindTail`, `packages/pyodide-terminal/src/rewind-tail.ts`): 꼬리가 터미널 폭을 넘으면 `read()` 앞에 `\x1b[nA`로 첫 행까지 커서를
   올린다(TRP-016). 행 수는 `term.write('', cb)`로 flush를 기다린 뒤 화면 버퍼에서 커서 행(`baseY + cursorY`)부터 `isWrapped`를
   위로 세어 구하고, `cursorY`를 넘어 스크롤백으로는 올리지 않는다. **짧은 꼬리(`길이 × 2 < cols`)는 flush 없이 건너뛴다.**
   커서만 옮기므로 sink를 거치지 않는다. REPL 경로와 stdin 경로가 같은 `rewindTail`을 쓴다.
 - REPL 경로(`terminal/repl-reader.ts`의 `createReplReader(readline, term, sinks)` → `read(prompt, cancelable): Promise<string | null>`, 세션마다 하나)의 순서: `rewindTail` → 꼬리
   재조회(flush를 기다리는 사이 온 출력을 반영) → `resetTail` → `readline.read(꼬리 + "\x1b[0m" + 프롬프트, { cancelable })`. 꼬리가 없으면
   프롬프트 그대로 읽는다. 꼬리의 열린 색이 프롬프트로 새지 않도록 둘 사이에 SGR 리셋을 넣는다.
-- stdin 경로(`terminal/stdin-reader.ts`의 `createInputReader(readline, term, sinks)` → `read(cancelable): Promise<string | null>`, 세션마다 하나)는 꼬리 그대로가
+- stdin 경로(`packages/pyodide-terminal/src/stdin-reader.ts`의 `createInputReader(readline, term, sinks)` → `read(cancelable): Promise<string | null>`, 세션마다 하나)는 꼬리 그대로가
   프롬프트의 전부다(sink·꼬리 규칙은 `05-output.md`, 프롬프트 문자열은 `02-console-core.md` 5.2 참고). 순서는 `rewindTail` → 꼬리
   재조회 → `resetTail` → `readline.read(꼬리, { cancelable })`이고 **SGR 리셋을 붙이지 않는다**: 프롬프트의 열린 색은 tty처럼 입력에 이어진다(색이 닫힌
   프롬프트의 입력은 기본색). 꼬리가 없으면 프롬프트 없이 읽는다. 둘을 한 함수로 일반화하지 않았다(합성과 SGR 리셋이 다르다).

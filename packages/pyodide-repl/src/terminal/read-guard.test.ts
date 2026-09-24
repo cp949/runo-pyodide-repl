@@ -11,8 +11,7 @@ import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
 import { createAutoIndent } from "./auto-indent";
 import { createReadGuard } from "./read-guard";
 import { createReplReader } from "./repl-reader";
-import { createTerminalSinks } from "./sinks";
-import { createInputReader } from "./stdin-reader";
+import { createInputReader, createTerminalSinks } from "@cp949/runo-pyodide-terminal/internal";
 
 /** 매크로태스크 한 번. 가드가 걸어 둔 then 체인(마이크로태스크 여러 번)이 끝나기를 기다린다. */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));

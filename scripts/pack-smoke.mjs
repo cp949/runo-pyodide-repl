@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// tarball 스모크: xterm-readline·core·repl을 `pnpm pack`으로 묶어 저장소 밖 임시 소비자 프로젝트에 설치하고 실제로 쓸 수 있는지 본다.
-//   1. 세 패키지 `pnpm pack`, tarball 안 package.json에 `workspace:`·`catalog:`가 남지 않았는지, core에 optional peer `pyodide`가
+// tarball 스모크: xterm-readline·core·terminal·repl을 `pnpm pack`으로 묶어 저장소 밖 임시 소비자 프로젝트에 설치하고 실제로 쓸 수 있는지 본다.
+//   1. 네 패키지 `pnpm pack`, tarball 안 package.json에 `workspace:`·`catalog:`가 남지 않았는지, core에 optional peer `pyodide`가
 //      있는지 확인
-//   2. 임시 소비자(`file:` 3개 + 작업공간 파일 `overrides`로 내부 패키지 고정 + `@xterm/xterm`·`pyodide`) `pnpm install`
-//   3. node ESM `import`(세 패키지의 공개 진입점 `.`·`./worker`)
+//   2. 임시 소비자(`file:` 4개 + 작업공간 파일 `overrides`로 내부 패키지 고정 + `@xterm/xterm`·`pyodide`) `pnpm install`
+//   3. node ESM `import`(네 패키지의 공개 진입점 `.`·`./worker`·`./internal`)
 //   4. `tsc --noEmit`(`skipLibCheck: false`로 배포된 `.d.mts`의 타입 해석까지 검사)
 //   5. 설치된 트리에 `coincident`·`reflected-ffi` 없음(lockfile·`.pnpm` 디렉터리·설치된 dist 문자열)
 // 사용: pnpm smoke:pack (= pnpm build && node scripts/pack-smoke.mjs). 약 1분, L0 수동 실행이며 `pnpm test`·turbo 기본
@@ -25,6 +25,7 @@ const FORBIDDEN = ["coincident", "reflected-ffi"];
 const PACKAGES = [
   { name: "@cp949/runo-xterm-readline", dir: "packages/xterm-readline" },
   { name: "@cp949/runo-pyodide-core", dir: "packages/pyodide-core" },
+  { name: "@cp949/runo-pyodide-terminal", dir: "packages/pyodide-terminal" },
   { name: "@cp949/runo-pyodide-repl", dir: "packages/pyodide-repl" },
 ];
 
@@ -56,6 +57,19 @@ const ENTRY_POINTS = [
       bootWorker: "function",
       createCoreConsole: "function",
       composeRpcHandlers: "function",
+    },
+  ],
+  // `.`는 RD-022 DELTA-06 전까지 빈 모듈이다. 그래도 import가 성립하는지(exports·dist 배치)는 본다.
+  ["@cp949/runo-pyodide-terminal", {}],
+  [
+    "@cp949/runo-pyodide-terminal/internal",
+    {
+      createTerminalSinks: "function",
+      createInputReader: "function",
+      rewindTail: "function",
+      writeNotice: "function",
+      createSelectionCopy: "function",
+      decideKey: "function",
     },
   ],
   [
@@ -121,7 +135,7 @@ async function main(tmp) {
       throw new Error(`${dir}/dist가 없다. 먼저 pnpm build를 실행한다`);
   }
 
-  step("pnpm pack 3개");
+  step("pnpm pack 4개");
   const tarballDir = join(tmp, "tarballs");
   await mkdir(tarballDir);
   const tarballs = {};
@@ -254,6 +268,8 @@ async function main(tmp) {
       `import { Readline, type ReadOptions } from "@cp949/runo-xterm-readline";`,
       `import { startCoreSession, composeRpcHandlers as composeMain, type MainDriver } from "@cp949/runo-pyodide-core";`,
       `import { runWorker, createCoreConsole, type WorkerDriver, type PyodideConsoleProxy } from "@cp949/runo-pyodide-core/worker";`,
+      `import { createTerminalSinks, type TerminalSinks } from "@cp949/runo-pyodide-terminal/internal";`,
+      `import type * as TerminalMain from "@cp949/runo-pyodide-terminal";`,
       `import { createRepl, type ReplHandle, type ReplOptions } from "@cp949/runo-pyodide-repl";`,
       `import { runReplWorker } from "@cp949/runo-pyodide-repl/worker";`,
       `import type { PyodideInterface } from "pyodide";`,
@@ -261,8 +277,8 @@ async function main(tmp) {
       `// core worker 타입이 소비자의 pyodide 타입으로 해석되는지(any로 무너지지 않는지) 본다.`,
       `const makeConsole: (pyodide: PyodideInterface) => PyodideConsoleProxy = (pyodide) =>`,
       `  createCoreConsole(pyodide, { write() {}, writeError() {} } as never);`,
-      `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createRepl, runReplWorker];`,
-      `export type Used = [ReadOptions, MainDriver, WorkerDriver, ReplHandle, ReplOptions];`,
+      `export const used: unknown[] = [Readline, startCoreSession, composeMain, runWorker, makeConsole, createTerminalSinks, createRepl, runReplWorker];`,
+      `export type Used = [ReadOptions, MainDriver, WorkerDriver, TerminalSinks, typeof TerminalMain, ReplHandle, ReplOptions];`,
       ``,
     ].join("\n"),
   );
@@ -290,7 +306,7 @@ async function main(tmp) {
   step("pnpm install (소비자)");
   run("pnpm", ["install", "--prefer-offline"], consumer);
 
-  step("node ESM import (공개 진입점 5개)");
+  step("node ESM import (공개 진입점 7개)");
   run("node", ["check.mjs"], consumer);
 
   step("tsc --noEmit (skipLibCheck: false)");

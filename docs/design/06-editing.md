@@ -161,7 +161,7 @@
   `copy failed`를 1초 표시한다(`00-architecture.md` 4.1). 실패는 조용히 무시하지 않는다 — 사용자가 복사됐다고
   오해하는 것을 막는다.
 
-기전(코어 `terminal/selection-copy.ts`, `createRepl`이 핸들 수명으로 만든다 — 세션이 아니다):
+기전(terminal 패키지 `packages/pyodide-terminal/src/selection-copy.ts`, `createRepl`이 핸들 수명으로 만든다 — 세션이 아니다):
 
 - 키 가로채기는 **벤더 공개 훅** `ReadlineOptions.onKeyEvent?: (event: KeyboardEvent) => boolean`이다.
   `Readline.handleKeyEvent`(xterm `attachCustomKeyEventHandler`에 등록된 벤더 핸들러)가 자기 처리(Shift+Enter)

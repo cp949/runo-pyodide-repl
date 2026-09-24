@@ -135,8 +135,8 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 `cancelRead()` 경합 무해, RD-015 DELTA-01·01a·04a 11건)를 본다), `tab-completion.test.ts`(`planTab`·`resolveCompletion`·`formatCompletionList`,
  RD-016이 `planTab` 게이트 분기 10건 추가: 빈 스템 `import `·`from os import ` → complete, `x = ` → indent, `important = ` → complete, `pending`에만 `import`가 있는 경우),
 `import-gate.test.ts`(`mentionsImportKeyword` 코퍼스 55줄 61건: 게이트 거짓 16·오탐 28·비`None` 11·대소문자 2, 코퍼스 정의는 `terminal/import-gate-corpus.ts`, `complete-source.test.ts`가 같은 코퍼스로 안전성을 본다),
-`tab-reader.test.ts`(RD-016이 게이트 참 빈 스템 배선 6건 추가: `pending` 전달, `x = ` 무왕복 공백, 8연타 큐 → 32칸, Tab 직후 입력·커서 이동 → 응답 버림), `stdin-reader.test.ts`,
-`repl-reader.test.ts`, `rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
+`tab-reader.test.ts`(RD-016이 게이트 참 빈 스템 배선 6건 추가: `pending` 전달, `x = ` 무왕복 공백, 8연타 큐 → 32칸, Tab 직후 입력·커서 이동 → 응답 버림), `packages/pyodide-terminal/src/stdin-reader.test.ts`,
+`repl-reader.test.ts`, `packages/pyodide-terminal/src/rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
 `worker/repl-loop.test.ts`(pyodide 없이 주입한 `readLine`·`run` 각본으로 프롬프트·`pending` 전달, 종료, 실행 오류 복구, 읽기
 요청 거절 정책, **`setAtPrompt` 호출 순서**(`true` → `readLine` → `false` → `discardPendingInterrupt` → `run`, 취소
 `null`과 `readLine` reject 경로 포함)를 고정), `index.test.ts`(`createRepl`),

@@ -9,7 +9,7 @@ import { loadPyodide, type PyodideInterface } from "pyodide";
 import { beforeAll, describe, expect, test } from "vitest";
 import { createConsole } from "../worker/console";
 import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
-import { createTerminalSinks } from "./sinks";
+import { createTerminalSinks } from "@cp949/runo-pyodide-terminal/internal";
 
 let pyodide: PyodideInterface;
 

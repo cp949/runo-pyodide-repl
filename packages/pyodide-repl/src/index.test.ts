@@ -1986,7 +1986,7 @@ describe("top-level await 옵션(RD-012)", () => {
 });
 
 /**
- * 선택 복사 배선(RD-017 DELTA-03). `terminal/selection-copy.ts`(DELTA-02)의 `decideKey`·`createSelectionCopy`
+ * 선택 복사 배선(RD-017 DELTA-03). `packages/pyodide-terminal/src/selection-copy.ts`(DELTA-02)의 `decideKey`·`createSelectionCopy`
  * 자체는 여기서 다시 보지 않는다 — `createRepl`이 벤더 `Readline`의 `onKeyEvent`에 실제로 연결했는지, `dispose()`
  * 순서, `!isolated`·`setCopyOnSelect`가 문서(DELTA-03.md "## 계획")대로인지만 본다. `createRepl`이 `writeText`를
  * 주입받지 않으므로(옵션 없음) `navigator.clipboard`를 jsdom에 심어 관찰한다.

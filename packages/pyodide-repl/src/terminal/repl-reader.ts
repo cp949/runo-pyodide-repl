@@ -12,8 +12,11 @@
  */
 import type { Readline } from "@cp949/runo-xterm-readline";
 import type { ReadOptionsProvider } from "./read-options";
-import { rewindTail, type RewindTerminal } from "./rewind-tail";
-import type { TerminalSinks } from "./sinks";
+import {
+  rewindTail,
+  type RewindTerminal,
+  type TerminalSinks,
+} from "@cp949/runo-pyodide-terminal/internal";
 
 export interface ReplReader {
   /**

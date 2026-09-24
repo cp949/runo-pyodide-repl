@@ -16,7 +16,7 @@ import { createAutoIndent } from "./auto-indent";
 import { createBlockHistory } from "./block-history";
 import { mergeReadOptions } from "./read-options";
 import { createReplReader } from "./repl-reader";
-import { createTerminalSinks } from "./sinks";
+import { createTerminalSinks } from "@cp949/runo-pyodide-terminal/internal";
 
 /** 매크로태스크 한 번. `repl-reader.test.ts`와 같은 이유(TRP-008). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));

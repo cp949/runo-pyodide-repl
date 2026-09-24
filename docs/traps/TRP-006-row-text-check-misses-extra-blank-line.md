@@ -15,4 +15,4 @@
 ## 탐지/회피
 
 - 회피: 커서가 있는 행의 인덱스(`.xterm-cursor`가 든 `.xterm-rows > div`의 위치)를 단언한다. 예: 배너 2행 + `100%` + `err` 다음이면 커서 행은 4다. xterm 6 DOM 렌더러에서 `.xterm-cursor`가 있는 행을 찾을 수 있었다(Chromium 148 headless, 터미널이 포커스된 상태에서만 확인. 포커스를 잃은 상태의 클래스는 확인하지 않았다).
-- 탐지: `terminal/sinks.ts`의 `writeErrorRaw`를 `print` → `println`으로 바꿔 하니스를 돌린다. 텍스트 행은 그대로이고 커서 행이 4 → 6으로 바뀌어야 하니스가 실패한다(RD-004 브라우저 확인에서 이 변이로 확인).
+- 탐지: `packages/pyodide-terminal/src/sinks.ts`의 `writeErrorRaw`를 `print` → `println`으로 바꿔 하니스를 돌린다. 텍스트 행은 그대로이고 커서 행이 4 → 6으로 바뀌어야 하니스가 실패한다(RD-004 브라우저 확인에서 이 변이로 확인).
