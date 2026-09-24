@@ -25,7 +25,7 @@ type RpcMessage =
 
 | 이름 | 종류 | 방향 | 인자 | 결과 | 시점 |
 | --- | --- | --- | --- | --- | --- |
-| `readLine` | req | worker→main | `prompt: string, pending: string \| undefined, cancelable: boolean` | `string \| null`(취소) | REPL 루프가 한 줄을 읽을 때 |
+| `readLine` | req | worker→main | `prompt: string, pending: string \| undefined, cancelable: boolean, outcome?: RunOutcome` | `string \| null`(취소) `\| { source: string }`(루프 명령) | REPL 루프가 한 줄을 읽을 때. `outcome`(RD-022a)은 바로 앞 `{ source }` 응답을 실행한 결말이고 그 요청에만 실린다 |
 | `complete` | req | main→worker | `source: string, pending: string \| undefined` | `{ completions: string[], start: number }` | Tab. worker는 프롬프트 대기 중에만 계산 |
 | `readInput` | ntf | worker→main | `cancelable: boolean` | — | stdin 콜백 진입. 이 알림 직후 worker는 메일박스 대기에 들어간다 |
 | `write` | ntf | worker→main | `text: string` | — | stdout 조각(개행 미강제) |
@@ -38,6 +38,8 @@ type RpcMessage =
 | `crashed` | ntf | worker→main | `{ message: string }` | — | 부팅 뒤(REPL 루프)의 잡히지 않은 예외. worker는 살아 있을 수 있으나 루프는 끝났다(RD-010) |
 
 표의 핸들러 소유(RD-020): `write`·`writeErrorRaw`·`readInput`·`ready`·`loadFailed`·`sessionTerminated`·`crashed`는 core 핸들러(main 쪽 표 `CORE_MAIN_HANDLER_NAMES`)이고, `readLine`(worker→main)·`writeOutput`·`writeError`는 REPL main driver 핸들러, `complete`(main→worker)는 REPL worker driver 핸들러다. 각 RPC 끝점은 생성 시 `composeRpcHandlers(core 표, driver 표)`로 표를 합치고 이름이 겹치면 예외를 던진다(늦은 등록 API 없음). core는 `write`·`writeErrorRaw`를 `{ stream: 'stdout' | 'stderr', text }` 원문으로 세션 `output` 콜백에 넘긴다.
+
+**`readLine` 응답 `{ source }`와 요청 4번째 인자 `outcome`**(RD-022a, repl `src/repl-protocol.ts`의 `ReadLineReply`·`ReadLineSourceReply`·`ReadLineOutcome`·`isReadLineSourceReply`, main·worker 공용 타입): 응답은 셋 중 하나다. 문자열은 제출한 줄, `null`은 입력 취소(Ctrl+C), `{ source: string }`은 루프 명령이다. `{ source }`는 `ReplHandle.runSource(code)`가 만든다: main이 열린 읽기를 `takeRead()`로 가져가고(또는 첫 프롬프트 전 대기하던 코드를 첫 요청에서 바로) 줄 대신 `{ source }`로 응답하면, worker 루프가 제출 한 건처럼 `setAtPrompt(false)` → `discardPendingInterrupt()` → 실행 순으로 처리하고(`02-console-core.md` 5.6) 결말을 **다음** `readLine` 요청의 네 번째 위치 인자 `outcome`으로 보낸다. `outcome`은 core `RunOutcome`(`ok` / `error{ errorType, traceback }` / `interrupted{ traceback }` / `exit{ code }`)이고 `restarted`는 main이 만드는 결말이라 실리지 않는다. `{ source }` 실행 직후 요청에만 실리고 그 밖의 요청(첫 요청·일반 명령 뒤)은 3인자 그대로다(worker는 `outcome === undefined`면 인자를 넘기지 않고, main은 인자 유무로 구분한다). 한 결말은 한 요청에만 실린다. 이 요청의 `prompt`는 `>>> `이고 `pending`은 `undefined`다(main은 블록 입력 중에는 `{ source }`를 보내지 않는다). 결말을 별도 알림으로 보내지 않고 요청에 싣는 이유는 main이 새 읽기를 열 때 결말을 이미 알아야 "복원한 줄이 그려진 뒤 결과를 확정한다"(5.6.4)를 지킬 수 있고, 알림과 요청의 도착 순서를 따로 보장할 필요가 없기 때문이다. `{ source }`로 실행한 코드의 `SystemExit`는 `sessionTerminated`를 보내지 않는다. worker 내부 오류는 `outcome`이 `{ kind: "error", errorType: "InternalError", traceback: "repl 내부 오류: …\n" }`이다. 실행 중 worker 크래시·`reset()`이면 다음 요청이 오지 않으므로 main이 `crashed`·`restarted`를 스스로 만든다.
 
 **`ready` 페이로드**(RD-021, core `protocol/ready-payload.ts`의 `ReadyPayload`·`createReadyPayload`): worker가 부팅 중 한 번 탐지한 pyodide 호환 결과다. 공개 API가 아닌 내부 계약이다.
 

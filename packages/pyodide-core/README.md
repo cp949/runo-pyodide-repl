@@ -7,7 +7,7 @@ pyodide를 Web Worker에서 실행하는 프로토콜(RPC·`input()` 메일박�
 tarball을 `file:`로 설치한다(`pnpm smoke:pack`이 이 경로를 검증한다). 진입점은 두 개다.
 
 - `@cp949/runo-pyodide-core`: main 쪽(프로토콜, `startCoreSession`, `createRunner`, `RunRejectedError`, `PYODIDE_VERSION`, `DEFAULT_PYODIDE_INDEX_URL`).
-- `@cp949/runo-pyodide-core/worker`: worker 쪽(`runWorker`, `bootWorker`, `runDriver`, driver 타입).
+- `@cp949/runo-pyodide-core/worker`: worker 쪽(`runWorker`, `bootWorker`, `runDriver`, driver 타입, 실행·결말 분류 공용 함수 `loadExecInConsole`·`toRunOutcome`(runner와 `@cp949/runo-pyodide-repl`의 `runSource`가 함께 쓴다)).
 
 ## 코드 실행(`createRunner`)
 

@@ -2,7 +2,7 @@
 
 > 이 문서의 규칙·상수는 이전 구현(`/work/cp949/pyodide-samples/apps/repl`, 읽기 전용 참고)이 CPython 3.14.4 pty 실측과 브라우저 회귀로 확정한 것이다. 새 구현은 통신 계층만 바꾸고(`docs/design/00-architecture.md`, `01-protocols.md`) 이 규칙은 그대로 지킨다. 절 끝의 "참고:" 경로는 이전 구현의 근거 위치다.
 
-worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-protocols.md`의 RPC(`readLine` 요청, 출력 알림)와 무관하게 이 규칙만으로 결정된다.
+worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)은 이전 구현에 없는 신규 절이다. main과의 통신은 `01-protocols.md`의 RPC(`readLine` 요청, 출력 알림)와 무관하게 이 규칙만으로 결정된다.
 
 ## 5.1 PyodideConsole 사용법
 - 콘솔은 `pyodide.console.PyodideConsole`. `stdin_callback`은 넘기지 않고, `stdout_callback`/
@@ -158,6 +158,81 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
   활성 읽기가 없어 키는 화면에 나오지 않는다(Ctrl+L만 즉시 동작하고 나머지는 벤더 type-ahead 버퍼에 쌓이며 다음 읽기가 없어 재생되지 않는다, 리셋의 `cancelRead()`가 비운다 — RD-019, `06-editing.md` 6.7). 루프가 `break`한 뒤 core `worker/boot.ts`(`bootWorker`)의 `finally`에서 `stopWatch()`·
   `interruptIdle.destroy()`로 감시 타이머와 깨우기 proxy를 정리한다(`03-ctrl-c.md` 2.5).
 - 여러 줄 제출 중 `exit()`가 나면 나머지 문장은 실행하지 않는다.
+- `runSource(code)`(5.6)가 실행한 코드의 `SystemExit`는 이 규칙을 따르지 않는다: `sessionTerminated`를 보내지 않고 루프를 끝내지 않으며 상태도 `terminated`가 되지 않는다(결과 `exit{ code }`, 세션 유지).
+
+## 5.6 `runSource(code)` — 호스트가 REPL 세션에 코드를 실행시킨다(RD-022a)
+
+`ReplHandle.runSource(code: string): Promise<RunResult>`와 `readonly busy: boolean`(`00-architecture.md` 4.1). 코드는 REPL globals(`pyodide.globals`)에서 실행되고 입력 줄 에코 없이 출력만 화면에 낸다. 치던 한 줄(텍스트·커서)은 보존해 출력 뒤 다시 그린다. CPython에 대응 기능이 없어 `10-parity-deviations.md`의 편차 대상이 아니다. 이름과 이유 문자열은 repl `dist/index.d.mts`와 일치해야 한다. 벤더 쪽 규칙은 `06-editing.md` 6.1(`takeRead`·`prefillCursor`), 프로토콜은 `01-protocols.md` 1.2(`readLine` 응답 `{ source }`)다.
+
+### 5.6.1 실행 경로
+
+- 프롬프트가 열려 있으면 main이 열린 `readLine` RPC에 줄 대신 `{ source }`로 응답한다. worker `runReplLoop`는 이를 제출 한 건처럼 받는다: `setAtPrompt(false)` → `discardPendingInterrupt()` → `runSource(source)` 순이고, 결말은 다음 `readLine` 요청의 네 번째 인자로 돌아온다. 그래서 Ctrl+C(core 게이트 `pythonRunning = alive && inputReadsPending === 0 && !isIdle()`, 감시 타이머)·`input()`(stdin 리더)·type-ahead가 평소 명령 실행과 같은 경로다. 프롬프트가 열린 채 동시 RPC 핸들러로 돌리는 방식은 쓰지 않는다.
+- 실행·분류는 runner와 공용인 core `./worker`의 `exec_in_console`(Python, `run-driver.py`)이다(`14-runner.md` 14.2.1). `CodeRunner(source, mode="exec", return_mode="none", dedent=False, dont_inherit=True, filename=console.filename, flags=…)`로 컴파일하고 `await console.runcode(source, runner)`로 실행한다. TS는 `loadExecInConsole(pyodide)`·`toRunOutcome`이고 repl `worker/run-source.ts`의 `createSourceRunner`가 세션마다 한 번 올리고 세션이 끝나면 놓는다.
+- runner와 다른 점: `console.globals`(= `pyodide.globals`)와 `sys.stdin`을 바꾸지 않는다. `runSource("x = 1")` 뒤 REPL 명령 `x`가 `1`을 돌려주는 것이 이 때문이다. 파일명은 `console.filename`(`<console>`)이다. SIGINT 규칙 ①(`03-ctrl-c.md` 2.4)과 트레이스백 프레임 유지가 이 일치에 의존한다(`docs/traps/TRP-020`, `TRP-052`).
+- exec 의미: 마지막 식의 값을 출력하지 않고 `builtins._`를 바꾸지 않는다(`1 + 1`은 출력 없음). 오류 시 `sys.last_*`는 `formattraceback`의 부수 효과대로 설정된다(평소 REPL과 같다, 복원하지 않는다). 트레이스백은 REPL 형식(`File "<console>", line N`, 소스 줄 없음, stderr 빨강)으로 화면에 나가고 결과 `traceback`에도 실린다.
+- TLA: 실행마다 콘솔 컴파일러 플래그(`_compile.compiler.flags & 0x2000`, 5.4)를 읽어 `top_level_await`로 넘긴다. `createRepl({ topLevelAwait })`·`reset({ topLevelAwait })`가 정한 값을 따른다. 플래그 경로가 없으면(`compiler-flags` 저하) 켬으로 본다. 끔이면 최상위 `await`는 `SyntaxError`이고 `errorType`은 `"SyntaxError"`다.
+- 결말 분류는 runner와 같은 코드다(`14-runner.md` 14.2.1 표, 14.2.4): `KeyboardInterrupt`·정지한 `await`를 깨운 `IdleInterrupt`는 `interrupted{ traceback }`, `SystemExit`는 `exit{ code }`(코드 규칙·int32 밖 `& 0xFF` 포함), 그 밖의 예외는 `error{ errorType, traceback }`(`SyntaxError` 하위 클래스는 `errorType: "SyntaxError"`로 통일). worker 내부 오류(`runSource`가 던진 예외)만 REPL 고유다: 루프가 `onError`(stderr `repl 내부 오류: …`, 콘솔 미완성 블록 버림)를 부르고 결말 `{ kind: "error", errorType: "InternalError", traceback: "repl 내부 오류: …\n" }`를 싣는다. 이후 프롬프트는 `>>> `·`pending` 없음이다.
+- history에 남기지 않는다. 입력 history도 블록 history(6.4)도 건드리지 않는다.
+
+### 5.6.2 호출 시점별 결과와 거부
+
+결과 유니온 `RunResult`는 core `createRunner`와 같다(`ok` / `error{ errorType, traceback }` / `interrupted{ traceback }` / `exit{ code }` / `restarted`). `RunRejectedError`·`RunResult`·`RunRejectedReason`은 core의 같은 클래스·타입을 repl `.`에서 다시 내보낸다(`instanceof` 성립). 판정은 위에서부터 첫 일치 행이다.
+
+| `runSource()` 호출 시점·사건 | 결과 |
+| --- | --- |
+| `code`가 문자열이 아님 | `TypeError`로 reject |
+| `dispose()` 뒤 | `RunRejectedError("disposed")` |
+| 상태 `not-isolated`·`load-failed`·`crashed`·`terminated` | `RunRejectedError("unavailable")`. `terminated`는 REPL 명령 `exit()`로 세션이 끝난 상태다 |
+| 다른 `runSource`가 슬롯을 차지함(대기·실행·정착 어느 단계든) | `RunRejectedError("busy")` |
+| 블록 입력 중(최근 `readLine` 요청의 `pending !== undefined`, `... `) | `RunRejectedError("busy")` |
+| Python 실행 중(명령 실행), `readLine` 요청이 도착했지만 프롬프트가 아직 그려지기 전(write 콜백 전, 수 ms), `input()` 대기 중(프롬프트가 열린 채 worker의 배경 콜백이 `input()`을 불러 stdin 읽기가 대기함), Tab `complete` 왕복 중 | `RunRejectedError("busy")` |
+| 첫 `readLine` 요청 전: `loading`(최초·리셋 직후), `ready` 알림 뒤 배너를 쓰는 구간 | 대기(슬롯 점유). 첫 요청이 오면 읽기를 열지 않고 `{ source }`로 응답해 실행한다. 화면에 그린 것이 없어 꼬리가 남아 있으면 `\r\n`만 쓰고 출력을 시작하며 실행 뒤 `>>> `가 한 번 나온다 |
+| 프롬프트가 그려져 열려 있음(`>>> `, 블록 아님) | 받아들인다: 읽기를 가져가고 실행한다(5.6.3) |
+| 대기 중 `reset()` | 취소하지 않고 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았으므로 `restarted`가 아니다) |
+| 대기 중 `load-failed` | `RunRejectedError("unavailable")` |
+| 실행 중(`{ source }`를 보낸 뒤 결말 도착 전) `reset()` | `{ kind: "restarted" }`로 resolve. 새 세션에서 다시 실행하지 않는다 |
+| 실행 중·대기 중 worker 크래시 | `RunRejectedError("crashed")` |
+| 실행 중·대기 중 `dispose()` | `RunRejectedError("disposed")` |
+| 결말이 도착한 뒤 복원한 줄이 그려지기 전(정착 전)의 `reset()`·`dispose()`·크래시 | 그 결말로 resolve한다. 코드는 이미 끝까지 실행됐으므로 `restarted`·거부로 바꾸지 않는다 |
+
+- `busy` 게터: 지금 `runSource()`를 부르면 `RunRejectedError("busy")`가 되는가(runner의 `busy`와 같은 뜻). 판정은 `runSource()`와 같은 함수(`judge()`)라 둘이 어긋나지 않는다(`docs/traps/TRP-047`). 대기로 받아들여질 시점(`loading`)·`unavailable`·`disposed`는 `false`다. `status` 게터는 없다(상태는 `onStatus`).
+- 슬롯은 핸들이 하나 소유하고 세션(worker)을 넘어 산다. 대기 중인 코드가 `reset()`을 넘겨 새 worker의 첫 `>>> `에서 실행되기 때문이다. 슬롯을 비우는 사건(크래시·`load-failed`·`exit()`로 `terminated`·`reset()`·`dispose()`)은 소비자 콜백을 부르기 전에 슬롯을 비우고 결과는 콜백 뒤에 낸다(`docs/traps/TRP-051`).
+
+### 5.6.3 화면 규칙
+
+- 받아들이면 벤더 `Readline.takeRead()`로 열린 읽기를 제출·history 없이 끝내고 그 읽기의 프롬프트·입력 행(줄이 감겼거나 여러 행이어도 전부)을 화면에서 지운다. 커서는 프롬프트 첫 행 열 0에 놓이고 출력은 그 자리부터 시작한다. 텍스트·커서는 보존한다.
+- 꼬리가 붙은 프롬프트(`a>>> pri`, 직전 출력이 미종결 줄로 끝남): 벤더는 꼬리까지 프롬프트로 보고 함께 지우므로 main이 지운 꼬리를 다시 쓴다: `${꼬리}\x1b[0m\r\n`(꼬리가 열어 둔 SGR을 닫고 새 행에서 출력을 시작, `14-runner.md` 14.5.4 행 머리 규칙). 꼬리가 없으면 아무것도 쓰지 않는다.
+- 출력이 끝나면 worker가 결말을 실어 다음 `readLine` 요청을 보낸다. REPL reader가 평소처럼 꼬리(출력이 미종결이면 그 꼬리, prompt-join 규칙 `04-stdin-input.md` 3.3) + `>>> `로 읽기를 열되 보존한 텍스트를 `prefill`, 커서를 `prefillCursor`로 넘긴다. 이 복원은 자동 들여쓰기 프리필(6.3)보다 우선하고, 보존한 텍스트가 빈 문자열이면 복원하지 않는다. 결과는 `>>> pri`(커서 위치 유지)가 출력 아래에 다시 그려진다. 입력 줄 에코 행(`>>> x = 1`)은 생기지 않는다.
+
+### 5.6.4 정착 시점
+
+`runSource` Promise는 worker 결말이 도착하고 보존한 줄로 다음 `>>> ` 읽기가 화면에 그려진 뒤에 resolve한다. main은 REPL reader가 `readline.read()`를 연 직후 `terminal.write("", callback)`를 하나 더 쓴다. xterm은 쓰기 콜백을 쓰기 순서로 부르고 벤더는 `read()` 안에서 이미 자기 그리기 콜백을 큐에 넣었으므로, 이 콜백은 프롬프트·복원한 줄이 그려지고 쌓인 type-ahead가 재생된 뒤에 온다(동기·비동기 write 두 모드를 시험이 확인). 그 콜백 안에서 type-ahead의 Enter로 읽기가 끝나도 읽기 상태는 마이크로태스크 뒤에 내려가 정착이 유실되지 않는다. 단 xterm DOM 행은 다음 프레임에 그려지므로 결과를 받은 직후 `.xterm-rows`를 읽으면 마지막 행이 없을 수 있다(`docs/traps/TRP-050`).
+
+### 5.6.5 실행 중 키
+
+평소 명령 실행과 같다. 실행 중 친 키는 type-ahead(`06-editing.md` 6.7)에 쌓였다가 복원한 커서 위치에 재생되고, Enter가 섞이면 `pri…` 줄이 제출된다. Ctrl+C는 `^C` 에코 + 중단 송신이고 결과는 `interrupted`다(트레이스백 `File "<console>", line N` + `KeyboardInterrupt`). `input()`은 stdin 리더로 읽는다. `runSource`가 진행 중일 때 main은 리셋(`terminate`) 외에는 `cancelRead()`를 부르지 않는다: `cancelRead()`는 열린 읽기가 없어도 쌓인 type-ahead를 비운다(`docs/traps/TRP-053`).
+
+### 5.6.6 `SystemExit`와 stdin
+
+- `SystemExit`는 `{ kind: "exit", code }`이고 세션을 유지한다(`sessionTerminated`를 보내지 않고, 루프가 `onTerminated()`를 부르지 않고, `ReplStatus`가 `terminated`가 되지 않는다). 프롬프트를 다시 그린다. 비정수 코드의 stderr 출력은 runner 규칙이다(14.2.4).
+- `exit()`·`quit()`은 `SystemExit`를 올리기 전에 `sys.stdin`을 닫는다(`_sitebuiltins.Quitter`). 평소 명령의 `exit()`는 세션이 끝나 상관없고 runner는 run마다 stdin을 새로 열지만(14.2.2), 세션이 이어지는 `{ source }` 경로에서는 다음 `input()`이 `ValueError: I/O operation on closed file.`이 된다(`docs/traps/TRP-054`). 그래서 `createSourceRunner`가 `exit` 결말 직후에만 `sys.stdin`이 닫혀 있으면(`closed` 또는 `None`) fd 0·`<stdin>`·라인 버퍼 `TextIOWrapper`로 다시 연다. 사용자가 직접 `sys.stdin.close()`한 `ok` 결말이나 열린 stdin은 건드리지 않는다.
+
+### 5.6.7 알려진 경계
+
+- **뷰포트보다 큰 입력**: 입력이 화면 행 수를 넘어 위쪽 행이 스크롤백으로 넘어간 상태에서 `runSource`를 부르면 그 행은 지워지지 않는다(스크롤백은 ANSI 시퀀스로 지울 수 없다). "스크롤백에 흔적이 남지 않는다"(5.6.3)는 입력이 뷰포트 안일 때만 성립한다. 화면에 남은 행만 지운다.
+- **프롬프트가 그려지기 전 구간**은 `busy`다(5.6.2). 명령 출력 직후 곧바로 호출하는 소비자는 드물게 `busy`를 받는다. 호출은 프롬프트가 화면에 보인 뒤에 하는 것이 안전하다(입력 타이밍 규칙, `docs/traps/TRP-005`와 같은 취지).
+- **interrupt buffer 재사용**: `reset()`은 옛 worker와 같은 interrupt buffer를 새 세션에 싣는다(`08-session.md` 8.1 2번). 실행 중(`runSource` 포함) `reset()` 직후 첫 Ctrl+C가 아직 종료되지 않은 옛 worker에 가로채일 수 있다(`14-runner.md` 14.3.5, `docs/traps/TRP-049`). REPL에서 재현은 확인하지 않았고 RD-022a는 고치지 않았다(`.scratch/run-driver-terminal-followups/issues/01-*.md`). 브라우저 확인 S08은 `restarted` 뒤 REPL 명령만 돌리고 Ctrl+C 셀이 없어 이 경로에 닿지 않았다.
+- `printAbove` 재그리기 중의 `takeRead()`는 옛 입력줄을 지우지 못한다(`06-editing.md` 6.1). Tab `complete` 왕복 중은 `busy`로 거부하므로 실경로에서 닿지 않는다.
+- 꼬리 다시 쓰기는 꼬리가 `\r`로 덮어쓴 텍스트를 가진 경우 화면과 꼬리 추적기(마지막 `\r` 뒤만 보관)가 어긋날 수 있다. 관찰한 적은 없다.
+- 브라우저 셀이 없는 경로: 뷰포트 초과 입력, `loading` 중 호출, Tab 왕복 중 호출, 크래시 중 호출, 리셋 뒤 Ctrl+C. 앞의 넷은 jsdom·node 시험이 고정한다.
+
+### 5.6.8 시험과 확인
+
+- core: `worker/run-driver-exec-in-console.test.ts`(실제 pyodide + 실제 `PyodideConsole`, globals·stdin 불변·`console.filename`·exec 의미·TLA 인자).
+- 벤더: `take-read.test.ts`(지움·커서·history·type-ahead·`prefillCursor`, jsdom + `VTerm`).
+- repl worker: `worker/run-source.test.ts`(실제 pyodide: globals 공유, `_` 불변, `<console>` 트레이스백, `sys.exit(3)`, `exit()` 뒤 stdin, SIGINT·정지한 `await` 중단, TLA 켬·끔, `input()`), `worker/repl-loop.test.ts`(가짜 deps: 호출 순서·결말 운반·`onTerminated` 미호출), `worker/boot.test.ts`(실제 `MessageChannel`에서 결말이 네 번째 인자로 도착), `worker/repl-driver-source-runner.test.ts`.
+- repl main: `run-source.test.ts`(jsdom + 실제 `Readline` + 가짜 worker + `test/vt-screen.ts`: 시나리오·거부 표·`busy`·정착 시점·꼬리·커서·생애 사건).
+- 브라우저: `apps/demo`의 REPL 화면 plain 요소 `source`(textarea)·`run-source`(버튼)·`source-result`(JSON 텍스트, 거부는 `{"rejected":"<reason>"}`)와 `pnpm --filter demo e2e:run-source`(S01~S10, `apps/demo/e2e/BASELINE.md`).
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/01-console-core.md`,
 이전 구현 설계 문서 `07-multiline-submit.md`, `08-top-level-await.md`,

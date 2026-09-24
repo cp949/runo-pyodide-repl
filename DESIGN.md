@@ -11,11 +11,11 @@
 1. **무엇을, 왜**: `docs/design/00-architecture.md`(목표·채널·생명주기·패키지·공개 인터페이스), `docs/adr/`(결정 7건)
 2. **통신 계약**: `docs/design/01-protocols.md`(RPC 메시지, stdin 메일박스, interrupt buffer, 초기화 프레임, 시퀀스)
 3. **기능 규칙**(이전 구현이 3.14 pty 실측으로 확정한 것을 계승):
-   - `02-console-core.md` PyodideConsole·제출 실행·top-level await·종료
+   - `02-console-core.md` PyodideConsole·제출 실행·top-level await·종료, `runSource`(5.6)
    - `03-ctrl-c.md` SIGINT 프로토콜(요청 번호·ack·재전송, Python 핸들러, 감시 타이머, sleep 조각)
    - `04-stdin-input.md` `input()` 읽기·취소·read-guard·프롬프트 꼬리
    - `05-output.md` sink 4종·전역 스트림·배너
-   - `06-editing.md` 벤더링 xterm-readline·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사·읽기 없는 구간의 키 버퍼링
+   - `06-editing.md` 벤더링 xterm-readline(`takeRead`·`prefillCursor` 포함)·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사·읽기 없는 구간의 키 버퍼링
    - `07-tab-completion.md` Tab 완성
    - `08-session.md` 리셋·이중 마운트·종료 후 상태
    - `14-runner.md` 실행 driver(`runDriver`)·`createRunner`(상태 8종·결과·`stop()`)·`InputProvider`·xterm 실행창(`createTerminalRunner`). REPL이 아니라 `python main.py` 기준이다

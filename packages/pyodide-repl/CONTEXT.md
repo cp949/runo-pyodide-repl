@@ -116,6 +116,36 @@ top-level await 대기를 깨울 때 콘솔 task를 끝내는 표지 예외(`Exc
 **프롬프트 유휴**:
 REPL 읽기를 기다리며 사용자 코드가 없는 상태(`ReplLoopDeps.setAtPrompt(true)` 구간). 여기서 남은 SIGINT는 폐기한다.
 
+### `runSource`(RD-022a)
+
+**`runSource`**:
+`ReplHandle.runSource(code): Promise<RunResult>`. 호스트가 REPL 세션의 globals에서 코드를 실행시키는 공개 API. 입력 줄 에코 없이 출력만 내고 치던 줄을 보존해 다시 그린다. 규칙은 `docs/design/02-console-core.md` 5.6.
+_Avoid_: 실행 API(runner의 `run`과 혼동), 원격 실행, 주입
+
+**`busy`(게터)**:
+`ReplHandle.busy`. 지금 `runSource()`를 부르면 `RunRejectedError("busy")`가 되는가. `runSource()`의 거부 판정(`judge()`)과 같은 함수를 읽는다. 대기로 받아들여질 시점(`loading`)·`unavailable`·`disposed`는 거짓이다.
+_Avoid_: 게이트(Ctrl+C 송신 판정 `pythonRunning`), 실행 중 플래그
+
+**슬롯**:
+`runSource` 하나가 차지하는 자리(핸들이 소유, `run-source.ts`의 `createSourceSlot`). 단계는 `waiting`(첫 `readLine` 요청 전, worker에 아직 보내지 않음)·`sent`(`{ source }`를 보냈고 결말 도착 전)·`settling`(결말 도착, 복원한 줄이 그려지기 전). 세션(worker)을 넘어 산다: 대기 중인 코드가 `reset()`을 넘겨 새 worker의 첫 프롬프트에서 실행된다.
+_Avoid_: 큐(대기열이 아니라 한 자리다), 작업
+
+**루프 명령**:
+`readLine` 응답 `{ source }`. worker 루프가 줄 제출 한 건처럼 받아 REPL 콘솔에서 실행한다(`setAtPrompt(false)` → `discardPendingInterrupt()` → 실행). 그래서 Ctrl+C·`input()`·type-ahead가 평소 명령 실행과 같은 경로다.
+_Avoid_: 원격 호출, 동시 RPC
+
+**결말 운반**:
+`{ source }` 실행의 결말(`RunOutcome`)을 다음 `readLine` 요청의 네 번째 인자 `outcome`으로 main에 돌려주는 것. 결말이 새 읽기가 열리기 전에 도착해야 정착 시점(아래)을 지킬 수 있다.
+_Avoid_: 결과 알림
+
+**가져가기**(`takeRead`):
+main이 열린 REPL 읽기를 제출·history 없이 끝내 프롬프트·입력 행을 지우고 텍스트·커서를 보존하는 것(벤더 `Readline.takeRead()`, `ReadTakenError`로 끝남). 취소(`ReadCancelledError`, 리셋 경로)와 다르다.
+_Avoid_: 중단, 취소
+
+**정착**:
+`runSource` Promise가 결말로 resolve하는 시점. 결말이 도착하고 보존한 줄로 다음 `>>> ` 읽기가 화면에 그려진 뒤(벤더 write 콜백 뒤)다.
+_Avoid_: 완료(실행이 끝난 시점과 구분한다)
+
 ### Tab 완성
 
 **Tab 리더**:
@@ -172,7 +202,7 @@ main의 눌림 전송·점검·재전송 상태기계(core `protocol/interrupt-s
 
 **게이트**:
 main이 보는 "Python 실행 중"(`createRepl`의 `pythonRunning`). core 세션의 식 `alive && inputReadsPending === 0 && !driver.isIdle()`이고, REPL driver의 `isIdle`은 `readLinePending || cancelSettling`이다. 즉 worker가 살아 있고(`alive`) 대기 중인 `readLine`·`readInput` 읽기가 없고 취소 직후 구간이 아니면(`!cancelSettling`) 참이다. 거짓이면 Ctrl+C를 에코도 전송도 하지 않는다. 로딩 중은 참이다(부팅 중 눌림은 worker의 연결 단계가 폐기한다).
-_Avoid_: running 플래그, busy
+_Avoid_: running 플래그, busy(`ReplHandle.busy`는 게이트가 아니라 `runSource()` 거부 판정이다)
 
 **cancelSettling**:
 게이트의 항 하나. REPL 읽기가 취소로 끝난 뒤 다음 요청이 도착하기 전까지 참이다(`readLine` 도착·`readInput` 도착·`inputReadsPending → 0`에서 거짓). 이 구간의 Ctrl+C는 SIGINT를 남겨 다음 실행을 죽이므로 막는다. `input()` 취소에는 세우지 않는다(취소 뒤에도 사용자 코드가 계속 돈다).

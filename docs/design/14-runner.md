@@ -32,7 +32,7 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 
 ### 14.2.1 실행 경로
 
-- driver Python(`run-driver.py`)의 `run_code(console, source, filename, top_level_await)`가 `CodeRunner(source, mode="exec", return_mode="none", dedent=False, dont_inherit=True, filename=filename, flags=flags).compile()`을 만들고 `await console.runcode(source, runner)`로 실행한다. 옵션 세 개는 스크립트 실행 의미를 맞춘다: `CodeRunner` 기본값 `dedent=True`는 들여쓴 첫 줄을 조용히 통과시키고 `return_mode="last_expr"`는 마지막 식을 값으로 바꾼다(`docs/traps/TRP-041`).
+- driver Python(`run-driver.py`)은 두 함수로 나뉜다. `run_code(console, source, filename, top_level_await)`는 runner 전용 준비(새 `sys.stdin`·새 globals, 14.2.2)를 한 뒤 공용 함수 `exec_in_console(console, source, top_level_await, filename=None)`을 부른다. `exec_in_console`이 컴파일·실행·결말 분류·stderr 쓰기를 한다: `CodeRunner(source, mode="exec", return_mode="none", dedent=False, dont_inherit=True, filename=filename, flags=flags).compile()`을 만들고 `await console.runcode(source, runner)`로 실행한다. `filename`이 `None`(기본)이면 `console.filename`이고 `run_code`만 자기 인자를 넘긴다(runner에서는 둘이 같다). 이 함수는 `console.globals`와 `sys.stdin`을 건드리지 않으며 REPL `runSource`(`02-console-core.md` 5.6)가 그대로 쓴다. 분류 규칙(`_is_interrupt`·`_error_type`·`_exit_status`)은 이 한 곳이다. TS 쪽은 core `./worker`가 `loadExecInConsole(pyodide)`(버리는 이름공간에 Python 소스를 올리고 함수를 돌려준다)·`toRunOutcome(raw)`·타입 `ExecInConsolePy`·`RawOutcome`을 export한다(`runDriver`와 REPL이 함께 쓴다). 옵션 세 개는 스크립트 실행 의미를 맞춘다: `CodeRunner` 기본값 `dedent=True`는 들여쓴 첫 줄을 조용히 통과시키고 `return_mode="last_expr"`는 마지막 식을 값으로 바꾼다(`docs/traps/TRP-041`).
 - REPL의 `push()`·`ConsoleFuture`·`runsource` 경로를 거치지 않는다. 이유: `PyodideConsole`의 `_CommandCompiler`는 미완성 입력에 `None`("입력 계속")을 돌려주고 `_compile`은 항상 `PyCF_ALLOW_TOP_LEVEL_AWAIT`를 켠다(pyodide 314.0.7 `console.py`). 스크립트 한 덩어리는 둘 다 맞지 않는다.
 - `console.runcode`는 core `sigint-handler.py`가 인스턴스 속성으로 바꿔 둔 래퍼다(`active` task 기록, 정지한 `await`를 깨우는 `interrupt_idle`이 의존). `console.formattraceback`도 core가 바꾼 버전이다(우리 프레임 절단, 깨운 중단 `IdleInterrupt` → `"KeyboardInterrupt\n"`). 실행 driver는 인스턴스의 메서드를 그대로 불러 두 확장을 상속한다. SIGINT 계층·`sigint-handler.py`는 이 RD에서 바뀌지 않았고 실제 pyodide 시험(가설 8항목)이 `while` 루프·`time.sleep`·TLA `await`·`asyncio.run`·`input()` 취소를 확인한다.
 - 예외는 `console.formattraceback(exc)`, 문법 오류는 `console.formatsyntaxerror(exc)`로 포맷하고 결과 `traceback`과 stderr에 함께 쓴다. `filename`이 `<…>` 꺾쇠 형태가 아니면 `CodeRunner`가 소스를 `linecache`에 등록하므로(`_set_linecache`) `File "main.py", line N` 밑에 소스 줄이 나온다. 3.13+ 트레이스백은 그 줄 밑에 `~^~` 형태의 캐럿 줄을 붙인다.
@@ -227,4 +227,4 @@ runner를 먼저 끝낸다(열린 읽기의 `signal`이 abort돼 `cancelRead()`�
 
 - `10-parity-deviations.md` 50~53: 뒤늦은 비동기 출력, `sys.modules` 유지, `input()` 밖 키 무시, import 기반 자동 패키지 로드.
 - 종료 코드 int32 밖 `& 0xFF`(14.2.4)와 provider 생략 시 `KeyboardInterrupt`(14.4)는 사양 문구와 다른 결정이고 이 문서가 기준이다.
-- REPL `runSource`(REPL globals에서 같은 `runcode` 경로로 실행)는 RD-022a다(`ROADMAP.md`).
+- REPL `runSource`(REPL globals에서 같은 `exec_in_console` 경로로 실행)는 `02-console-core.md` 5.6이다. 결과 유니온·거부 사유·`busy` 게터의 뜻은 14.3.2와 같고 표는 5.6.2에 있다.

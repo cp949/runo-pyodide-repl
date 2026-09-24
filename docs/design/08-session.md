@@ -63,6 +63,8 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 worker는 이미 종료 중이라 응답을 기다리지 않는다. `readInput`은 세션이 `ended`면(TRP-003) 메일박스에
 `fail()`도 쓰지 않는다.
 
+`runSource`(RD-022a, `02-console-core.md` 5.6)의 슬롯은 핸들 소유라 리셋을 넘어 산다. 세션 순서에서 슬롯을 비우는 시점은 `onStatus` 콜백 앞이고 결과는 콜백 뒤에 낸다(`docs/traps/TRP-051`). 리셋은 실행 중(`{ source }`를 보낸 뒤 결말 도착 전)이면 `restarted`로 resolve하고 대기 중(첫 프롬프트 전)이면 유지해 새 세션의 첫 `>>> `에서 실행한다. 크래시(8.4)는 실행 중·대기 중 모두 `crashed`, `dispose()`는 `disposed`로 거부하고, 결말이 이미 도착한 슬롯은 그 결말로 resolve한다. 대기 중 `load-failed`는 `unavailable`이다.
+
 Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 별개 기능이다. Ctrl+L은 벤더 동작 그대로이고 코어는
 손대지 않는다(`10-parity-deviations.md`).
 

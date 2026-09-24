@@ -71,6 +71,10 @@ core `./worker`의 `.d.mts`를 import하는 코드. 그 파일이 `pyodide`·`py
 `WorkerDriver<RunDriverOptions>` 구현. 앱 worker 파일이 `runWorker({ driver: runDriver })`로 쓴다. RPC `runCode(source)`를 받아 run마다 새 globals에서 `CodeRunner(exec)` + `console.runcode`로 실행하고 결말을 돌려준다. REPL driver와 달리 제어 흐름이 없고 요청 단위로 일한다. `probe`는 없다.
 _Avoid_: 스크립트 러너, 실행 엔진
 
+**공용 실행 함수(`exec_in_console`)**:
+core `run-driver.py`의 함수. 컴파일(`CodeRunner`, exec)·`await console.runcode`·결말 분류·stderr 쓰기를 한다. runner(`run_code`가 새 globals·새 stdin을 준비한 뒤 부른다)와 REPL `runSource`(REPL globals·stdin을 그대로 두고 부른다)가 함께 쓴다. TS 쪽 `loadExecInConsole`·`toRunOutcome`은 `./worker`가 export한다. 파일명은 `console.filename`이 기본이다.
+_Avoid_: run_code(runner 전용 준비까지 포함한 함수)
+
 **runner(`createRunner`)**:
 main 쪽 UI 비의존 실행 핸들. worker 생성·재생성, worker마다 새 interrupt buffer·송신기, core 세션, 상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`, 슬롯 점유 `busy`를 맡는다. `MainDriver`를 구현해 core 세션 위에 얹힌다. xterm 실행창(`createTerminalRunner`, terminal 패키지)과 다른 소비자가 이것을 쓴다.
 _Avoid_: 세션 매니저, 실행기

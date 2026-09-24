@@ -127,20 +127,24 @@ interface ReplOptions {
 
 interface ReplHandle {
   reset(options?: { topLevelAwait?: boolean }): void   // worker 교체. 화면 유지
+  runSource(code: string): Promise<RunResult>           // REPL globals에서 코드 실행, 치던 줄 보존(RD-022a, 02 5.6)
+  readonly busy: boolean                                // 지금 runSource()를 부르면 RunRejectedError("busy")인가
   setCopyOnSelect(on: boolean): void                    // 선택 시 자동 복사 on/off. 리셋 없음(RD-017)
   dispose(): void                                       // worker 종료·리스너 해제. Terminal은 호출자가 소유
   readonly crossOriginIsolated: boolean                 // 거짓이면 worker가 없다(경고만 낸 상태)
 }
 
+// `RunRejectedError`·`RunResult`·`RunRejectedReason`은 core의 것을 repl `.`에서 다시 내보낸다(`instanceof` 성립)
+
 // worker 쪽 진입점(앱의 얇은 worker 파일이 부른다)
 export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
 ```
 
-`ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`·`onCrash?`(RD-010)·`topLevelAwait?`(RD-012, 기본 `false`, `=== true`만 켠다)·`copyOnSelect?`·`onCopy?`(RD-017, 기본 `true`·`=== false`일 때만 끈다, `06-editing.md` 6.6)이고 `ReplHandle`은 `dispose()`·`reset(options?)`·`setCopyOnSelect(on)`(RD-017, 세션·화면에 영향 없음, `disposed` 뒤 no-op)·`crossOriginIsolated`다. 선택 복사 리스너는 핸들 수명이라 `reset()`이 건드리지 않고 `dispose()`가 뗀다(`selectionCopy.dispose()`는 `session.terminate()` 뒤, `readline.dispose()` 앞). RD-003·004의 임시 `readLine(prompt)` 핸들 API는 RD-005에서 빠졌다. 줄 읽기는 worker가 보내는 `readLine` 요청이 유일한 경로다. `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`·`terminated`(`sessionTerminated` 알림)를 발행하고 `crashed`는 RD-010이 발행한다. `sessionTerminated`는 터미널에 쓰지 않고 worker도 종료하지 않는다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다.
+`ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`·`onCrash?`(RD-010)·`topLevelAwait?`(RD-012, 기본 `false`, `=== true`만 켠다)·`copyOnSelect?`·`onCopy?`(RD-017, 기본 `true`·`=== false`일 때만 끈다, `06-editing.md` 6.6)이고 `ReplHandle`은 `dispose()`·`reset(options?)`·`setCopyOnSelect(on)`(RD-017, 세션·화면에 영향 없음, `disposed` 뒤 no-op)·`crossOriginIsolated`·`runSource(code)`·`busy`(RD-022a, 규칙은 `02-console-core.md` 5.6)다. 선택 복사 리스너는 핸들 수명이라 `reset()`이 건드리지 않고 `dispose()`가 뗀다(`selectionCopy.dispose()`는 `session.terminate()` 뒤, `readline.dispose()` 앞). RD-003·004의 임시 `readLine(prompt)` 핸들 API는 RD-005에서 빠졌다. 줄 읽기는 worker가 보내는 `readLine` 요청이 유일한 경로다. `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`·`terminated`(`sessionTerminated` 알림)를 발행하고 `crashed`는 RD-010이 발행한다. `sessionTerminated`는 터미널에 쓰지 않고 worker도 종료하지 않는다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다.
 
 `reset(options?: { topLevelAwait?: boolean }): void`(RD-010이 무인자로 추가, RD-012가 옵션을 더했다). `topLevelAwait`가 boolean이면 그 값으로 바꾸고, 생략·`undefined`면 마지막으로 적용한 값을 유지한다(sticky, 핸들이 보관, getter는 없다). `disposed`·`!isolated`면 no-op, 그 외 상태는 전부 허용한다. 순서·게이트는 3.4·`08-session.md` 8.1.
 
-main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 그려 한 줄을 읽어 응답한다(`04-stdin-input.md` 3.3). 열린 읽기가 있는 동안 도착한 요청은 `Error("이미 읽는 중")`로 거절한다(벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다). 요청 시그니처는 `readLine(prompt, pending, cancelable)`이고 `cancelable`은 리더에 그대로 전달한다(RD-008). `pending`은 `createAutoIndent(readline).readOptions(pending)`으로 프리필·키 훅(Shift/Alt+Enter·Backspace)이 된다(RD-013 완료, `06-editing.md` 6.3). 블록 history 항목 묶기(`createBlockHistory(readline).readOptions(pending)`)도 같은 `pending`을 받아 `mergeReadOptions`로 합성한다(RD-014 완료, `06-editing.md` 6.4). 리더에는 `dispose()` 뒤 write 콜백을 전달하지 않는 터미널 뷰를 준다. xterm은 `term.dispose()` 뒤에도 대기 중인 write 콜백을 실행하므로, `rewindTail`이 flush를 기다리는 중에 dispose되면 그 콜백이 해제된 `buffer`를 읽는다(`docs/traps/TRP-004`). 뷰가 이 콜백을 막는다.
+main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 그려 한 줄을 읽어 응답한다(`04-stdin-input.md` 3.3). 열린 읽기가 있는 동안 도착한 요청은 `Error("이미 읽는 중")`로 거절한다(벤더 `Readline`은 열린 읽기를 교체하고 앞 promise를 끝내지 않는다). 요청 시그니처는 `readLine(prompt, pending, cancelable, outcome?)`이고 `cancelable`은 리더에 그대로 전달한다(RD-008). 응답은 줄·`null`(취소)·`{ source }`(`runSource`의 루프 명령)이고 `outcome`은 바로 앞 `{ source }` 실행의 결말이다(RD-022a, `01-protocols.md` 1.2). `pending`은 `createAutoIndent(readline).readOptions(pending)`으로 프리필·키 훅(Shift/Alt+Enter·Backspace)이 된다(RD-013 완료, `06-editing.md` 6.3). 블록 history 항목 묶기(`createBlockHistory(readline).readOptions(pending)`)도 같은 `pending`을 받아 `mergeReadOptions`로 합성한다(RD-014 완료, `06-editing.md` 6.4). 리더에는 `dispose()` 뒤 write 콜백을 전달하지 않는 터미널 뷰를 준다. xterm은 `term.dispose()` 뒤에도 대기 중인 write 콜백을 실행하므로, `rewindTail`이 flush를 기다리는 중에 dispose되면 그 콜백이 해제된 `buffer`를 읽는다(`docs/traps/TRP-004`). 뷰가 이 콜백을 막는다.
 
 `readline?` 옵션은 두지 않는다. 호출자가 준 `Readline`은 `persist: false`를 보장할 수 없고, auto-indent·tab 래퍼는 코어가 만든 인스턴스를 감싼다. 코어는 `terminal.loadAddon(readline)`과 `readline.dispose()`만 하고 `Terminal`은 dispose하지 않는다. `term.dispose()`도 로드된 addon을 dispose하므로 `Readline.dispose()`는 멱등이다(`06-editing.md` 6.1).
 
@@ -232,8 +236,8 @@ packages/pyodide-core/src/                      (공통. UI·xterm 비의존)
     boot.ts                bootWorker: 부팅 시퀀스(옵션 검증 → RPC → 로드 → interrupt API 확인 → 콘솔 → probe → 연결 → ready → 감시 → driver.run)   ← 01 5절 S1
     compat.ts              저하 수집기(`createDegradedCollector`)·`findMissingInterruptApi`·`CoreDegradedId`   ← 13-version-upgrade.md 13.6
     driver.ts              WorkerDriver·WorkerDriverSession·ConsoleContext·RunContext (driver 경계)
-    run-driver.ts          runDriver(WorkerDriver)·createRunSession: RPC runCode, 재진입 거부, atPrompt   ← 14-runner.md 14.2
-    run-driver.py          run_code: 새 globals·CodeRunner(exec)·console.runcode·결말 분류·stdin 교체(`.py?raw`)   ← 14-runner.md 14.2.1
+    run-driver.ts          runDriver(WorkerDriver)·createRunSession: RPC runCode, 재진입 거부, atPrompt. `loadExecInConsole`·`toRunOutcome`은 `./worker`로 export해 REPL이 쓴다   ← 14-runner.md 14.2
+    run-driver.py          `exec_in_console`(CodeRunner(exec)·console.runcode·결말 분류, runner·REPL `runSource` 공용)·`run_code`(runner 전용: 새 globals·stdin 교체 뒤 `exec_in_console`)(`.py?raw`)   ← 14-runner.md 14.2.1
     core-console.ts        installStdioWriters·createCoreConsole(PyodideConsole 뼈대)·콘솔 프록시 타입   ← 02 5.1
     load-pyodide.ts        CDN 동적 import(브라우저 전용, 시험은 npm loadPyodide 주입)
     interrupt-buffer.ts    connectInterrupts(설치 → 폐기 → 연결)       ← 03 2.6
@@ -256,10 +260,12 @@ packages/pyodide-terminal/src/                  (xterm 실행창 + repl 공유 �
   selection-copy.ts        선택 시 자동 복사·선택 중 Ctrl+C 복사(Shift 무관)   ← 06 6.6
 
 packages/pyodide-repl/src/                      (REPL driver + REPL 프런트)
-  index.ts                 createRepl (main 쪽 조립, readline·interruptBuffer·sender·Ctrl+C 핸들러·dispose만)
+  index.ts                 createRepl (main 쪽 조립, readline·interruptBuffer·sender·Ctrl+C 핸들러·dispose·`runSource`/`busy` 판정)
   session.ts               core 세션(startCoreSession)과 REPL main driver를 조립해 ReplSession을 만든다. reset()(RD-010)이 통째로 교체하는 단위   ← 08-session.md
   repl-main-driver.ts      REPL main driver: sink·리더·가드·자동 들여쓰기·블록 히스토리·Tab 리더를 세션마다 만들고 `readLine`·`writeOutput`·`writeError` 핸들러, `isIdle`, 종료 시 읽기 정리를 낸다   ← 08 8.1
   driver-options.ts        REPL driver 옵션 타입(`{ topLevelAwait }`)·파서. main 쪽 driver가 싣고 worker 쪽 driver가 검증한다
+  repl-protocol.ts         `readLine` 응답 `{ source }`·요청 4번째 인자 `outcome`의 타입·판별 함수(main·worker 공용)   ← 01 1.2
+  run-source.ts            `runSource` 실행 슬롯(핸들 소유, 세션을 넘어 산다: 대기·실행·정착 단계)·`RunRejectedError` 생성   ← 02 5.6.2
   worker.ts                runReplWorker (core `runWorker({ driver: replDriver })`의 얇은 래퍼)
   terminal/                main 쪽. Terminal·Readline에만 의존. sinks·notice·rewind-tail·stdin-reader·selection-copy는 RD-022가 terminal 패키지(`./internal`)로 옮겼다
     repl-reader.ts         꼬리 + '>>> ' 합성 읽기                   ← 04 3.3
@@ -270,19 +276,21 @@ packages/pyodide-repl/src/                      (REPL driver + REPL 프런트)
     block-history.ts       블록 → history 항목 하나(createBlockHistory, 세션 소유)  ← 06 6.4(RD-014 완료)
     tab-completion.ts      순수 로직                                  ← 07
     tab-reader.ts          Tab 가로채기·큐·complete RPC 왕복(목록 재그리기는 벤더 printAbove)
+    source-bridge.ts       `runSource` 조율(세션마다 하나): `takeRead` 가져가기·꼬리 다시 쓰기·복원 옵션·정착 시점   ← 02 5.6.3~5.6.4
   worker/                  worker 쪽. REPL 전용. pyodide 프록시에만 의존(repl-driver.ts·boot.ts는 조립 모듈이라 예외, 아래)
     repl-driver.ts         replDriver(WorkerDriver): `complete` 핸들러·콘솔 확장·배너·러너·readLine 루프를 core 커널에 끼운다   ← 00 3.2
     boot.ts                bootReplWorker: core `bootWorker`에 replDriver를 끼우는 얇은 진입점(시험용)   ← 01 5절 S1
-    repl-loop.ts           REPL 루프(readLine → run, 종료·오류 정책)    ← 00 3.2
+    repl-loop.ts           REPL 루프(readLine → run 또는 `{ source }` 실행, 종료·오류 정책)    ← 00 3.2
     console.ts             REPL 콘솔(createConsole: core 뼈대 + sys.ps1/ps2·헬퍼·TLA)·runLine·await_fut·정규화  ← 02 5.1
     console-helpers.py     `await_fut` 등 헬퍼 namespace(`.py?raw`)
+    run-source.ts          `{ source }` 실행기(`createSourceRunner`: core `loadExecInConsole`·TLA 플래그·`exit()` 뒤 stdin 재개)   ← 02 5.6.1
     submission-runner.ts   제출 실행 규칙(한 줄 제출 + 여러 줄 분할·줄 흘림, RD-011)  ← 02 5.2
     multiline.py           split_paste 본체(`.py?raw`, 파싱 + 2차 compile)         ← 02 5.2
     multiline.ts           loadSplitPaste(pyodide) — multiline.py를 별도 namespace에서 실행
     multiline-corpus.json  split_paste 코퍼스 27개(이름·소스, node + 실제 pyodide 차등 검증) ← 09 9.1
     top-level-await.ts     setTopLevelAwait                           ← 02 5.4
     complete-source.ts     완성 후처리·ZipStdlibModuleCompleter(`complete-source.py`)   ← 07 7.5
-  test/                    시험 전용: sigint-setup.ts(REPL 콘솔 통합 조립), core-internals.ts(core 소스 상대 경로 re-export)   ← 09 시험 배치(9.1 앞)
+  test/                    시험 전용: sigint-setup.ts(REPL 콘솔 통합 조립), core-internals.ts(core 소스 상대 경로 re-export), vt-screen.ts(화면 행을 해석하는 시험용 가상 화면, `runSource` 시험)   ← 09 시험 배치(9.1 앞)
 
 packages/pyodide-testkit/src/                   (시험 전용, exports가 소스를 직접 가리킨다)
   thread.ts                spawnRole: worker_threads 역할 하니스
@@ -309,6 +317,7 @@ RD-010 시점의 데모(`ReplView.tsx`)는 `createRepl({ terminal, createWorker,
 - 터미널(`<div data-testid="terminal">`)은 `crashed` 중에도 계속 렌더한다(이전 구현과 다른 선택: 화면에 남은 출력이 단서가 된다).
 - `<label><input type="checkbox" data-testid="copy-on-select" /> 선택 시 자동 복사</label>`(RD-017): 기본 켜짐. `localStorage`(`runo-repl.copyOnSelect`, `"0"`이면 꺼짐)에서 초기값을 읽고 바뀔 때마다 저장하며 `handle.setCopyOnSelect(checked)`를 부른다(리셋 없음). `createRepl`에도 같은 초기값을 `copyOnSelect`로 넘긴다. `isolated`와 무관하게 활성이다(worker 없이도 선택·복사는 된다).
 - `<div role="status" data-testid="copy-toast">`(RD-017): `onCopy` 결과를 우측 하단 고정(`position: fixed; right: 16px; bottom: 16px`, 작은 글씨)으로 1초 보인다 — `ok`면 `copied {chars} chars to clipboard`, 아니면 `copy failed`. 연속 복사는 타이머를 새로 건다. 표시 중이 아니면 렌더하지 않는다.
+- `<textarea data-testid="source">`·`<button data-testid="run-source">`·`<output data-testid="source-result">`(RD-022a): `runSource(code)` 시험용이다. 버튼이 `handle.runSource(textarea 값)`을 부르고(터미널에 포커스를 주지 않는다) 결과를 JSON 텍스트로 `source-result`에 낸다(거부는 `{"rejected":"<reason>"}`). 새 호출을 시작하면 이전 결과를 지운다. `window` 전역 노출은 없다. 결과 칸은 xterm DOM 행보다 먼저 바뀔 수 있다(`docs/traps/TRP-050`). e2e는 `apps/demo/e2e/checks/run-source-check.mjs`(`e2e:run-source`).
 
 `?view=runner`(RD-022): `App.tsx`가 쿼리 `view=runner`이면 `ReplView` 대신 `RunnerView`(`createTerminalRunner`)를 렌더링한다(페이지당 xterm 1개). plain 요소 `code`(textarea)·`run`·`stop`·`reset`·`clear`·`status`·`result`·`copy-result`·`terminal`의 `data-testid`를 두고 worker는 `src/runner.worker.ts`(`runWorker({ driver: runDriver })`)다. 규칙과 e2e는 `14-runner.md` 14.6.
 
