@@ -2,7 +2,11 @@
 // 채우는 들여쓰기 규칙을 옮긴 것이다(docs/design/06-editing.md 6.3). `createAutoIndent`가 이 순수
 // 함수를 세션 소유 상태(`lastUsedIndentation`)와 묶어 벤더 `ReadOptions`로 바꾼다.
 
-import { InputType, type Input, type Readline } from "@cp949/runo-xterm-readline";
+import {
+  InputType,
+  type Input,
+  type Readline,
+} from "@cp949/runo-xterm-readline";
 import type { ReplReadOptions } from "./read-options";
 
 export interface NextIndentation {
@@ -43,13 +47,12 @@ function firstIndentation(buffer: string): string | null {
 // 줄은 들여쓰기가 없는 것(null)으로 본다.
 function previousLineIndent(
   buffer: string,
-  pos: number
+  pos: number,
 ): { lineStart: number; indent: number | null } {
   let lineStart = pos;
   while (lineStart > 0 && buffer.charAt(lineStart - 1) !== "\n") lineStart--;
   let textStart = lineStart;
-  while (textStart < pos && isIndentChar(buffer.charAt(textStart)))
-    textStart++;
+  while (textStart < pos && isIndentChar(buffer.charAt(textStart))) textStart++;
   return {
     lineStart,
     indent: textStart === pos ? null : textStart - lineStart,
@@ -89,7 +92,7 @@ export function backspaceCount(
   buffer: string,
   pos: number,
   unitWidth: number,
-  continuation: boolean
+  continuation: boolean,
 ): number {
   const lineStart = buffer.lastIndexOf("\n", pos - 1) + 1;
   const prefix = buffer.slice(lineStart, pos);
@@ -102,7 +105,7 @@ export function backspaceCount(
 export function nextIndentation(
   buffer: string,
   pos: number,
-  lastUsedIndentation: string | null
+  lastUsedIndentation: string | null,
 ): NextIndentation {
   const { lineStart, indent } = previousLineIndent(buffer, pos);
   const kept = indent ? buffer.slice(lineStart, lineStart + indent) : "";
@@ -126,7 +129,10 @@ export interface AutoIndent {
  * `createAutoIndent`를 다시 불러 4칸(`DEFAULT_UNIT`)으로 되돌아간다(`08-session.md` 8.1).
  */
 export function createAutoIndent(
-  readline: Pick<Readline, "getLine" | "getCursor" | "editInsert" | "editBackspace">
+  readline: Pick<
+    Readline,
+    "getLine" | "getCursor" | "editInsert" | "editBackspace"
+  >,
 ): AutoIndent {
   let lastUsedIndentation: string | null = null;
   // 마지막 `readOptions` 호출의 `pending`(`""`는 "블록 없음"과 "빈 블록 첫 줄"을 구분하지 않는다 —
@@ -144,7 +150,7 @@ export function createAutoIndent(
       const next = nextIndentation(
         prefix + buf,
         prefix.length + pos,
-        lastUsedIndentation
+        lastUsedIndentation,
       );
       lastUsedIndentation = next.lastUsedIndentation;
       readline.editInsert("\n" + next.indentation);
@@ -157,7 +163,7 @@ export function createAutoIndent(
         buf,
         pos,
         indentUnitWidth(lastUsedIndentation),
-        pendingBlock !== ""
+        pendingBlock !== "",
       );
       if (count > 1) {
         readline.editBackspace(count);
@@ -173,7 +179,11 @@ export function createAutoIndent(
     readOptions(pending) {
       pendingBlock = pending ?? "";
       if (pending === undefined) return { onKey };
-      const next = nextIndentation(pending, pending.length, lastUsedIndentation);
+      const next = nextIndentation(
+        pending,
+        pending.length,
+        lastUsedIndentation,
+      );
       lastUsedIndentation = next.lastUsedIndentation;
       return next.indentation === ""
         ? { onKey }

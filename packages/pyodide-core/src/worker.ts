@@ -16,10 +16,7 @@ export { composeRpcHandlers } from "./protocol/rpc-handlers";
 export type { ReadyPayload } from "./protocol/ready-payload";
 export { bootWorker } from "./worker/boot";
 export type { BootDeps, BootOptions } from "./worker/boot";
-export {
-  createCoreConsole,
-  installStdioWriters,
-} from "./worker/core-console";
+export { createCoreConsole, installStdioWriters } from "./worker/core-console";
 export type {
   CompilerFlagsHolder,
   ConsoleFutureProxy,

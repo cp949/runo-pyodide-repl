@@ -60,7 +60,12 @@ export type ExecInConsolePy = PyProxy &
   ) => Promise<RawOutcome>);
 
 /** driver Python이 만든 결말을 검증하며 `RunOutcome`으로 바꾼다. 형식이 어긋나면 던진다(RPC 오류로 나간다). */
-export function toRunOutcome([kind, errorType, traceback, code]: RawOutcome): RunOutcome {
+export function toRunOutcome([
+  kind,
+  errorType,
+  traceback,
+  code,
+]: RawOutcome): RunOutcome {
   switch (kind) {
     case "ok":
       return { kind };
@@ -136,7 +141,9 @@ function loadDriverFunction<T extends PyProxy>(
   pyodide: PyodideInterface,
   name: string,
 ): T {
-  const namespace = pyodide.toPy({}) as PyProxy & { get(name: string): unknown };
+  const namespace = pyodide.toPy({}) as PyProxy & {
+    get(name: string): unknown;
+  };
   try {
     pyodide.runPython(RUN_DRIVER_SOURCE, {
       globals: namespace,

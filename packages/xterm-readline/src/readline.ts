@@ -206,7 +206,7 @@ export class Readline implements ITerminalAddon {
         if (this.activeRead !== undefined) {
           this.state.refresh();
         }
-      })
+      }),
     );
     this.term.attachCustomKeyEventHandler(this.handleKeyEvent.bind(this));
   }
@@ -630,7 +630,7 @@ export class Readline implements ITerminalAddon {
         this.term.rows,
         this.term.options.tabStopWidth,
         this.output(),
-        anchor
+        anchor,
       );
     } else {
       return new Tty(0, 0, 8, this.output());
@@ -656,7 +656,7 @@ export class Readline implements ITerminalAddon {
   public read(prompt: string, options: ReadOptions): Promise<string | null>;
   public read(
     prompt: string,
-    options: ReadOptions = {}
+    options: ReadOptions = {},
   ): Promise<string | null> {
     const cancelable = options.cancelable === true;
     return new Promise((resolve, reject) => {
@@ -680,12 +680,12 @@ export class Readline implements ITerminalAddon {
           prompt,
           this.tty(),
           this.highlighter,
-          this.history
+          this.history,
         );
         if (options.prefill !== undefined && options.prefill !== "") {
           this.state.update(
             options.prefill,
-            clampCursor(options.prefillCursor, options.prefill.length)
+            clampCursor(options.prefillCursor, options.prefill.length),
           );
         } else {
           this.state.refresh();
@@ -888,7 +888,7 @@ export class Readline implements ITerminalAddon {
           this.activeRead.prompt,
           this.tty(),
           this.highlighter,
-          this.history
+          this.history,
         );
         this.state.refresh();
         break;

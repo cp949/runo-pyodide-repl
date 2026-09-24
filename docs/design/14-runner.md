@@ -4,12 +4,12 @@
 
 ## 14.1 구성과 패키지 배치
 
-| 층 | 위치 | 역할 |
-| --- | --- | --- |
-| worker 실행 driver | core `./worker`의 `runDriver`(`worker/run-driver.ts` + `run-driver.py`) | RPC `runCode(source)`를 받아 새 globals에서 실행하고 결말(`RunOutcome`)을 돌려준다 |
-| main 실행 핸들 | core `.`의 `createRunner`(`session/runner.ts`) | worker 생성·재생성, interrupt buffer·송신기, core 세션, 상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`, `InputProvider` 호출 |
-| xterm 실행창 | terminal `.`의 `createTerminalRunner`(`src/terminal-runner.ts`) | `createRunner`를 호출자 소유 `Terminal`에 붙인다: sink 출력, `input()` 한 줄 읽기, Ctrl+C, 선택 복사 |
-| 데모 | `apps/demo`의 `?view=runner`(`RunnerView.tsx`, `runner.worker.ts`) | plain 요소로 실행창 조작·결과를 노출한다(14.6). RD-024부터 `RunnerView`는 `createTerminalRunner`를 직접 부르지 않고 `<PythonRunner>`(`@cp949/runo-pyodide-react`, `15-react.md`)를 쓴다 |
+| 층                 | 위치                                                                    | 역할                                                                                                                                                                                    |
+| ------------------ | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| worker 실행 driver | core `./worker`의 `runDriver`(`worker/run-driver.ts` + `run-driver.py`) | RPC `runCode(source)`를 받아 새 globals에서 실행하고 결말(`RunOutcome`)을 돌려준다                                                                                                      |
+| main 실행 핸들     | core `.`의 `createRunner`(`session/runner.ts`)                          | worker 생성·재생성, interrupt buffer·송신기, core 세션, 상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`, `InputProvider` 호출                                                      |
+| xterm 실행창       | terminal `.`의 `createTerminalRunner`(`src/terminal-runner.ts`)         | `createRunner`를 호출자 소유 `Terminal`에 붙인다: sink 출력, `input()` 한 줄 읽기, Ctrl+C, 선택 복사                                                                                    |
+| 데모               | `apps/demo`의 `?view=runner`(`RunnerView.tsx`, `runner.worker.ts`)      | plain 요소로 실행창 조작·결과를 노출한다(14.6). RD-024부터 `RunnerView`는 `createTerminalRunner`를 직접 부르지 않고 `<PythonRunner>`(`@cp949/runo-pyodide-react`, `15-react.md`)를 쓴다 |
 
 `createRunner`는 xterm·React를 모른다. canvas 같은 소비자는 `onOutput`·`InputProvider`만 채워 쓴다. 앱의 worker 파일과 main 사용은 다음과 같다(`worker.format`은 REPL과 같은 이유로 `'es'`, `00-architecture.md` 4.1).
 
@@ -21,8 +21,13 @@ runWorker({ driver: runDriver });
 // main (UI 비의존)
 import { createRunner } from "@cp949/runo-pyodide-core";
 const runner = createRunner({
-  createWorker: () => new Worker(new URL("./runner.worker.ts", import.meta.url), { type: "module" }),
-  onOutput: ({ stream, text }) => { /* stdout·stderr 원문 조각 */ },
+  createWorker: () =>
+    new Worker(new URL("./runner.worker.ts", import.meta.url), {
+      type: "module",
+    }),
+  onOutput: ({ stream, text }) => {
+    /* stdout·stderr 원문 조각 */
+  },
   inputProvider: async (prompt, signal) => "한 줄", // 생략하면 input()이 읽기 취소를 받는다(14.4)
 });
 const result = await runner.run('print("hi")'); // { kind: "ok" }
@@ -38,12 +43,12 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 - 예외는 `console.formattraceback(exc)`, 문법 오류는 `console.formatsyntaxerror(exc)`로 포맷하고 결과 `traceback`과 stderr에 함께 쓴다. `filename`이 `<…>` 꺾쇠 형태가 아니면 `CodeRunner`가 소스를 `linecache`에 등록하므로(`_set_linecache`) `File "main.py", line N` 밑에 소스 줄이 나온다. 3.13+ 트레이스백은 그 줄 밑에 `~^~` 형태의 캐럿 줄을 붙인다.
 - 하나의 결말 분류:
 
-| Python 쪽 결말 | `RunOutcome` |
-| --- | --- |
-| 예외 없이 끝남 | `{ kind: "ok" }` |
-| 처리되지 않은 `KeyboardInterrupt`, 또는 정지한 `await`를 깨워 끝낸 중단(`IdleInterrupt`) | `{ kind: "interrupted", traceback }` |
-| `SystemExit` | `{ kind: "exit", code }`(14.2.4) |
-| 그 밖의 처리되지 않은 예외(문법 오류 포함) | `{ kind: "error", errorType, traceback }` |
+| Python 쪽 결말                                                                           | `RunOutcome`                              |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------- |
+| 예외 없이 끝남                                                                           | `{ kind: "ok" }`                          |
+| 처리되지 않은 `KeyboardInterrupt`, 또는 정지한 `await`를 깨워 끝낸 중단(`IdleInterrupt`) | `{ kind: "interrupted", traceback }`      |
+| `SystemExit`                                                                             | `{ kind: "exit", code }`(14.2.4)          |
+| 그 밖의 처리되지 않은 예외(문법 오류 포함)                                               | `{ kind: "error", errorType, traceback }` |
 
 `IdleInterrupt`는 공개 이름이 없는 표지 예외라 클래스 이름 문자열로 알아본다(`_is_interrupt`, `docs/traps/TRP-040`).
 
@@ -82,16 +87,16 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 
 ### 14.3.1 상태 8종
 
-| 상태 | 들어가는 때 | 나가는 때 |
-| --- | --- | --- |
-| `loading` | 격리된 페이지에서 첫 worker를 만든 직후 | `ready`(`ready` 알림), `load-failed`, `crashed` |
-| `ready` | worker `ready`, 실행 종료, run 없는 입력 읽기 종료 | `running`(run 전송), `restarting`, `crashed` |
-| `running` | `runCode` 전송 | `ready`(결말), `waiting-input`, `restarting`, `crashed` |
-| `waiting-input` | worker가 `input()`·`sys.stdin` 읽기로 메일박스에서 정지(`readInput` 알림) | `running`(응답·취소 뒤, run 있음) 또는 `ready`(run 없음), `restarting`, `crashed` |
-| `restarting` | `reset()` 또는 `stop()` 폴백이 worker를 교체(새 worker를 만든 뒤 통지. 생성이 던지면 거치지 않고 `crashed`) | `ready`, `load-failed`, `crashed` |
-| `load-failed` | pyodide 로드 실패(worker는 살아 있다) | `reset()` |
-| `crashed` | worker `error` 이벤트·`crashed` 알림, 재생성 중 `createWorker` 예외 | `reset()`(크래시 뒤에도 살아 있는 worker의 입력 읽기는 공급자를 부르지 않고 응답 없이 버려 상태가 바뀌지 않는다) |
-| `not-isolated` | `crossOriginIsolated !== true`(worker를 만들지 않는다) | 없음(`reset()`도 no-op) |
+| 상태            | 들어가는 때                                                                                                 | 나가는 때                                                                                                        |
+| --------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `loading`       | 격리된 페이지에서 첫 worker를 만든 직후                                                                     | `ready`(`ready` 알림), `load-failed`, `crashed`                                                                  |
+| `ready`         | worker `ready`, 실행 종료, run 없는 입력 읽기 종료                                                          | `running`(run 전송), `restarting`, `crashed`                                                                     |
+| `running`       | `runCode` 전송                                                                                              | `ready`(결말), `waiting-input`, `restarting`, `crashed`                                                          |
+| `waiting-input` | worker가 `input()`·`sys.stdin` 읽기로 메일박스에서 정지(`readInput` 알림)                                   | `running`(응답·취소 뒤, run 있음) 또는 `ready`(run 없음), `restarting`, `crashed`                                |
+| `restarting`    | `reset()` 또는 `stop()` 폴백이 worker를 교체(새 worker를 만든 뒤 통지. 생성이 던지면 거치지 않고 `crashed`) | `ready`, `load-failed`, `crashed`                                                                                |
+| `load-failed`   | pyodide 로드 실패(worker는 살아 있다)                                                                       | `reset()`                                                                                                        |
+| `crashed`       | worker `error` 이벤트·`crashed` 알림, 재생성 중 `createWorker` 예외                                         | `reset()`(크래시 뒤에도 살아 있는 worker의 입력 읽기는 공급자를 부르지 않고 응답 없이 버려 상태가 바뀌지 않는다) |
+| `not-isolated`  | `crossOriginIsolated !== true`(worker를 만들지 않는다)                                                      | 없음(`reset()`도 no-op)                                                                                          |
 
 - `waiting-input`은 run 없이도 나타난다: `run()`이 끝난 뒤 남은 asyncio task가 `input()`을 부르면 worker가 메일박스에 정지한다. 이때 provider가 그대로 불리고, 새 `run()`은 `busy`, `stop()`은 그 읽기만 취소하고 `"idle"`, `interrupt()`도 읽기를 취소하며, 읽기가 끝나면 `ready`로 돌아온다(복구는 `reset()`이기도 하다).
 - 로딩·재시작 대기 중이던 `run()`이 `ready`에서 시작되면 `ready` → `running` 두 상태를 차례로 통지한다. `onStatus("ready")` 콜백이 `reset()`을 부르면 대기 run은 옛 세션으로 보내지 않고 새 worker의 `ready`까지 기다린다.
@@ -102,34 +107,35 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 - 결과 유니온 `RunResult` = `RunOutcome`(14.2.1의 4종) + `{ kind: "restarted" }`. 코드가 실행됐을 때의 결말만 담는다.
 - 코드가 실행되지 않았거나 실행 도중 worker가 사라지면 `RunRejectedError { reason }`으로 reject한다(`reason`: `"busy"` | `"unavailable"` | `"disposed"` | `"crashed"`).
 
-| `run()` 호출 시점·사건 | 결과 |
-| --- | --- |
-| `code`가 문자열이 아님 | `TypeError`로 reject |
-| `dispose()` 뒤 | `RunRejectedError("disposed")` |
-| 상태 `not-isolated`·`load-failed`·`crashed` | `RunRejectedError("unavailable")` |
-| 이미 실행 슬롯을 차지한 run이 있음(대기 중 포함), 또는 상태 `waiting-input` | `RunRejectedError("busy")` |
-| 상태 `loading`·`restarting` | 대기(슬롯 점유). `ready`가 되면 실행한다 |
-| 대기 중 `stop()` | 대기 취소, `RunRejectedError("unavailable")`, `stop()`은 `"idle"` |
-| 대기 중 `load-failed` | `RunRejectedError("unavailable")` |
-| 실행 중·대기 중 `dispose()` | `RunRejectedError("disposed")` |
-| 실행 중·대기 중 worker 크래시 | `RunRejectedError("crashed")`(자동 재생성 없음) |
-| 실행 중 `reset()`·`stop()` 폴백 | `{ kind: "restarted" }`로 resolve |
-| 대기 중 `reset()` | 취소하지 않고 새 worker가 `ready`가 되면 실행한다(아직 실행되지 않았으므로 `restarted`가 아니다) |
+| `run()` 호출 시점·사건                                                      | 결과                                                                                             |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `code`가 문자열이 아님                                                      | `TypeError`로 reject                                                                             |
+| `dispose()` 뒤                                                              | `RunRejectedError("disposed")`                                                                   |
+| 상태 `not-isolated`·`load-failed`·`crashed`                                 | `RunRejectedError("unavailable")`                                                                |
+| 이미 실행 슬롯을 차지한 run이 있음(대기 중 포함), 또는 상태 `waiting-input` | `RunRejectedError("busy")`                                                                       |
+| 상태 `loading`·`restarting`                                                 | 대기(슬롯 점유). `ready`가 되면 실행한다                                                         |
+| 대기 중 `stop()`                                                            | 대기 취소, `RunRejectedError("unavailable")`, `stop()`은 `"idle"`                                |
+| 대기 중 `load-failed`                                                       | `RunRejectedError("unavailable")`                                                                |
+| 실행 중·대기 중 `dispose()`                                                 | `RunRejectedError("disposed")`                                                                   |
+| 실행 중·대기 중 worker 크래시                                               | `RunRejectedError("crashed")`(자동 재생성 없음)                                                  |
+| 실행 중 `reset()`·`stop()` 폴백                                             | `{ kind: "restarted" }`로 resolve                                                                |
+| 대기 중 `reset()`                                                           | 취소하지 않고 새 worker가 `ready`가 되면 실행한다(아직 실행되지 않았으므로 `restarted`가 아니다) |
 
 ### 14.3.3 `stop()`과 `interrupt()`
 
 - `interrupt()`(Ctrl+C용): 열린 입력 읽기가 있으면 그 읽기를 취소한다(worker는 메일박스에 정지해 SIGINT를 폴링하지 못한다). 아니면 `run`이 실행 중(`running`)일 때 눌림만 보낸다(REPL과 같은 송신기·연타 보호·5ms 점검·재전송, `03-ctrl-c.md` 2.3, terminate 없음). 그 밖은 무동작. 게이트는 core 세션 `pythonRunning = alive && inputReadsPending === 0 && !driver.isIdle()`이고 runner의 `isIdle()`은 `active?.phase !== "sent"`다.
 - `stop(): Promise<"idle" | "stopped" | "restarted">`:
 
-| 호출 시점 | 동작 | 반환 |
-| --- | --- | --- |
-| 실행 없음(`ready` 등) | 배경 task의 열린 읽기가 있으면 그것만 취소 | `"idle"` |
-| 로딩·재시작 대기 중인 run | 대기 취소(위 표) | `"idle"` |
-| 실행 중 | 열린 입력 읽기가 있으면(`waiting-input`) 읽기 취소(`KeyboardInterrupt`), 없으면 interrupt 송신. **호출 시각부터 1000ms**(`STOP_FALLBACK_MS`) 안에 `run()`이 끝나면 | `"stopped"` |
-| 실행 중, 1000ms 안에 끝나지 않음 | worker를 terminate하고 새로 만든다(`restarting`). `run()`은 `{ kind: "restarted" }`. 새 worker 생성(`createWorker`)이 던져 `crashed`가 돼도 같다 | `"restarted"` |
-| `dispose()` 뒤 | — | `"idle"` |
+| 호출 시점                        | 동작                                                                                                                                                               | 반환          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| 실행 없음(`ready` 등)            | 배경 task의 열린 읽기가 있으면 그것만 취소                                                                                                                         | `"idle"`      |
+| 로딩·재시작 대기 중인 run        | 대기 취소(위 표)                                                                                                                                                   | `"idle"`      |
+| 실행 중                          | 열린 입력 읽기가 있으면(`waiting-input`) 읽기 취소(`KeyboardInterrupt`), 없으면 interrupt 송신. **호출 시각부터 1000ms**(`STOP_FALLBACK_MS`) 안에 `run()`이 끝나면 | `"stopped"`   |
+| 실행 중, 1000ms 안에 끝나지 않음 | worker를 terminate하고 새로 만든다(`restarting`). `run()`은 `{ kind: "restarted" }`. 새 worker 생성(`createWorker`)이 던져 `crashed`가 돼도 같다                   | `"restarted"` |
+| `dispose()` 뒤                   | —                                                                                                                                                                  | `"idle"`      |
 
-  `stop()`을 겹쳐 부르면 첫 호출의 Promise를 공유하고 타이머는 첫 호출 시각부터다. `stop()` 중에 새로 시작된 읽기(`KeyboardInterrupt`를 잡고 다시 `input()`을 부른 프로그램)는 provider를 거치지 않고 즉시 취소한다. `"stopped"`는 결말이 무엇이든(`interrupted`이든 크래시·`dispose()`이든) worker 교체 없이 실행이 끝났다는 뜻이다.
+`stop()`을 겹쳐 부르면 첫 호출의 Promise를 공유하고 타이머는 첫 호출 시각부터다. `stop()` 중에 새로 시작된 읽기(`KeyboardInterrupt`를 잡고 다시 `input()`을 부른 프로그램)는 provider를 거치지 않고 즉시 취소한다. `"stopped"`는 결말이 무엇이든(`interrupted`이든 크래시·`dispose()`이든) worker 교체 없이 실행이 끝났다는 뜻이다.
+
 - `KeyboardInterrupt`를 삼키는 루프(`while True: try: … except KeyboardInterrupt: pass`)는 interrupt로 끝나지 않으므로 `stop()`은 폴백(`"restarted"`)이 되고 Ctrl+C만으로는 끝낼 수 없다.
 
 ### 14.3.4 `reset()`·`dispose()`·크래시
@@ -155,7 +161,10 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 ## 14.4 `InputProvider`
 
 ```ts
-type InputProvider = (prompt: string, signal: AbortSignal) => Promise<string | null>
+type InputProvider = (
+  prompt: string,
+  signal: AbortSignal,
+) => Promise<string | null>;
 ```
 
 - 호출 시점: Python이 `input()`·`sys.stdin` 읽기를 시작해 worker가 메일박스에서 정지했을 때 한 번(읽기 한 건당).
@@ -186,13 +195,13 @@ type InputProvider = (prompt: string, signal: AbortSignal) => Promise<string | n
 
 ### 14.5.3 Ctrl+C
 
-| 상태 | Ctrl+C 동작 |
-| --- | --- |
-| 텍스트 선택이 있음(모든 상태) | 복사하고 선택을 지운다. 인터럽트·취소 없음(`06-editing.md` 6.6이 가로챈다) |
-| `running` | `^C`를 개행 없이 화면에 쓰고 `runner.interrupt()`(눌림 송신) |
-| `waiting-input`, 읽기가 화면에 열려 있음 | 벤더가 `cancelable` 읽기를 `null`로 끝낸다(`^C` 표시 없음, 줄바꿈만). `input()`은 `KeyboardInterrupt`, 결과 `interrupted` |
-| `waiting-input`, 읽기가 아직 그려지기 전이거나 `inputProvider`를 직접 준 경우 | `runner.interrupt()`가 읽기를 취소한다 |
-| 그 밖(`ready`·`loading` 등) | 무동작(`^C`도 없음) |
+| 상태                                                                          | Ctrl+C 동작                                                                                                               |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 텍스트 선택이 있음(모든 상태)                                                 | 복사하고 선택을 지운다. 인터럽트·취소 없음(`06-editing.md` 6.6이 가로챈다)                                                |
+| `running`                                                                     | `^C`를 개행 없이 화면에 쓰고 `runner.interrupt()`(눌림 송신)                                                              |
+| `waiting-input`, 읽기가 화면에 열려 있음                                      | 벤더가 `cancelable` 읽기를 `null`로 끝낸다(`^C` 표시 없음, 줄바꿈만). `input()`은 `KeyboardInterrupt`, 결과 `interrupted` |
+| `waiting-input`, 읽기가 아직 그려지기 전이거나 `inputProvider`를 직접 준 경우 | `runner.interrupt()`가 읽기를 취소한다                                                                                    |
+| 그 밖(`ready`·`loading` 등)                                                   | 무동작(`^C`도 없음)                                                                                                       |
 
 `running` 중 Ctrl+C는 벤더 `setCtrlCHandler`(읽기 밖 Ctrl+C에만 불린다)가 처리하고 상태는 core `status`를 그 시점에 읽는다.
 

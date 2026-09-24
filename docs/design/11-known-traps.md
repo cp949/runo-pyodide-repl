@@ -4,41 +4,41 @@
 
 ## 목록
 
-| 번호 | 범주 | 증상 |
-| --- | --- | --- |
-| TRAP-01 (TRP-002) | runtime | `input()` 프롬프트가 Enter 뒤에야 다음 출력과 함께 늦게 나타난다 |
-| TRAP-02 (TRP-003) | runtime | 예외가 날 때만 트레이스백에 pyodide 내부 프레임이 다 보이고 proxy가 이미 파괴돼 있다 |
-| TRAP-03 (TRP-007) | runtime | `await asyncio.sleep(1)`이 top-level에서 오류 없이 실행돼 CPython REPL과 다르다 |
-| TRAP-04 (TRP-009) | runtime | 실행 구간 밖에서 쓴 SIGINT가 남아 다음 문장 실행 때 worker가 죽는다 |
-| TRAP-05 (TRP-014) | runtime | stdin 콜백의 취소 신호 대부분이 HANG·`OSError`·`EOFError`·fatal로 엉뚱하게 끝난다 |
-| TRAP-06 (TRP-019) | runtime | `^C`가 찍히고 버퍼도 0인데 루프가 계속 돈다(신호 폴링 비원자성) |
-| TRAP-07 (TRP-020) | runtime | `await asyncio.sleep(5); print('done')`이 `^Cdone`이 되고 `sleep` 루프는 프롬프트가 안 돌아온다 |
-| TRAP-08 (TRP-021) | runtime | 드물게 눌림이 조용히 사라지거나 시험이 시간 초과로 멈춘다 |
-| TRAP-09 (TRP-022) | runtime | 기대한 트레이스백 앞에 `CancelledError` 트레이스백이 하나 더 화면에 나온다 |
-| TRAP-10 (TRP-032) | runtime | `import collections.a` 완성 후보가 예외 없이 `[]`다 |
-| TRAP-11 (TRP-001) | readline | dispose된 `Readline`의 지연 콜백이 `DisposableStore` 경고를 남긴다 |
-| TRAP-12 (TRP-004) | readline | 개행 없이 끝난 출력이 다음 읽기의 첫 재그리기에서 통째로 지워진다 |
-| TRAP-13 (TRP-006) | readline | 붙여넣은 탭이 조용히 사라져 들여쓰기가 깨진다 |
-| TRAP-14 (TRP-008) | readline | `read()` 직후의 입력 버퍼 조작이 조용히 사라진다 |
-| TRAP-15 (TRP-016) | readline | 폭을 넘는 프롬프트의 첫 재그리기가 앞 행을 남겨 중복된다 |
-| TRAP-16 (TRP-017) | readline | 화면은 멀쩡한데 스크롤백에서 꼬리 1행이 사라진다 |
-| TRAP-17 (TRP-030) | readline | 재그리기 뒤 커서 복원이 줄 맨 앞으로 가거나 이모지 뒤에서 어긋난다 |
-| TRAP-18 (TRP-011) | harness | pty로 띄운 3.14 `_pyrepl`이 화살표 키를 오류 없이 무시해 "↑ 무동작"으로 오인된다 |
-| TRAP-19 (TRP-013) | harness | pty CPython의 stderr 무개행 쓰기가 안 보여 "출력 안 됨"으로 오인된다 |
-| TRAP-20 (TRP-015) | harness | 배경 실행한 pty 자식이 SIGINT를 무시해 Ctrl+C가 오류 없이 무반응이다 |
-| TRAP-21 (TRP-018) | harness | Ctrl+C 연타 측정이 눌림 합쳐짐·에코 합쳐짐·소표본 때문에 성공처럼 보인다 |
-| TRAP-22 (TRP-023) | harness | `unhandledRejection` 리스너를 붙인 시험이 vitest 집계에서 빠진다 |
-| TRAP-23 (TRP-024) | harness | 폴링 경로 JS 훅이 맨몸 루프 +10%로 보이지만 `str(i)` 루프는 2.9배다 |
-| TRAP-24 (TRP-025) | harness | 가짜 재전송이 섞여 재전송 횟수를 소실·복구로 읽게 된다 |
-| TRAP-25 (TRP-028) | harness | 눌림 시각 고정·소표본 측정이 통과해 최대 지연 13배가 안 보인다 |
-| TRAP-26 (TRP-029) | harness | 블로킹 대기 위의 `setTimeout` 눌림 시험이 끊기지 않았는데 통과한다 |
-| TRAP-27 (TRP-034) | harness | 모듈 완성 후보 개수·목록 단정이 cwd와 환경마다 깨진다 |
-| TRAP-28 (TRP-035) | harness | 요청 번호 없이 심은 SIGINT를 핸들러가 무시해 "영향 없음"으로 오판된다 |
-| TRAP-29 (TRP-012) | protocol | 끝 개행을 붙여 넘겨도 시험이 통과한 채 프롬프트 앞에 빈 줄만 생긴다 |
-| TRAP-30 (TRP-026) | protocol | 읽기 진입에서 취소한 인터럽트 송신기가 곧바로 되살아난다 |
-| TRAP-31 (TRP-027) | protocol | SIGINT 슬롯을 ack 없이 지우면 부팅 중 Ctrl+C가 worker를 죽인다 |
-| TRAP-32 (TRP-031) | protocol | Python 인덱스를 JS 문자열에 그대로 써서 이모지 뒤가 한 칸씩 어긋난다 |
-| TRAP-33 (TRP-033) | protocol | 단어 경계 정규식 게이트가 `1import os`에서 건전하지 않다 |
+| 번호              | 범주     | 증상                                                                                            |
+| ----------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| TRAP-01 (TRP-002) | runtime  | `input()` 프롬프트가 Enter 뒤에야 다음 출력과 함께 늦게 나타난다                                |
+| TRAP-02 (TRP-003) | runtime  | 예외가 날 때만 트레이스백에 pyodide 내부 프레임이 다 보이고 proxy가 이미 파괴돼 있다            |
+| TRAP-03 (TRP-007) | runtime  | `await asyncio.sleep(1)`이 top-level에서 오류 없이 실행돼 CPython REPL과 다르다                 |
+| TRAP-04 (TRP-009) | runtime  | 실행 구간 밖에서 쓴 SIGINT가 남아 다음 문장 실행 때 worker가 죽는다                             |
+| TRAP-05 (TRP-014) | runtime  | stdin 콜백의 취소 신호 대부분이 HANG·`OSError`·`EOFError`·fatal로 엉뚱하게 끝난다               |
+| TRAP-06 (TRP-019) | runtime  | `^C`가 찍히고 버퍼도 0인데 루프가 계속 돈다(신호 폴링 비원자성)                                 |
+| TRAP-07 (TRP-020) | runtime  | `await asyncio.sleep(5); print('done')`이 `^Cdone`이 되고 `sleep` 루프는 프롬프트가 안 돌아온다 |
+| TRAP-08 (TRP-021) | runtime  | 드물게 눌림이 조용히 사라지거나 시험이 시간 초과로 멈춘다                                       |
+| TRAP-09 (TRP-022) | runtime  | 기대한 트레이스백 앞에 `CancelledError` 트레이스백이 하나 더 화면에 나온다                      |
+| TRAP-10 (TRP-032) | runtime  | `import collections.a` 완성 후보가 예외 없이 `[]`다                                             |
+| TRAP-11 (TRP-001) | readline | dispose된 `Readline`의 지연 콜백이 `DisposableStore` 경고를 남긴다                              |
+| TRAP-12 (TRP-004) | readline | 개행 없이 끝난 출력이 다음 읽기의 첫 재그리기에서 통째로 지워진다                               |
+| TRAP-13 (TRP-006) | readline | 붙여넣은 탭이 조용히 사라져 들여쓰기가 깨진다                                                   |
+| TRAP-14 (TRP-008) | readline | `read()` 직후의 입력 버퍼 조작이 조용히 사라진다                                                |
+| TRAP-15 (TRP-016) | readline | 폭을 넘는 프롬프트의 첫 재그리기가 앞 행을 남겨 중복된다                                        |
+| TRAP-16 (TRP-017) | readline | 화면은 멀쩡한데 스크롤백에서 꼬리 1행이 사라진다                                                |
+| TRAP-17 (TRP-030) | readline | 재그리기 뒤 커서 복원이 줄 맨 앞으로 가거나 이모지 뒤에서 어긋난다                              |
+| TRAP-18 (TRP-011) | harness  | pty로 띄운 3.14 `_pyrepl`이 화살표 키를 오류 없이 무시해 "↑ 무동작"으로 오인된다                |
+| TRAP-19 (TRP-013) | harness  | pty CPython의 stderr 무개행 쓰기가 안 보여 "출력 안 됨"으로 오인된다                            |
+| TRAP-20 (TRP-015) | harness  | 배경 실행한 pty 자식이 SIGINT를 무시해 Ctrl+C가 오류 없이 무반응이다                            |
+| TRAP-21 (TRP-018) | harness  | Ctrl+C 연타 측정이 눌림 합쳐짐·에코 합쳐짐·소표본 때문에 성공처럼 보인다                        |
+| TRAP-22 (TRP-023) | harness  | `unhandledRejection` 리스너를 붙인 시험이 vitest 집계에서 빠진다                                |
+| TRAP-23 (TRP-024) | harness  | 폴링 경로 JS 훅이 맨몸 루프 +10%로 보이지만 `str(i)` 루프는 2.9배다                             |
+| TRAP-24 (TRP-025) | harness  | 가짜 재전송이 섞여 재전송 횟수를 소실·복구로 읽게 된다                                          |
+| TRAP-25 (TRP-028) | harness  | 눌림 시각 고정·소표본 측정이 통과해 최대 지연 13배가 안 보인다                                  |
+| TRAP-26 (TRP-029) | harness  | 블로킹 대기 위의 `setTimeout` 눌림 시험이 끊기지 않았는데 통과한다                              |
+| TRAP-27 (TRP-034) | harness  | 모듈 완성 후보 개수·목록 단정이 cwd와 환경마다 깨진다                                           |
+| TRAP-28 (TRP-035) | harness  | 요청 번호 없이 심은 SIGINT를 핸들러가 무시해 "영향 없음"으로 오판된다                           |
+| TRAP-29 (TRP-012) | protocol | 끝 개행을 붙여 넘겨도 시험이 통과한 채 프롬프트 앞에 빈 줄만 생긴다                             |
+| TRAP-30 (TRP-026) | protocol | 읽기 진입에서 취소한 인터럽트 송신기가 곧바로 되살아난다                                        |
+| TRAP-31 (TRP-027) | protocol | SIGINT 슬롯을 ack 없이 지우면 부팅 중 Ctrl+C가 worker를 죽인다                                  |
+| TRAP-32 (TRP-031) | protocol | Python 인덱스를 JS 문자열에 그대로 써서 이모지 뒤가 한 칸씩 어긋난다                            |
+| TRAP-33 (TRP-033) | protocol | 단어 경계 정규식 게이트가 `1import os`에서 건전하지 않다                                        |
 
 ## runtime — pyodide/CPython 런타임 함정
 
@@ -47,7 +47,7 @@
 - 증상: `input("이름: ")`의 프롬프트가 사용자가 입력하기 전이 아니라 Enter 뒤 다음 출력과 함께 나타난다. 값 전달은 정확하고 오류도 없어 "프롬프트 없이 입력받는 버그"로 오인한다.
 - 원인: `pyodide.setStdout({ batched })`는 개행이 나올 때까지 버퍼링한다. `input(prompt)`가 쓰는 프롬프트에는 개행이 없다. `PyodideConsole`의 `stdout_callback`(`console.py`의 `_WriteStream`)은 `write()`마다 즉시 콜백을 부르는 별개 경로다.
 - 새 구현이 지킬 규칙: 전역 스트림은 `setStdout({ batched })`를 쓰지 않고 `write` 단위 콜백으로 등록한다. 콘솔 콜백과 전역 stdout·stderr를 같은 sink로 보낸다(프롬프트 대기 중 도는 콜백의 출력은 전역 스트림을 탄다).
-- 검증 방법: `input("p: ")` 실행 후 메일박스에 값을 넣기 *전에* 터미널에 `p: `가 도달했는지 화면 행으로 단언한다.
+- 검증 방법: `input("p: ")` 실행 후 메일박스에 값을 넣기 _전에_ 터미널에 `p: `가 도달했는지 화면 행으로 단언한다.
 
 ### TRAP-02 (TRP-003) raw ConsoleFuture를 JS에서 직접 await하면 트레이스백이 깨지고 proxy가 조기 파괴됨
 
@@ -162,7 +162,7 @@ TRAP-12는 공개 `read(prompt)`만 쓰지만 `refreshLineInner`의 재그리기
 - 증상: 폭을 넘는 프롬프트의 첫 그리기 직후에만 앞 행이 중복된다. 글자를 치기 시작하면 라이브러리가 스스로 올라가 맞아 보이고, 전체 바이트에 `toContain('\x1b[nA')`를 쓰는 시험은 Enter 시점의 라이브러리 자체 이동으로 충족돼 통과한다.
 - 원인: `read()`가 시작 시점 `cursorY`를 `anchorRow`로 잡고, 첫 재그리기는 oldLayout 커서 행이 0이라 위로 올라가지 않은 채 커서 행부터 `\r\x1b[J`로 지우고 프롬프트 전체를 다시 쓴다(`tty.js` `refreshLineInner`).
 - 새 구현이 지킬 규칙: `read()` 앞에 `\x1b[nA`로 커서를 프롬프트 첫 행까지 올린다. n은 `term.write('', cb)`로 flush를 기다린 뒤 화면 버퍼에서 커서 행부터 `isWrapped`를 위로 센 값이다(`baseY + cursorY` 기준, `cursorY` 상한).
-- 검증 방법: 첫 재그리기(`\r\x1b[J`) *앞에* 나간 `\x1b[nA`만 센다. 커서 올리기 제거, 행 수 고정, `baseY` 무시, `cursorY` 상한 제거 변이로 실제로 걸리는지 확인한다.
+- 검증 방법: 첫 재그리기(`\r\x1b[J`) _앞에_ 나간 `\x1b[nA`만 센다. 커서 올리기 제거, 행 수 고정, `baseY` 무시, `cursorY` 상한 제거 변이로 실제로 걸리는지 확인한다.
 - 이전 우회: 자체 `rewindTail` 구현이 xterm `buffer.active`의 `isWrapped`를 직접 순회했다. `Tty`가 export되지 않고 `string-width`가 선언 의존성이 아니라 라이브러리 레이아웃 규칙을 재구현한 형태.
 
 ### TRAP-16 (TRP-017) 뷰포트를 채운 레이아웃에서 맨 윗행이 스크롤백에 안 감
@@ -222,7 +222,7 @@ TRAP-12는 공개 `read(prompt)`만 쓰지만 `refreshLineInner`의 재그리기
 - 증상: 시험 전체·타입체크·lint·브라우저 매트릭스가 모두 통과한 채 남는다(그 측정들은 전부 프롬프트가 뜬 뒤에 누른다). 부팅 크래시 트레이스백이 시작 코드(`eval_code`, `signal.signal`) 안의 `KeyboardInterrupt`라 "pyodide 시작이 불안정하다"로 읽힌다. 실측 수정 전 30/30 크래시.
 - 원인: 부팅 중 눌림이 SIGINT를 쓴 뒤 worker가 슬롯을 ack 없이 지우면, 다음 점검이 `signal === 0`·`ack === snapshot`을 소실로 읽고 같은 번호로 다시 쓴다. 그 2가 핸들러 설치 전 pyodide 기본 폴링에 걸린다(요청 번호 규칙은 핸들러 안에 있어 설치 전에는 못 막는다).
 - 새 구현이 지킬 규칙: 슬롯을 지우는 모든 곳은 지운 값이 2일 때 ack를 올린다(지울 눌림이 없으면 ack하지 않는다 — 과잉 ack는 살아 있는 송신기가 미전달을 전달로 읽게 한다). 송신기가 살아 있을 수 있는 상태에서 슬롯을 비우거나 worker를 바꾸는 코드는 `cancel()`이나 ack 중 하나를 반드시 동반한다. 핸들러를 interrupt buffer 연결보다 먼저 설치한다.
-- 검증 방법: 첫 프롬프트 *전에* 누르는 브라우저 시나리오를 둔다(`page.goto`는 `waitUntil: 'commit'`, `waitForSelector`는 `state: 'attached'` — `domcontentloaded`는 늦고 xterm 헬퍼 textarea는 크기 0이라 기본 `visible`이 프롬프트까지 기다린다). 새 정리 지점을 더하면 "그 지점 전에 누른 눌림"을 시험한다.
+- 검증 방법: 첫 프롬프트 _전에_ 누르는 브라우저 시나리오를 둔다(`page.goto`는 `waitUntil: 'commit'`, `waitForSelector`는 `state: 'attached'` — `domcontentloaded`는 늦고 xterm 헬퍼 textarea는 크기 0이라 기본 `visible`이 프롬프트까지 기다린다). 새 정리 지점을 더하면 "그 지점 전에 누른 눌림"을 시험한다.
 
 ### TRAP-32 (TRP-031) Python 코드포인트 인덱스를 JS UTF-16 문자열에 그대로 씀
 

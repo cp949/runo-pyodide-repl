@@ -61,7 +61,7 @@ class StubTerminal {
 
   /** 벤더 `handleKeyEvent`에 원시 이벤트를 넘기고 반환값(=xterm 자체 처리 여부)을 돌려준다. */
   fireKeyEvent(
-    event: Partial<KeyboardEvent> & { key: string; type: string }
+    event: Partial<KeyboardEvent> & { key: string; type: string },
   ): boolean {
     return this.keyEventHandler?.(event as KeyboardEvent) ?? true;
   }

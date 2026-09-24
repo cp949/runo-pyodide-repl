@@ -25,11 +25,7 @@ export {
   startCoreSession,
 } from "./session/core-session";
 export type { CoreSession, CoreSessionOptions } from "./session/core-session";
-export type {
-  MainDriver,
-  OutputChunk,
-  SessionStatus,
-} from "./session/driver";
+export type { MainDriver, OutputChunk, SessionStatus } from "./session/driver";
 export type { RunOutcome } from "./protocol/run-outcome";
 export { RunRejectedError, createRunner } from "./session/runner";
 export type {

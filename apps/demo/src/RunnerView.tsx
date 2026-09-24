@@ -1,12 +1,17 @@
 import { PythonRunner, RunRejectedError } from "@cp949/runo-pyodide-react";
-import type { CopyResult, PythonRunnerHandle, RunnerStatus } from "@cp949/runo-pyodide-react";
+import type {
+  CopyResult,
+  PythonRunnerHandle,
+  RunnerStatus,
+} from "@cp949/runo-pyodide-react";
 import "@xterm/xterm/css/xterm.css";
 import { useRef, useState } from "react";
 import { createRunnerWorker } from "./create-worker";
 
 /** `run()`이 끝났을 때 `result`에 보여 줄 문자열. 결과 유니온은 JSON, 거부는 `{"rejected":"<reason>"}`. */
 function describeError(error: unknown): string {
-  if (error instanceof RunRejectedError) return JSON.stringify({ rejected: error.reason });
+  if (error instanceof RunRejectedError)
+    return JSON.stringify({ rejected: error.reason });
   return JSON.stringify({ error: String(error) });
 }
 
@@ -52,13 +57,25 @@ export function RunnerView({ fit }: { fit: boolean }) {
         <button type="button" data-testid="run" onClick={run}>
           run
         </button>{" "}
-        <button type="button" data-testid="stop" onClick={() => void runnerRef.current?.stop()}>
+        <button
+          type="button"
+          data-testid="stop"
+          onClick={() => void runnerRef.current?.stop()}
+        >
           stop
         </button>{" "}
-        <button type="button" data-testid="reset" onClick={() => runnerRef.current?.reset()}>
+        <button
+          type="button"
+          data-testid="reset"
+          onClick={() => runnerRef.current?.reset()}
+        >
           reset
         </button>{" "}
-        <button type="button" data-testid="clear" onClick={() => runnerRef.current?.clear()}>
+        <button
+          type="button"
+          data-testid="clear"
+          onClick={() => runnerRef.current?.clear()}
+        >
           clear
         </button>
       </div>
@@ -76,7 +93,9 @@ export function RunnerView({ fit }: { fit: boolean }) {
         fit={fit}
         onStatus={setStatus}
         // 드래그 선택 복사와 선택 중 Ctrl+C 복사의 결과를 화면에 남긴다(토스트 대신 plain 텍스트).
-        onCopy={(r: CopyResult) => setCopyResult(r.ok ? `copied ${r.chars} chars` : "copy failed")}
+        onCopy={(r: CopyResult) =>
+          setCopyResult(r.ok ? `copied ${r.chars} chars` : "copy failed")
+        }
       />
     </>
   );

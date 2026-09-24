@@ -5,14 +5,15 @@
 새 구현에서 sink 4종은 worker→main **단방향 RPC 알림**(`notify`)으로 전달된다. 이전 구현은 조각마다 worker를 멈추는 동기 호출이었고, 그 동기성은 요구사항이 아니었다. 순서 보장은 같은 MessagePort의 FIFO에 의존한다(`01-protocols.md` 1절).
 
 ## 4.1 sink 4종(`createTerminalSinks(readline)`)
+
 sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL main driver가 세션마다 만든다)가 소유한다. `write`·`writeErrorRaw`는 core 세션이 `write`·`writeErrorRaw` 알림을 `{ stream: "stdout" | "stderr", text }`로 넘기는 `output` 콜백을 REPL main driver가 연결한 것이고(`stdout` → `write`, `stderr` → `writeErrorRaw`), `writeOutput`·`writeError`는 core가 아니라 REPL main driver의 RPC 핸들러가 부른다(`01-protocols.md` 1.2, `00-architecture.md` 4.1 core export). 꼬리 추적기 `createOutputTail`(`output-tail`)은 터미널에 의존하지 않는 순수 모듈이라 core `terminal/output-tail.ts`에 있고 `sinks.ts`가 import한다.
 
-| sink | 구현 | 개행 | 색 | 용도 |
-| --- | --- | --- | --- | --- |
-| `writeOutput` | `readline.println(text)` | 강제 `\r\n` | 없음 | 식 값 에코, 시작 배너 |
-| `writeError` | `println("\x1b[31m…\x1b[0m")` | 강제 `\r\n` | 빨강(한 번 감쌈) | 트레이스백, SyntaxError, 붙여넣기 파싱 오류, 취소 `KeyboardInterrupt` |
-| `write` | `readline.print(text)` | 없음 | 없음 | `stdout_callback` 조각, `^C` 에코, 전역 stdout |
-| `writeErrorRaw` | `print("\x1b[31m…\x1b[0m")` | 없음 | 조각마다 열고 닫음 | `stderr_callback` 조각, 전역 stderr |
+| sink            | 구현                          | 개행        | 색                 | 용도                                                                  |
+| --------------- | ----------------------------- | ----------- | ------------------ | --------------------------------------------------------------------- |
+| `writeOutput`   | `readline.println(text)`      | 강제 `\r\n` | 없음               | 식 값 에코, 시작 배너                                                 |
+| `writeError`    | `println("\x1b[31m…\x1b[0m")` | 강제 `\r\n` | 빨강(한 번 감쌈)   | 트레이스백, SyntaxError, 붙여넣기 파싱 오류, 취소 `KeyboardInterrupt` |
+| `write`         | `readline.print(text)`        | 없음        | 없음               | `stdout_callback` 조각, `^C` 에코, 전역 stdout                        |
+| `writeErrorRaw` | `print("\x1b[31m…\x1b[0m")`   | 없음        | 조각마다 열고 닫음 | `stderr_callback` 조각, 전역 stderr                                   |
 
 - **개행 계약**: println 계열 sink가 `\r\n`을 붙이므로 호출부는 **끝 개행 없는 텍스트**를 넘긴다. 붙이면
   프롬프트 앞에 빈 줄이 하나 더 생긴다(TRP-012). 트레이스백/SyntaxError는 `formatted_error`의 **끝 개행
@@ -34,6 +35,7 @@ sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL ma
   sink 세트를 새로 만드는 자리에서만 쓴다 — 꼬리가 남은 sink 세트 옆에서 부르면 화면과 꼬리가 어긋난다.
 
 ## 4.2 batched vs raw, 전역 스트림
+
 - `PyodideConsole`은 `runcode()` 동안에만 `sys.stdout`/`sys.stderr`를 `stdout_callback`/`stderr_callback`
   (순수 Python `_WriteStream`)으로 리다이렉트한다. 이 콜백은 `write()` 호출마다 버퍼링 없이 즉시 실행되며
   FS 레벨 `setStdout`의 `batched`/`raw` 설정과 **완전히 독립**이다. 스트리밍 문제의 원인은 pyodide 설정이
@@ -52,10 +54,11 @@ sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL ma
 - stderr 버퍼링(`line_buffering=True`)은 모사하지 않는다 — 콘솔 콜백 경로의 웹은 즉시 낸다(TRP-013).
 
 ## 4.3 BANNER / 프롬프트 문자열
+
 - 시작 배너는 `pyodide.console` 모듈의 `BANNER`를 `writeOutput`으로 그대로 낸다(sink가 개행을 붙이므로
   배너에 개행을 더하지 않는다). 가짜 리눅스/GCC 배너를 흉내내지 않는다. `BANNER`는 `pyodide.pyimport("pyodide.console")`
   모듈의 속성이고 끝 개행이 없다: `Python 3.14.2 (main, Sep 14 2026 03:03:51) on WebAssembly/Emscripten\nType "help",
-  "copyright", "credits" or "license" for more information.`(pyodide 314.0.7, 2행).
+"copyright", "credits" or "license" for more information.`(pyodide 314.0.7, 2행).
 - worker 시작 시 `sys.ps1 = ">>> "`, `sys.ps2 = "... "`를 직접 설정한다(pyodide 기본은 `None`이라
   `hasattr(sys, 'ps1')`로 REPL을 판정하는 코드가 어긋난다).
 
@@ -141,4 +144,3 @@ REPL `input()` 읽기, 실행창 `input()` 읽기. `printAbove`·`printAboveRaw`
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/05-output-streaming.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/{terminal-sinks,sink-writer,output-tail}.ts`
-

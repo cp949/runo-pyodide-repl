@@ -52,7 +52,8 @@ function hasVisibleText(segment: string): boolean {
   while (index < segment.length) {
     if (segment[index] !== "\x1b" || segment[index + 1] !== "[") return true;
     let end = index + 2;
-    while (end < segment.length && "0123456789;:".includes(segment.charAt(end))) end += 1;
+    while (end < segment.length && "0123456789;:".includes(segment.charAt(end)))
+      end += 1;
     if (segment[end] !== "m") return true;
     index = end + 1;
   }
@@ -122,12 +123,16 @@ export function createTerminalSinks(
   /** 열린 읽기 위에 쓴다. 꼬리 추적기는 건드리지 않는다(읽기 중 접두는 벤더가 보관한다). */
   const printAboveRead = (text: string) => {
     const current = readline.abovePrefix();
-    const previous = resume !== undefined && resume.prefix === current ? resume.text : current;
+    const previous =
+      resume !== undefined && resume.prefix === current ? resume.text : current;
     const split = splitAboveRead(previous, text);
     resume =
       split.resume === undefined
         ? undefined
-        : { prefix: split.prefix, text: compactResume(split.prefix, split.resume) };
+        : {
+            prefix: split.prefix,
+            text: compactResume(split.prefix, split.resume),
+          };
     void readline.printAboveRaw(split.lines, split.prefix);
   };
   const print = (text: string) => {

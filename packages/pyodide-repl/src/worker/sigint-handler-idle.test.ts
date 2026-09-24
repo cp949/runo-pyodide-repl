@@ -511,7 +511,9 @@ asyncio.futures._set_result_unless_cancelled = _sruc_pressing
     }
 
     // 주입 지점을 실제로 지났는지(지나지 않았으면 이 시험은 아무것도 보지 않은 것이다).
-    expect(pyodide.runPython("len(_sruc_hits)", { globals: pyodide.globals })).toBe(1);
+    expect(
+      pyodide.runPython("len(_sruc_hits)", { globals: pyodide.globals }),
+    ).toBe(1);
     expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
   }, 20_000);
 
@@ -585,13 +587,18 @@ asyncio.ensure_future = _ef_pressing
     try {
       expect(await runner.run("run_sync(asyncio.sleep(0.01))")).toEqual(READY);
     } finally {
-      pyodide.runPython("import asyncio\nasyncio.ensure_future = _ef_original", {
-        globals: pyodide.globals,
-        filename: "<test>",
-      });
+      pyodide.runPython(
+        "import asyncio\nasyncio.ensure_future = _ef_original",
+        {
+          globals: pyodide.globals,
+          filename: "<test>",
+        },
+      );
     }
 
-    expect(pyodide.runPython("len(_ef_hits)", { globals: pyodide.globals })).toBe(1);
+    expect(
+      pyodide.runPython("len(_ef_hits)", { globals: pyodide.globals }),
+    ).toBe(1);
     expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
   }, 20_000);
 });
@@ -901,7 +908,9 @@ async def main():
     expect(await runner.run("catcher()")).toEqual(READY);
 
     expect(performance.now() - startedAt).toBeLessThan(300 + WAKE_LIMIT_MS);
-    expect(runner.screen.stdout).not.toMatch(/'guard'|'sleep'|'poll'|'sigint_handler'/);
+    expect(runner.screen.stdout).not.toMatch(
+      /'guard'|'sleep'|'poll'|'sigint_handler'/,
+    );
     expect(runner.screen.stdout).not.toContain("<sleep-slice>");
     expect(runner.screen.stdout).not.toContain("wasm://");
     expect(runner.screen.stdout).not.toContain("pyodide.asm.mjs");
@@ -939,9 +948,7 @@ def helper():
   it("코루틴 안에 사용자 프레임이 없으면 라이브러리 프레임이 남는다(TypeError)", async () => {
     const runner = await setup();
 
-    expect(await runner.run("asyncio.run(asyncio.sleep('x'))")).toEqual(
-      READY,
-    );
+    expect(await runner.run("asyncio.run(asyncio.sleep('x'))")).toEqual(READY);
 
     expect(
       runner.screen.stderr.match(/Traceback \(most recent call last\):/g),

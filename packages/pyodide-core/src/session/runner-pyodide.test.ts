@@ -48,7 +48,8 @@ interface Started {
 
 /** 조건이 참이 될 때까지 이벤트 루프를 돌린다(벽시계 상한 없음, 시험 시간 제한이 정지를 잡는다). */
 async function until(predicate: () => boolean): Promise<void> {
-  while (!predicate()) await new Promise<void>((resolve) => setImmediate(resolve));
+  while (!predicate())
+    await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 async function start(options: Partial<RunnerOptions> = {}): Promise<Started> {

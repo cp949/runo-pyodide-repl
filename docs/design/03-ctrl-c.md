@@ -5,6 +5,7 @@
 interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3절에 있다. 이 문서는 그 위의 프로토콜(요청 번호·ack·재전송, Python 핸들러, 감시 타이머, 연결 순서)이다. 새 구현에서 달라지는 점은 하나다: `readInput` 진입은 main이 메일박스 요청 알림을 받는 시점이다.
 
 ## 2.1 버퍼 슬롯
+
 - `createInterruptBuffer()` = `new Int32Array(new SharedArrayBuffer(4 * 4))`,
   `INTERRUPT_BUFFER_LENGTH = 4`.
 - `SIGNAL = 0` — main이 `2`를 쓰고 pyodide 폴링이 읽고 비운다.
@@ -17,6 +18,7 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
   모두 no-op이고 SIGINT 슬롯만 동작한다.
 
 ## 2.2 쓰기·ack 규칙
+
 - `signalInterrupt(buffer)`: **`Atomics.add(SEQ, 1)`을 먼저** 하고 그다음 `Atomics.store(SIGNAL, 2)`.
   SIGINT가 보이는 순간 핸들러가 읽는 번호가 이 눌림의 것이어야 새 눌림이 직전 눌림의 재전송으로 오인되지 않는다.
   새 SIGINT를 쓰는 경로는 main 송신기와 core `worker/stdin-callback.ts` 두 곳뿐이다(후자는 RD-008이 넣었다: core `worker/boot.ts`가
@@ -28,6 +30,7 @@ interrupt buffer의 슬롯 배치와 전달 경로 자체는 `01-protocols.md` 3
 - 폐기가 ack 없이 슬롯만 지우면 송신기가 "소실"로 오판해 `2`를 되살린다(TRP-027).
 
 ## 2.3 main 송신기 상태기계(`createInterruptSender`)
+
 - 옵션 기본값: `intervalMs = 5`, `maxResends = 10`. 타이머는 주입(`setTimer`/`clearTimer`,
   프로덕션은 `window.setTimeout`).
 - `send()`: ack 값을 스냅샷 → `signalInterrupt` → 5ms마다 점검.
@@ -81,6 +84,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
    없어 `KeyboardInterrupt`를 잡고 계속 도는 프로그램은 다음 SIGINT에 다시 중단된다.
 
 깨우기 세부:
+
 - `run_sync` 래퍼(`pyodide.webloop.run_sync`, `pyodide.ffi.run_sync` 교체): 대기 awaitable을 `guard`
   코루틴 Task로 감싼다. 깨울 때 Task를 취소해 `finally`를 돌린 뒤 `guard`가 `CancelledError`를 정상 값
   `WOKEN`으로 바꾸고, 래퍼가 사용자 스택(대기 호출 지점)에서 `KeyboardInterrupt`를 올린다. awaitable이 낸
@@ -111,7 +115,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   (`run_until_complete`)도 뗀다. 그 뒤 남은 프레임 중 **우리 프레임 개별**(`run_sync` 래퍼 등)을 떼고, 그
   바로 바깥에 붙은 `webloop.py` 프레임도 함께 뗀다(awaitable 안에서 난 `webloop.py` 프레임, 예:
   `call_later`의 `TypeError` 자리는 남긴다). 예: `[<module>, webloop _run, webloop run_until_complete,
-  run_sync 래퍼, main]` → `[<module>, main]`(래퍼가 나른 예외는 안쪽 끝이 사용자 프레임이라 첫 단계 절단에
+run_sync 래퍼, main]` → `[<module>, main]`(래퍼가 나른 예외는 안쪽 끝이 사용자 프레임이라 첫 단계 절단에
   걸리지 않고, 개별 제거 단계만 적용된다). `IdleInterrupt`는 `KeyboardInterrupt` 한 줄로 만든다. 문자열에서
   `File "<sigint-handler>"` 줄을 지우는 방식보다 견고하다. 안쪽만 자르는 규칙은 연타에서 우리 프레임이
   샜다(2/10 → 0/10, RD-009a 전까지의 규칙이 첫 단계만이었을 때의 실측).
@@ -126,6 +130,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   아니면 `report('webloop-filename', 경로)`를 부른다. 절단 규칙 `is_webloop`이 무효가 될 뿐 끌 기능이 없어 보고만 한다.
 
 ## 2.5 감시 타이머(`startInterruptWatch(deps)` → 중지 함수)
+
 - `deps` = `interruptIdle`·`atPrompt`·`hasPending`·`consume`·`discard`·`tickMs = 20`. core `worker/interrupt-watch.ts`는 `protocol/`을
   import하지 않으므로 버퍼가 아니라 클로저를 받는다(core `boot.ts`가 넣는다): `hasPending` =
   `hasPendingInterrupt(buffer)`(`Atomics.load(SIGNAL) === 2`), `consume` =
@@ -145,6 +150,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 - `ready` 알림 뒤·`driver.run` 직전에 켜고(REPL은 배너·러너 생성 앞, 그 사이에 `await`가 없다), `driver.run`이 끝나면(REPL은 루프가 `exit()`로 끝날 때) 끈다. 세션 리셋은 worker 교체라 함께 사라진다.
 
 ## 2.6 연결 순서와 시작 코드 보호
+
 - `connectInterrupts(pyodide, pyconsole, buffer, { ack, seq, discard, report })` → `InterruptIdle`이 유일한
   진입점이다. core `worker/interrupt-buffer.ts`는 `protocol/`을 import하지 않으므로 네 함수는 core `boot.ts`가 클로저로 넣는다
   (`stdin-callback.ts`와 같은 패턴). 부팅 순서에서 위치는 `driver.createConsole`·`driver.probe`·`suppressWebLoopReraise` 뒤·`setStdin`
@@ -158,6 +164,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   치운다(재전송이 새 worker에 도착하면 같은 사고).
 
 ## 2.7 main 쪽 Ctrl+C 처리
+
 - `readline.setCtrlCHandler(...)`는 읽는 중이 아닐 때만 불린다. 눌림마다 `^C`를 **sink `write`로**
   에코하고(꼬리에 들어가야 한다) `interruptSender.send()`를 부른다.
 - **게이트 `pythonRunning = alive && inputReadsPending === 0 && !driver.isIdle()`**(core 세션, RD-020). REPL driver의 `isIdle = readLinePending || cancelSettling`이라 옛 식 `alive && !readLinePending && inputReadsPending === 0 && !cancelSettling`과 같은 불리언이다. 거짓이면
@@ -180,6 +187,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   `cancelable = true`를 보내며, `false`를 보내면 벤더 원본 동작(`^C` + 같은 프롬프트 재그리기)이다.
 
 ## 2.8 webloop 재보고 억제(`webloop-reraise.py`)
+
 - WebLoop의 `_keyboard_interrupt_handler`·`_system_exit_handler`를 no-op으로 바꿔 `run_handle`이
   콜백 안의 `KeyboardInterrupt`·`SystemExit`을 다시 던지지 않게 한다. 정상 중단·`input()` 취소·`exit()`가
   내던 `pageerror`(시행당 2, 2, 1건)가 0이 된다. 화면 트레이스백과 `exit()` 종료는 그대로.
@@ -192,6 +200,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   `suppressWebLoopReraise`를 불러야 한다(core `boot.ts`의 배선은 그 인스턴스에 닿지 않는다).
 
 ## 2.9 텍스트 시퀀스
+
 ```
 (A) 실행 중 정상 중단
 main: Ctrl+C → pythonRunning() 확인 → sink.write("^C") → sender.send()
@@ -240,4 +249,3 @@ main: 이 구간의 Ctrl+C는 게이트가 열려 있어 에코·전송한다(�
 이전 구현 설계 문서 `02f-sleep-slice.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/{interrupt-protocol,interrupt-sender,interrupt-buffer,interrupt-watch,sigint-handler,webloop-reraise}.ts`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/sigint-handler.py`
-

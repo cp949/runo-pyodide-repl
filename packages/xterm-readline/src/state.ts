@@ -60,7 +60,7 @@ export class State {
     prompt: string,
     tty: Tty,
     highlighter: Highlighter,
-    history: History
+    history: History,
   ) {
     this.prompt = prompt;
     this.basePrompt = prompt;
@@ -106,7 +106,7 @@ export class State {
   public shouldHighlight(): boolean {
     const highlighting = this.highlighter.highlightChar(
       this.line.buf,
-      this.line.pos
+      this.line.pos,
     );
     if (highlighting) {
       this.highlighting = true;
@@ -207,14 +207,14 @@ export class State {
     const newLayout = this.tty.computeLayout(this.promptSize, this.line);
     newLayout.scrollOffset = this.adjustScroll(
       newLayout.cursor.row,
-      this.layout.scrollOffset
+      this.layout.scrollOffset,
     );
     this.tty.refreshLine(
       this.prompt,
       this.line,
       this.layout,
       newLayout,
-      this.highlighter
+      this.highlighter,
     );
     this.layout = newLayout;
   }
@@ -356,7 +356,7 @@ export class State {
   public moveCursor() {
     const cursor = this.tty.calculatePosition(
       this.line.pos_buffer(),
-      this.promptSize
+      this.promptSize,
     );
     if (cursor === this.layout.cursor) {
       return;

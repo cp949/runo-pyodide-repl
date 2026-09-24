@@ -119,7 +119,10 @@ interface Request {
 
 function startSession(options: SessionOptions = {}) {
   const cols = options.cols ?? 40;
-  const fake = createFakeTerminal({ asyncWrite: options.asyncWrite ?? false, cols });
+  const fake = createFakeTerminal({
+    asyncWrite: options.asyncWrite ?? false,
+    cols,
+  });
   // 화면을 해석하는 가상 화면을 가짜 터미널의 write 앞에 끼운다. 커서 모델도 함께 갱신한다(`Readline`이 앵커 행으로 읽는다).
   const vt = new VtScreen(cols, 24);
   const originalWrite = fake.term.write.bind(fake.term);
@@ -612,7 +615,9 @@ describe("runSource 대기·생애 사건", () => {
       session.statuses.push(status);
       if (status !== "crashed") return;
       seen.busy = session.handle.busy;
-      seen.rejection = session.handle.runSource("x").catch((error: unknown) => error);
+      seen.rejection = session.handle
+        .runSource("x")
+        .catch((error: unknown) => error);
     });
 
     session.worker.dispatchError("worker 죽음");
@@ -620,7 +625,9 @@ describe("runSource 대기·생애 사건", () => {
     await expect(run).rejects.toMatchObject({ reason: "crashed" });
     expect(observed().state).toBe("rejected");
     expect(seen.busy).toBe(false);
-    await expect(seen.rejection).resolves.toMatchObject({ reason: "unavailable" });
+    await expect(seen.rejection).resolves.toMatchObject({
+      reason: "unavailable",
+    });
   });
 
   test("크래시 콜백 안에서 reset()해도(자동 복구) 진행 중이던 실행은 restarted가 아니라 crashed로 끝난다", async () => {
@@ -837,7 +844,8 @@ describe("runSource 거부 표와 busy 게터", () => {
   test.each(rejectionRows.map((row) => [row.title, row] as const))(
     "%s이면 거부하고 화면을 건드리지 않으며 busy 게터가 그 판정과 같다",
     async (title, row) => {
-      if (title === "상태 not-isolated") vi.stubGlobal("crossOriginIsolated", false);
+      if (title === "상태 not-isolated")
+        vi.stubGlobal("crossOriginIsolated", false);
       const session = startSession({
         asyncWrite: row.asyncWrite,
         workerHandlers: row.workerHandlers,
@@ -919,7 +927,11 @@ function serialWrites(session: Session): () => Promise<void> {
     queue.push({ text, callback });
   }) as typeof session.fake.term.write;
   return async () => {
-    for (let entry = queue.shift(); entry !== undefined; entry = queue.shift()) {
+    for (
+      let entry = queue.shift();
+      entry !== undefined;
+      entry = queue.shift()
+    ) {
       inner(entry.text, entry.callback);
       await tick();
     }
@@ -940,7 +952,13 @@ describe("runSource 정착·정리 경계(사후 리뷰)", () => {
     await settle();
     await drain();
 
-    const second = session.rpc.call<ReadLineReply>("readLine", ">>> ", undefined, true, OK);
+    const second = session.rpc.call<ReadLineReply>(
+      "readLine",
+      ">>> ",
+      undefined,
+      true,
+      OK,
+    );
     const secondState = observe(second);
     for (let round = 0; round < 3; round += 1) {
       await settle();
@@ -1244,15 +1262,21 @@ describe.each([
   test("프로브 P4: 감긴 입력줄 위 배경 출력은 감긴 두 행을 모두 지우고 그 아래에 다시 그리며 Backspace 뒤 흔적 행이 없다", async () => {
     const session = startSession({ asyncWrite, cols: 40 });
     const first = await openPrompt(session, "x".repeat(50));
-    expect(session.vt.screen()).toBe(`>>> ${"x".repeat(36)}\n${"x".repeat(14)}`);
+    expect(session.vt.screen()).toBe(
+      `>>> ${"x".repeat(36)}\n${"x".repeat(14)}`,
+    );
     await background(session, "tick\n");
-    expect(session.vt.screen()).toBe(`tick\n>>> ${"x".repeat(36)}\n${"x".repeat(14)}`);
+    expect(session.vt.screen()).toBe(
+      `tick\n>>> ${"x".repeat(36)}\n${"x".repeat(14)}`,
+    );
 
     session.fake.type("a");
     await session.pump();
     session.fake.type("\x7f\x7f");
     await session.pump();
-    expect(session.vt.screen()).toBe(`tick\n>>> ${"x".repeat(36)}\n${"x".repeat(13)}`);
+    expect(session.vt.screen()).toBe(
+      `tick\n>>> ${"x".repeat(36)}\n${"x".repeat(13)}`,
+    );
 
     await take(session, first);
     expect(session.vt.screen()).toBe("tick");
@@ -1402,13 +1426,20 @@ describe("Tab 완성 응답과 배경 출력 재그리기의 겹침", () => {
           finish = resolve;
         }),
     );
-    const session = startSession({ asyncWrite: true, workerHandlers: { complete } });
+    const session = startSession({
+      asyncWrite: true,
+      workerHandlers: { complete },
+    });
     const first = await openPrompt(session, "imp");
     await session.pump();
     expect(session.vt.screen()).toBe(">>> imp");
     session.fake.type("\t");
     await waitFor(() => complete.mock.calls.length > 0);
-    return { session, first, finish: (value: SourceCompletion) => finish(value) };
+    return {
+      session,
+      first,
+      finish: (value: SourceCompletion) => finish(value),
+    };
   };
 
   test("완성 응답이 재그리기 콜백보다 먼저 오면 커서는 import 끝이고 이어 친 글자가 그 뒤에 붙는다", async () => {

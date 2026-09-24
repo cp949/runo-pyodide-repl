@@ -143,7 +143,8 @@ function createFakeCore(initial: RunnerStatus = "ready") {
       const run = activeRun;
       activeRun = undefined;
       run?.resolve(result);
-      if (status === "running" || status === "waiting-input") setStatus("ready");
+      if (status === "running" || status === "waiting-input")
+        setStatus("ready");
     },
     /** Python이 `input()`을 부른 상황: core가 provider를 부르고 상태를 `waiting-input`으로 바꾼다. */
     requestInput(prompt = ""): {
@@ -157,7 +158,8 @@ function createFakeCore(initial: RunnerStatus = "ready") {
       const result = options.inputProvider(prompt, controller.signal);
       void result.finally(() => {
         if (inputController === controller) inputController = undefined;
-        if (status === "waiting-input") setStatus(activeRun ? "running" : "ready");
+        if (status === "waiting-input")
+          setStatus(activeRun ? "running" : "ready");
       });
       return { result, controller };
     },
@@ -463,7 +465,9 @@ describe("run 시작 시 화면 준비: 커서 줄바꿈·clearOnRun", () => {
     fake.written.length = 0;
     fake.screen.cursorX = 3;
 
-    await expect(handle.run("second")).rejects.toMatchObject({ reason: "busy" });
+    await expect(handle.run("second")).rejects.toMatchObject({
+      reason: "busy",
+    });
 
     expect(fake.written).toEqual([]);
   });
@@ -477,7 +481,9 @@ describe("run 시작 시 화면 준비: 커서 줄바꿈·clearOnRun", () => {
     fake.written.length = 0;
     fake.screen.cursorX = 3;
 
-    await expect(handle.run("second")).rejects.toMatchObject({ reason: "busy" });
+    await expect(handle.run("second")).rejects.toMatchObject({
+      reason: "busy",
+    });
 
     expect(fake.written).toEqual([]);
     expect(core.calls.run).toEqual(["first", "second"]);
@@ -638,8 +644,14 @@ describe("출력 연결", () => {
     core.output({ stream: "stderr", text: "err" });
 
     expect(screen()).toBe(`out${RED}err${RESET}`);
-    expect(onOutput).toHaveBeenNthCalledWith(1, { stream: "stdout", text: "out" });
-    expect(onOutput).toHaveBeenNthCalledWith(2, { stream: "stderr", text: "err" });
+    expect(onOutput).toHaveBeenNthCalledWith(1, {
+      stream: "stdout",
+      text: "out",
+    });
+    expect(onOutput).toHaveBeenNthCalledWith(2, {
+      stream: "stderr",
+      text: "err",
+    });
   });
 
   test("input()의 프롬프트는 직전 출력의 꼬리로 그려진다", async () => {
@@ -704,7 +716,10 @@ describe("input() 대기 중 배경 출력(RD-022b)", () => {
     core.output({ stream: "stderr", text: "warn\n" });
 
     expect(vt.screen()).toBe("warn\nx: ab");
-    expect(onOutput).toHaveBeenLastCalledWith({ stream: "stderr", text: "warn\n" });
+    expect(onOutput).toHaveBeenLastCalledWith({
+      stream: "stderr",
+      text: "warn\n",
+    });
     fake.type("\r");
     await expect(result).resolves.toBe("ab");
     core.finishRun();
@@ -894,9 +909,9 @@ describe("입력 읽기의 signal abort", () => {
     fake.type("\x03");
 
     await expect(result).resolves.toBeNull();
-    expect(fake.written.slice(before).filter((text) => text === "\r\n")).toHaveLength(
-      1,
-    );
+    expect(
+      fake.written.slice(before).filter((text) => text === "\r\n"),
+    ).toHaveLength(1);
   });
 });
 
@@ -948,7 +963,9 @@ describe("비격리", () => {
     expect(fake.written.join("")).toContain("cross-origin isolation");
     const before = fake.written.length;
     await expect(handle.run("1")).rejects.toBeInstanceOf(RunRejectedError);
-    await expect(handle.run("1")).rejects.toMatchObject({ reason: "unavailable" });
+    await expect(handle.run("1")).rejects.toMatchObject({
+      reason: "unavailable",
+    });
     expect(fake.written).toHaveLength(before);
     expect(createWorker).not.toHaveBeenCalled();
     handle.dispose();
@@ -1046,7 +1063,9 @@ describe("dispose()", () => {
     handle.dispose();
     fake.select("abc");
 
-    fake.term.element!.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+    fake.term.element!.dispatchEvent(
+      new MouseEvent("mousedown", { button: 0 }),
+    );
     document.dispatchEvent(new MouseEvent("mouseup"));
 
     expect(writeText).not.toHaveBeenCalled();
@@ -1058,7 +1077,9 @@ describe("선택 복사", () => {
     const writeText = stubClipboard();
     const { fake, handle } = setup({ terminal: { withElement: true } });
     const drag = () => {
-      fake.term.element!.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+      fake.term.element!.dispatchEvent(
+        new MouseEvent("mousedown", { button: 0 }),
+      );
       document.dispatchEvent(new MouseEvent("mouseup"));
     };
     fake.select("abc");
@@ -1079,7 +1100,9 @@ describe("선택 복사", () => {
     });
     fake.select("abc");
 
-    fake.term.element!.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+    fake.term.element!.dispatchEvent(
+      new MouseEvent("mousedown", { button: 0 }),
+    );
     document.dispatchEvent(new MouseEvent("mouseup"));
 
     expect(writeText).not.toHaveBeenCalled();

@@ -23,10 +23,18 @@
  * 끝나면 `interruptCompletion()`을 1회 부른다 — worker의 완성 계산(임의 `repr()` 실행 등)이 멎어
  * 있을 수 있어 비워 둔다. Enter로 끝나거나 요청이 없으면 부르지 않는다.
  */
-import { InputType, type Input, type Readline } from "@cp949/runo-xterm-readline";
+import {
+  InputType,
+  type Input,
+  type Readline,
+} from "@cp949/runo-xterm-readline";
 import type { SourceCompletion } from "../worker/complete-source";
 import type { ReplReadOptions } from "./read-options";
-import { formatCompletionList, planTab, resolveCompletion } from "./tab-completion";
+import {
+  formatCompletionList,
+  planTab,
+  resolveCompletion,
+} from "./tab-completion";
 
 export interface TabReaderDeps {
   /** worker `complete` RPC 호출. `pending`은 `... ` 블록의 이어지는 텍스트(RD-016 대비). */

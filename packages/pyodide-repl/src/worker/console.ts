@@ -148,9 +148,9 @@ export function createConsole(
   const retrieveException = namespace.get("retrieve_exception") as (
     fut: ConsoleFutureProxy,
   ) => void;
-  const incompleteInputMessage = namespace.get("incomplete_input_message") as () =>
-    | string
-    | undefined;
+  const incompleteInputMessage = namespace.get(
+    "incomplete_input_message",
+  ) as () => string | undefined;
 
   function pending(): string | undefined {
     const buffer = pyconsole.buffer;

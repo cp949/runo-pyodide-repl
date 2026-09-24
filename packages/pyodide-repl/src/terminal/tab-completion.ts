@@ -20,8 +20,7 @@ const LIST_CAP = 200;
 const CELL_GAP = 2;
 
 export type TabPlan =
-  | { kind: "indent"; text: string }
-  | { kind: "complete"; source: string };
+  { kind: "indent"; text: string } | { kind: "complete"; source: string };
 
 // import·from 사전 게이트. 부분 문자열이고 단어 경계가 없다(TRAP-33): `\b`를 쓰면 `1import os` 류에서
 // 게이트가 거짓인데 3.14 파서는 후보를 내 결과가 어긋난다. 필요조건("키워드 글자열이 있어야 한다")만
@@ -105,7 +104,10 @@ function codepointLength(text: string): number {
 // floor(터미널 열 / 셀 폭)이고(최소 1) 행 수는 ceil(후보 수 / 열 수)이다. 셀 인덱스는
 // `row + k * rowCount`(왼쪽 열부터 위에서 아래로 채운다). 마지막 셀은 패딩하지 않는다(행 끝
 // 공백 없음). `LIST_CAP`을 넘는 후보는 "...N개 더" 한 행으로 줄인다.
-export function formatCompletionList(completions: string[], columns: number): string[] {
+export function formatCompletionList(
+  completions: string[],
+  columns: number,
+): string[] {
   const shown = completions.slice(0, LIST_CAP);
   const cellWidth = Math.max(...shown.map(codepointLength)) + CELL_GAP;
   const perRow = Math.max(1, Math.floor(columns / cellWidth));
@@ -113,11 +115,14 @@ export function formatCompletionList(completions: string[], columns: number): st
   const rows: string[] = [];
   for (let row = 0; row < rowCount; row++) {
     const cells: string[] = [];
-    for (let index = row; index < shown.length; index += rowCount) cells.push(shown[index] ?? "");
+    for (let index = row; index < shown.length; index += rowCount)
+      cells.push(shown[index] ?? "");
     rows.push(
       cells
         .map((cell, i) =>
-          i < cells.length - 1 ? cell + " ".repeat(cellWidth - codepointLength(cell)) : cell,
+          i < cells.length - 1
+            ? cell + " ".repeat(cellWidth - codepointLength(cell))
+            : cell,
         )
         .join(""),
     );

@@ -6,12 +6,12 @@
 
 **시험 배치(RD-020)**. 아래 9.1·9.2의 파일 이름에서 `worker/`·`protocol/`·`terminal/`은 그 파일이 있는 패키지를 따른다.
 
-| 위치 | 시험 |
-| --- | --- |
-| `packages/pyodide-core/src/` | `protocol/*.test.ts`(init-frame·interrupt-protocol·interrupt-sender·rpc·rpc-handlers·stdin-mailbox·thread-scenario), `terminal/output-tail.test.ts`, `session/core-session.test.ts`(가짜 worker·가짜 driver로 세션 게이트·출력 계약·핸들러 충돌·종료 순서), `worker/{run-worker,boot-driver-options,core-console,interrupt-watch,sink-writer,sink-writer-pyodide}.test.ts`, 실행 driver(RD-022) `worker/{run-driver,run-driver-classify,run-driver-pyodide}.test.ts`·`session/{runner,runner-pyodide}.test.ts`(`14-runner.md` 14.6), `package-boundary.test.ts` |
-| `packages/pyodide-terminal/src/` | `{sinks,rewind-tail,stdin-reader,notice,selection-copy}.test.ts`(repl에서 이동), `terminal-runner.test.ts`(jsdom + 가짜 core), `package-boundary.test.ts` |
-| `packages/pyodide-repl/src/` | `terminal/*.test.ts`, `worker/*.test.ts`(SIGINT 통합 4종·`interrupt-buffer`·`stdin-callback`·`console`·`submission-runner`·`webloop-reraise`·`boot`·`repl-driver`·`repl-loop`·`multiline`·`complete-source`·`top-level-await`·`module-completion-parity`), `index.test.ts`(실제 `Readline` + 가짜 worker로 REPL 세션 전체), `worker.test.ts`, `package-boundary.test.ts` |
-| `packages/pyodide-testkit/src/` | `fake-terminal.test.ts`, `package-boundary.test.ts`(도우미 시험), `check-dist-script.test.ts` |
+| 위치                             | 시험                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/pyodide-core/src/`     | `protocol/*.test.ts`(init-frame·interrupt-protocol·interrupt-sender·rpc·rpc-handlers·stdin-mailbox·thread-scenario), `terminal/output-tail.test.ts`, `session/core-session.test.ts`(가짜 worker·가짜 driver로 세션 게이트·출력 계약·핸들러 충돌·종료 순서), `worker/{run-worker,boot-driver-options,core-console,interrupt-watch,sink-writer,sink-writer-pyodide}.test.ts`, 실행 driver(RD-022) `worker/{run-driver,run-driver-classify,run-driver-pyodide}.test.ts`·`session/{runner,runner-pyodide}.test.ts`(`14-runner.md` 14.6), `package-boundary.test.ts` |
+| `packages/pyodide-terminal/src/` | `{sinks,rewind-tail,stdin-reader,notice,selection-copy}.test.ts`(repl에서 이동), `terminal-runner.test.ts`(jsdom + 가짜 core), `package-boundary.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `packages/pyodide-repl/src/`     | `terminal/*.test.ts`, `worker/*.test.ts`(SIGINT 통합 4종·`interrupt-buffer`·`stdin-callback`·`console`·`submission-runner`·`webloop-reraise`·`boot`·`repl-driver`·`repl-loop`·`multiline`·`complete-source`·`top-level-await`·`module-completion-parity`), `index.test.ts`(실제 `Readline` + 가짜 worker로 REPL 세션 전체), `worker.test.ts`, `package-boundary.test.ts`                                                                                                                                                                                        |
+| `packages/pyodide-testkit/src/`  | `fake-terminal.test.ts`, `package-boundary.test.ts`(도우미 시험), `check-dist-script.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 - SIGINT 통합 시험(`sigint-handler*.test.ts` 4종)과 `interrupt-buffer`·`stdin-callback`·`console`·`submission-runner`·`webloop-reraise` 시험은 repl에 남는다. 공용 조립 `src/test/sigint-setup.ts`가 repl의 `worker/console`(`createConsole`)·`worker/multiline`(`loadSplitPaste`)을 조립하는 REPL 콘솔 통합 시험이라, core로 옮기면 core → repl 역의존이 생기기 때문이다. RD-022가 core에 실행 driver를 두면서 REPL 없는 core 전용 하니스(`src/test/roles/run-worker.ts`, `worker/run-driver-pyodide.test.ts`, `session/runner-pyodide.test.ts`)가 생겼다. 그러나 이 4종을 그 하니스로 옮겨 나누는 일은 RD-022에서 하지 않았다(범위 밖). 재검토 조건: core 전용 하니스가 이 4종이 확인하는 SIGINT 규칙(규칙 ①~④·sleep 조각·프롬프트 유휴)을 실제 REPL 콘솔 조립 없이 같은 검출력으로 재현함을 변이 검사로 보인 뒤에 옮긴다. 그 전에는 repl에 둔다.
 - 이 시험들이 core 부품(`connectInterrupts`·`installSigintHandler`·`installSleepSlice`·`createStdinCallback`·`suppressWebLoopReraise`·`createSinkWriter`)을 쓰는 통로는 repl `src/test/core-internals.ts` 한 곳이다. core 공개 export가 아니라 core 소스를 상대 경로(`../../../pyodide-core/src/worker/…`)로 re-export한다(시험 전용 이름이 공개 표면에 섞이지 않게). 눌림 스레드 역할도 같은 방식으로 `sigint-setup.ts`의 `INTERRUPT_PRESSER_ROLE`(core `src/test/roles/interrupt-presser.ts`의 URL)이 가리킨다. 저장소 체크아웃에서만 성립하는 경로이고 시험 전용이다. 패키지 배치가 바뀌면 이 두 파일만 고친다.
@@ -19,6 +19,7 @@
 - `runWorker`가 같은 번들 안에서 `bootWorker`를 부르므로 진입점 시험(옛 `worker.test.ts`의 4건)은 core `worker/run-worker.test.ts`에 있고, repl `worker.test.ts`는 `runReplWorker`가 REPL driver로 `runWorker`를 부르는지만 본다.
 
 ## 9.1 node + 실제 pyodide(`// @vitest-environment node`)
+
 파이썬 의미·pyodide 내부 가정·프로토콜 불변식을 실제로 돌려 고정한다. 해당 파일:
 `sigint-handler.test.ts`, `sigint-handler-idle.test.ts`, `sigint-handler-sleep-slice.test.ts`,
 `sigint-handler-nojspi.test.ts`(Node에서 `WebAssembly.Suspending`을 지워 JSPI 없는 경로),
@@ -28,6 +29,7 @@
 `terminal-sinks.test.ts`(실제 `PyodideConsole`·sink·`Readline`의 터미널 바이트),
 `complete-source.test.ts`, `module-completion-parity.test.ts`(RD-016, 아래 별도 항목), `auto-indent-parity.test.ts`
 (pyodide에 든 `_pyrepl.readline` 함수와 차분 검증), `rpc.test.ts`(실제 `MessageChannel`).
+
 - 루트 `pnpm test`를 기본 병렬도로 돌리면 repl `sigint-handler-sleep-slice.test.ts`의 100ms 벽시계 판정이 CPU 부하로 흔들릴 수 있다(RD-022 실측: 이동 전 커밋에서도 같은 명령이 2회 중 2회 1건·3건 실패, 단독 실행 3/3 통과). L0 판정은 `pnpm test --force --concurrency=1`로 하고, 실패하면 실패한 파일만 단독 재실행한다. 이슈는 `.scratch/sigint-test-isolation/issues/04-sleep-slice-2pow31-timing-flake.md`(deferred)다.
 - 파일 지정 실행: `pnpm --filter @cp949/runo-pyodide-repl test -- <이름>`은 필터가 적용되지 않아 패키지 전체를 돌린다(RD-020 뒤 repl 34개 파일·1034건, 약 18초. 2026-09-24 실측. 이동 전에는 43개 파일·1185건, 약 18초).
   대상만 돌리려면 `cd packages/pyodide-repl && pnpm exec vitest run <파일 일부 이름...> [--reporter=verbose]`.
@@ -117,17 +119,18 @@
     **`vitest.config.ts`의 `onUnhandledError` 필터는 제거했다**(억제 없이 필터만 떼면 개별 시험이 다 통과해도
     `Errors 210` + 종료코드 1이다 — 실측). 실제 pyodide를 직접 로드하는 시험 파일은 core `worker/boot.ts`(`bootWorker`)의 배선이 닿지
     않으므로 **그 파일의 콘솔 조립 지점에서 `suppressWebLoopReraise`를 직접 불러야** 한다. `process.on
-    ("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
+("unhandledRejection")`은 쓰지 않는다(집계에서 빠진다, TRAP-22).
   - `time.sleep`의 무효 인자 문구(`-1`·`'a'`·NaN·inf·키워드·인자 2개·`9.3e9`)를 단정하는 시험의 기준은 **로컬
     CPython 3.14.4**로 재 둔 문자열이다(번들 pyodide는 3.14.2 — 편차 19). 조각 래퍼는 이 인자들을 원본 C 함수에
     그대로 넘겨 문구를 보존한다.
   - 시험 입력 함정: `1 +`·`foo bar` 같은 EOF 문법 오류는 pyodide 314.0.7의 `pyconsole.push`가 `_IncompleteInputError:
-    incomplete input`으로 표시한다. `runLine`은 이를 표준 `SyntaxError: invalid syntax`로 정규화해 돌려주므로(`02-console-core.md`
+incomplete input`으로 표시한다. `runLine`은 이를 표준 `SyntaxError: invalid syntax`로 정규화해 돌려주므로(`02-console-core.md`
     5.1) `push`를 직접 부르는 시험만 원문을 기대해야 한다(`x = = 1`은 원문도 `SyntaxError: invalid syntax`). 한 줄에 `;`로
     이은 앞 식문장의 값은 콘솔이 stdout으로 에코해 꼬리를 비우므로, 개행 없는 출력 시험은 값이 없는
     `print(..., end="")`로 만든다.
 
 ## 9.2 jsdom(기본 환경) + 실제 `Readline` + 가짜 터미널 / 가짜 타이머
+
 `auto-indent.test.ts`(순수 함수 + `createAutoIndent` 정책 객체, RD-013 완료 — 별도 `-reader.ts` 파일 없이
 한 모듈에 둔다), `block-history.test.ts`(실제 `Readline` + 가짜 터미널, `createBlockHistory` 정책 객체,
 RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 완료 — 벤더 `packages/xterm-readline`의
@@ -135,7 +138,7 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 `print-above.test.ts`도 같은 패턴으로 `printAbove`(버퍼·커서 유지, 재그리기 중 키 큐 순서 보존, 커서 끝·이모지
 버퍼, 활성 읽기 없을 때 `println` 동등, dispose 뒤 콜백 무해, 다중 행 블록·감긴 단일 행에서 소실 없음,
 `cancelRead()` 경합 무해, RD-015 DELTA-01·01a·04a 11건)를 본다), `tab-completion.test.ts`(`planTab`·`resolveCompletion`·`formatCompletionList`,
- RD-016이 `planTab` 게이트 분기 10건 추가: 빈 스템 `import `·`from os import ` → complete, `x = ` → indent, `important = ` → complete, `pending`에만 `import`가 있는 경우),
+RD-016이 `planTab` 게이트 분기 10건 추가: 빈 스템 `import `·`from os import ` → complete, `x = ` → indent, `important = ` → complete, `pending`에만 `import`가 있는 경우),
 `import-gate.test.ts`(`mentionsImportKeyword` 코퍼스 55줄 61건: 게이트 거짓 16·오탐 28·비`None` 11·대소문자 2, 코퍼스 정의는 `terminal/import-gate-corpus.ts`, `complete-source.test.ts`가 같은 코퍼스로 안전성을 본다),
 `tab-reader.test.ts`(RD-016이 게이트 참 빈 스템 배선 6건 추가: `pending` 전달, `x = ` 무왕복 공백, 8연타 큐 → 32칸, Tab 직후 입력·커서 이동 → 응답 버림), `packages/pyodide-terminal/src/stdin-reader.test.ts`,
 `repl-reader.test.ts`, `packages/pyodide-terminal/src/rewind-tail.test.ts`, `read-guard.test.ts`, `output-tail.test.ts`, `sink-writer.test.ts`,
@@ -145,6 +148,7 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 `history-filter.test.ts`, `paste-tabs.test.ts`, `interrupt-protocol.test.ts`,
 `interrupt-sender.test.ts`(주입 타이머로 전송·재전송·10회 상한·읽기 순서), `interrupt-watch.test.ts`,
 `App.test.tsx`(배선: 전송·재전송, `readLine`/`readInput` 진입, 세션 리셋, 언마운트).
+
 - 가짜 터미널(`packages/pyodide-testkit/src/fake-terminal.ts`, `@repo/pyodide-testkit/fake-terminal`)은 `write` 콜백을 동기/비동기 둘 다 돌릴 수 있어야 한다
   (동기만 쓰면 TRP-008을 놓친다). history는 ↑ 재호출로만 관찰한다.
   `createFakeTerminal({ asyncWrite, cols, rows })`가 `{ term, screen, written, type, paste, keyDown, flush, disposedBufferReads }`를 돌려준다.
@@ -177,6 +181,7 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
   해당 테스트를 실패시키는지 확인했다.
 
 ## 9.3 브라우저(Playwright headless Chromium, dev 서버)로만 확인되는 것
+
 - SharedArrayBuffer/Atomics 동기 브리지 결합, `sync === true` 확인, COOP/COEP 의존 동작.
 - 실제 xterm의 **비동기 파싱**과 `isWrapped`·flush 타이밍(TRP-016/017 계열), 꼬리 재그리기 화면.
 - 눌림 간격·소실률·위험 구간 같은 타이밍 통계(연타 매트릭스 조합별 N=20, `while True: pass` 단일 눌림
@@ -221,6 +226,7 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 - `cursorX===0`(개행 직후 아무것도 안 그린 상태에서 리셋) 분기는 idle 프롬프트가 항상 `>>> `까지 그려진 뒤에야 관찰 가능해(cursorX=4) 브라우저에서 실사용 경로로 재현되지 않는다(Enter와 리셋 클릭을 경합시켜도 매번 프롬프트가 먼저 그려짐, 4회 확인). `index.test.ts`가 `cursorX`를 직접 0으로 둔 단위 시험으로만 고정한다 — 모든 분기가 브라우저로 확인 가능한 것은 아니다.
 
 ## 9.4 측정·비교 기준
+
 - 동등성 기준은 CPython 3.14.4를 pty(24×80, `TERM=xterm`)로 구동한 실측이다. 화면 비교는 pyte로 읽는다.
 - 후보를 비교할 때는 OK/HANG/CRASH/DIRTY 같은 판정 축과 n을 정해 표로 남기고, "간격 0ms"처럼 합쳐져
   성공처럼 보이는 측정(TRP-018)과 "재전송 수 = 소실 수"라는 오독(TRP-025)을 피한다.
@@ -248,7 +254,6 @@ RD-014 완료), `read-options.test.ts`(`mergeReadOptions` 순수 함수, RD-014 
 12. **(TRP-022, 이 저장소 RD-009) 브라우저 지연은 페이지 안의 한 시계로 잰다.** `keyboard.press` 직전 Node `performance.now()` + `page.$$eval` 폴링으로 재면 폴링마다 CDP 왕복이 최소 2회 껴 평균 5~8ms를 보탠다. 실측에서 이 방식이 12셀 중 8셀을 30ms 문턱 바로 위(31.5~33.9ms)로 밀어 가짜 회귀를 만들었고, 같은 시행을 페이지 내부 keydown 리스너 + `MutationObserver`(같은 `performance.now()` 시계)로 재니 12/12셀이 문턱 안(22.19~29.98ms)이었다. 측정 대상(눌림 → 새 프롬프트가 보인 시각)은 바꾸지 않고 시계만 옮긴다. 문턱에서 5~10ms 안쪽 결과는 다른 시계로 한 번 더 재기 전에 회귀로 보고하지 않는다. 실패한 1차 측정 로그는 판단을 되돌릴 근거이므로 버리지 않는다.
 
 참고: `/work/cp949/pyodide-samples/docs/repl/traps/` 의 TRP-011, TRP-013, TRP-015, TRP-018, TRP-023, TRP-024, TRP-025, TRP-028, TRP-029, TRP-034, TRP-035
-
 
 ## 9.6 이전 구현의 검증 자산 위치
 
@@ -353,7 +358,6 @@ C15f `import os; os.pa` 속성 폴백)을 더했다. 모듈 목록은 178개라 
 RD-016 실측 중앙값 26.2ms·최대 33.4ms, 같은 실행 `a.` 중앙값 28.7ms·최대 34.0ms). 이로써 지연 측정 3종이 모두 코드에 있다. 확인은 L1
 `ONLY=C5,C9,C12,C15` 20/20·`pageerror` 0이고 전체 76개(C1~C15) 재실행은 하지 않았다(L2 미실행). 양성 대조 1건: 게이트를 상시 거짓으로 변조 → C15d 실패.
 
-
 RD-024는 새 브라우저 스크립트 2종을 `apps/demo/e2e/checks/`에 두고 `run.mjs` `SETS`(dev 전용)·`package.json`(`e2e:react-strictmode`·`e2e:react-fit`)·`BASELINE.md` 행에 배선했다. 둘 다 dev 서버(5173, `<StrictMode>`)에 대해 화면 두 개(REPL `/`·실행창 `?view=runner`)를 각각 새 브라우저로 열고 결과 파일을 화면별(`-repl-dev`·`-runner-dev`)로 나눠 쓴다. `react-strictmode-check.mjs`(10셀)는 StrictMode 이중 마운트의 worker 수를 페이지 안 `Worker` 계측(`new`·`terminate` 호출)과 Playwright `worker`·`close` 이벤트 두 근거로 판정하고(생성 직후 terminate된 첫 worker는 Playwright 이벤트에 보이지 않는다, `docs/traps/TRP-061`), `.xterm` 1개·콘솔 warning(`DisposableStore` 포함) 0을 본다(경고 0 확인일 뿐 정리 순서 회귀는 검출하지 못한다. 순서 방어는 L0 몫, `docs/traps/TRP-064`). `react-fit-check.mjs`(12셀)는 `?fit=1`에서 창 크기를 바꿔 `cols`가 바뀌는지와 그 뒤 입력(REPL 유휴 `print(1+1)`, 실행창 `input()` 대기)을 본다. `cols`는 데모가 `Terminal`을 노출하지 않아 DOM 기하(`.xterm-screen` 너비 ÷ 셀 너비)와 `x` 400자 출력의 줄바꿈 폭 두 값이 같아야 통과한다. 두 스크립트의 판정 함수는 순수 함수 `apps/demo/e2e/react-judge.mjs`로 분리해 `react-judge.test.mjs`(vitest, 데모 `pnpm test`)가 가짜 입력으로 양성 대조한다(28개). 판정은 모두 폴링이고 고정 대기·절대 ms 상한이 없다(9.7). 브라우저 양성 대조 1건: `useCoreHandle` cleanup의 `handle.dispose()`를 지우면 `ONLY=REPL-S01`이 `살아 있는 worker 2개 (… new 2회·terminate 0회, 기대 1개)`로 실패한다. 규칙은 `15-react.md` 15.6, 15.10.
 
 ## 9.7 시간을 쓰는 판정 (2026-09-24 사용자 확정)
@@ -362,13 +366,13 @@ RD-024는 새 브라우저 스크립트 2종을 `apps/demo/e2e/checks/`에 두�
 e2e 스크립트에 적용한다. 기존 고정 대기(2026-09-24 기준 `checks/`·`measure/`에 145곳)는 그 스크립트를 고칠 때
 바꾸고 일괄 수정하지 않는다(`.scratch/e2e-time-dependence/issues/01-absence-checks-after-fixed-wait.md`).
 
-| 형태 | 규칙 | 느린 장비에서 생기는 일 |
-| --- | --- | --- |
-| 하한("N ms보다 빨리 나오면 실패") | 허용 | 없음 — 느려져도 더 빨라지지 않는다 |
-| 절대 ms 상한("N ms 안에 끝나야 한다") | 금지. 예외는 아래 2 | 결함 없이 실패 |
-| 고정 대기 뒤 부재 확인("N ms 기다렸는데 X가 없다") | 금지. 마커 배리어(아래 3) | 결함이 있어도 **통과**(검출력 상실, 로그에 안 남는다) |
-| 고정 대기 뒤 존재 확인("N ms 뒤 X가 있다") | 금지. 조건 대기(아래 4) | 결함 없이 실패(간헐 실패) |
-| 성능 수치(중앙값·최대·p95) | 판정이 아니라 기록(아래 6) | — |
+| 형태                                               | 규칙                       | 느린 장비에서 생기는 일                               |
+| -------------------------------------------------- | -------------------------- | ----------------------------------------------------- |
+| 하한("N ms보다 빨리 나오면 실패")                  | 허용                       | 없음 — 느려져도 더 빨라지지 않는다                    |
+| 절대 ms 상한("N ms 안에 끝나야 한다")              | 금지. 예외는 아래 2        | 결함 없이 실패                                        |
+| 고정 대기 뒤 부재 확인("N ms 기다렸는데 X가 없다") | 금지. 마커 배리어(아래 3)  | 결함이 있어도 **통과**(검출력 상실, 로그에 안 남는다) |
+| 고정 대기 뒤 존재 확인("N ms 뒤 X가 있다")         | 금지. 조건 대기(아래 4)    | 결함 없이 실패(간헐 실패)                             |
+| 성능 수치(중앙값·최대·p95)                         | 판정이 아니라 기록(아래 6) | —                                                     |
 
 1. **판정은 이벤트·상태로 한다.** `data-testid=status` 전이, 새 프롬프트 출현, 결과 문자열, `pageerror` 수.
 2. **상한 예외**: 요구 사항 자체가 응답성 수치일 때만(예: 실행 중 Ctrl+C → `KeyboardInterrupt`). 근거 RD·설계
@@ -392,11 +396,11 @@ e2e 스크립트에 적용한다. 기존 고정 대기(2026-09-24 기준 `checks
 
 "core·repl·terminal·react는 coincident에 의존하지 않는다"([ADR-0006](../adr/0006-pyodide-core-and-plugin-packages.md))와 "core는 터미널 라이브러리를 모른다"를 시험·스크립트로 강제한다. 검사 대상이 서로 달라 세 가지로 나눴고, 하나가 다른 것을 대신하지 않는다.
 
-| 검사 | 대상 | 실행 | 위치 |
-| --- | --- | --- | --- |
-| 의존 트리 시험 | 설치된 `node_modules`의 의존 트리 | `pnpm test`(vitest) | core·terminal·repl·react `src/package-boundary.test.ts`, 도우미 `@repo/pyodide-testkit/package-boundary` |
-| `dist` 문자열 검사 | 빌드 산출물 파일 내용 | `pnpm check-dist`, 루트 `pnpm test`가 함께 실행 | `scripts/check-dist.mjs`, 패키지 `check-dist` 스크립트 |
-| tarball 스모크 | `pnpm pack` tarball을 저장소 밖에 설치한 결과 | `pnpm smoke:pack`(L0 수동) | `scripts/pack-smoke.mjs` |
+| 검사               | 대상                                          | 실행                                            | 위치                                                                                                     |
+| ------------------ | --------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 의존 트리 시험     | 설치된 `node_modules`의 의존 트리             | `pnpm test`(vitest)                             | core·terminal·repl·react `src/package-boundary.test.ts`, 도우미 `@repo/pyodide-testkit/package-boundary` |
+| `dist` 문자열 검사 | 빌드 산출물 파일 내용                         | `pnpm check-dist`, 루트 `pnpm test`가 함께 실행 | `scripts/check-dist.mjs`, 패키지 `check-dist` 스크립트                                                   |
+| tarball 스모크     | `pnpm pack` tarball을 저장소 밖에 설치한 결과 | `pnpm smoke:pack`(L0 수동)                      | `scripts/pack-smoke.mjs`                                                                                 |
 
 ### 9.8.1 의존 트리 시험
 

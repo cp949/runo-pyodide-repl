@@ -166,7 +166,6 @@ top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02-ctrl-c.md`, `05-output-streaming.md`, `06-tab-completion.md`, `07-multiline-submit.md`, `09-auto-indent.md`, `10-block-history.md`, `/work/cp949/pyodide-samples/apps/repl/README.md`("알려진 제약"), RD-008 pty 재측정 `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/verify/pty/results.md`
 
-
 ## 2. 범위 밖 확정 (2026-09-21)
 
 3.14 pty와의 차이 중 웹에서 원리적으로 재현하기 어렵거나 사용자 시나리오에 닿지 않는 것.
@@ -176,4 +175,3 @@ top-level await 대기 중 Ctrl+C가 트레이스백 없이 `KeyboardInterrupt` 
 - **꼬리 뒤 블록의 `... `가 꼬리 폭만큼 밀리는 3.14 quirk**.
 - **RD-012g 동기 XHR 대기 중 Ctrl+C**: `pyodide.http.open_url`·`pyxhr.get`은 `req.open(…, False)`인 동기 XHR이라 워커 스레드를 통째로 막아 폴링 지점도 감시 타이머도 없다. 3초 지연 서버 N=5 실측에서 `pyxhr.get`은 응답 뒤 `KeyboardInterrupt`, `open_url`은 눌림 무시. 동기 API 의미를 바꾸지 않는 설계가 필요한데 시나리오가 드물다.
 - **RD-016e 미로드 pyodide 배포 패키지의 import 후보**: 3.14 동등 범위 밖의 pyodide 확장. lockfile 패키지명을 후보에 넣으면 후보 집합이 로드 상태에 의존하고 `from numpy import <Tab>`은 로드 전 속성을 볼 수 없어 일관성이 깨진다.
-

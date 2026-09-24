@@ -20,7 +20,7 @@ function setup(
     anchor?: number;
     highlighter?: Highlighter;
     history?: string[];
-  } = {}
+  } = {},
 ) {
   const vt = new VTerm(cols, rows);
   // Move the virtual cursor to the requested anchor row before constructing
@@ -36,7 +36,7 @@ function setup(
     opts.prompt ?? "> ",
     tty,
     opts.highlighter ?? new IdentityHighlighter(),
-    history
+    history,
   );
   state.refresh();
   return { vt, tty, state };

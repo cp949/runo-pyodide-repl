@@ -13,14 +13,22 @@ import { bootWorker } from "./boot";
 import type { ConsoleContext, RunContext } from "./driver";
 import { createRunSession, runDriver, type RunOutcome } from "./run-driver";
 
-type Raw = [string, string | undefined, string | undefined, number | bigint | undefined];
+type Raw = [
+  string,
+  string | undefined,
+  string | undefined,
+  number | bigint | undefined,
+];
 
 /** 가짜 pyodide + 가짜 Python `run_code`. `run_code`는 시험이 준 함수이고 인자를 기록한다. */
 function createFakes(runCodePy: (...args: unknown[]) => Promise<Raw>) {
   const pyconsole = { kind: "fake-console" };
-  const consoleFactory = Object.assign(vi.fn(() => pyconsole), {
-    callKwargs: vi.fn(() => pyconsole),
-  });
+  const consoleFactory = Object.assign(
+    vi.fn(() => pyconsole),
+    {
+      callKwargs: vi.fn(() => pyconsole),
+    },
+  );
   const namespace = { get: vi.fn(() => runCodePy), destroy: vi.fn() };
   const pyodide = {
     setStdout: vi.fn(),
@@ -55,15 +63,26 @@ const OPTIONS = { filename: "main.py", topLevelAwait: false };
 
 describe("parseOptions", () => {
   test("생략한 필드는 filename main.py·topLevelAwait false다", () => {
-    expect(runDriver.parseOptions({})).toEqual({ filename: "main.py", topLevelAwait: false });
-    expect(runDriver.parseOptions({ filename: undefined, topLevelAwait: undefined })).toEqual({
+    expect(runDriver.parseOptions({})).toEqual({
+      filename: "main.py",
+      topLevelAwait: false,
+    });
+    expect(
+      runDriver.parseOptions({ filename: undefined, topLevelAwait: undefined }),
+    ).toEqual({
       filename: "main.py",
       topLevelAwait: false,
     });
   });
 
   test("준 값은 그대로 쓰고 알 수 없는 필드는 무시한다", () => {
-    expect(runDriver.parseOptions({ filename: "app.py", topLevelAwait: true, extra: 1 })).toEqual({
+    expect(
+      runDriver.parseOptions({
+        filename: "app.py",
+        topLevelAwait: true,
+        extra: 1,
+      }),
+    ).toEqual({
       filename: "app.py",
       topLevelAwait: true,
     });
@@ -105,7 +124,9 @@ describe("parseOptions", () => {
       throw new Error("호출되면 안 된다");
     });
 
-    await expect(bootWorker(frame, { driver: runDriver, loadPyodide })).rejects.toThrow("topLevelAwait");
+    await expect(
+      bootWorker(frame, { driver: runDriver, loadPyodide }),
+    ).rejects.toThrow("topLevelAwait");
 
     expect(loadPyodide).not.toHaveBeenCalled();
     port1.close();
@@ -116,22 +137,37 @@ describe("parseOptions", () => {
 describe("공개 export", () => {
   test("worker 진입점이 runDriver를 내고 세션은 runCode 핸들러를 가진다", () => {
     expect(workerEntry.runDriver).toBe(runDriver);
-    expect(Object.keys(runDriver.createSession(OPTIONS).handlers)).toEqual(["runCode"]);
+    expect(Object.keys(runDriver.createSession(OPTIONS).handlers)).toEqual([
+      "runCode",
+    ]);
   });
 });
 
 describe("createConsole", () => {
   test("옵션 filename으로 콘솔을 만들고 driver Python을 별도 namespace에 올려 namespace는 놓는다", () => {
-    const fakes = createFakes(async () => ["ok", undefined, undefined, undefined]);
-    const session = createRunSession({ filename: "app.py", topLevelAwait: false });
+    const fakes = createFakes(async () => [
+      "ok",
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    const session = createRunSession({
+      filename: "app.py",
+      topLevelAwait: false,
+    });
 
     const created = session.createConsole(fakes.context);
 
     expect(created).toBe(fakes.pyconsole);
-    expect(fakes.consoleFactory.callKwargs).toHaveBeenCalledWith(undefined, { filename: "app.py" });
+    expect(fakes.consoleFactory.callKwargs).toHaveBeenCalledWith(undefined, {
+      filename: "app.py",
+    });
     expect(fakes.pyodide.setStdout).toHaveBeenCalledTimes(1);
     expect(fakes.pyodide.setStderr).toHaveBeenCalledTimes(1);
-    const [source, options] = fakes.pyodide.runPython.mock.calls[0] as [string, { filename: string; globals: unknown }];
+    const [source, options] = fakes.pyodide.runPython.mock.calls[0] as [
+      string,
+      { filename: string; globals: unknown },
+    ];
     expect(source).toContain("async def run_code(");
     expect(options.filename).toBe("<run-driver>");
     expect(options.globals).toBe(fakes.namespace);
@@ -141,61 +177,104 @@ describe("createConsole", () => {
 
 describe("runCode", () => {
   test("콘솔·filename·topLevelAwait를 Python run_code에 넘기고 결과를 돌려준다", async () => {
-    const runCodePy = vi.fn<(...args: unknown[]) => Promise<Raw>>(async () => ["ok", undefined, undefined, undefined]);
+    const runCodePy = vi.fn<(...args: unknown[]) => Promise<Raw>>(async () => [
+      "ok",
+      undefined,
+      undefined,
+      undefined,
+    ]);
     const fakes = createFakes(runCodePy);
-    const session = createRunSession({ filename: "app.py", topLevelAwait: true });
+    const session = createRunSession({
+      filename: "app.py",
+      topLevelAwait: true,
+    });
     session.createConsole(fakes.context);
 
     const outcome = await session.handlers.runCode!("print(1)" as never);
 
     expect(outcome).toStrictEqual({ kind: "ok" });
-    expect(runCodePy).toHaveBeenCalledWith(fakes.pyconsole, "print(1)", "app.py", true);
+    expect(runCodePy).toHaveBeenCalledWith(
+      fakes.pyconsole,
+      "print(1)",
+      "app.py",
+      true,
+    );
   });
 
   test.each<[string, Raw, RunOutcome]>([
     ["ok", ["ok", undefined, undefined, undefined], { kind: "ok" }],
-    ["error", ["error", "ValueError", "TB\n", undefined], { kind: "error", errorType: "ValueError", traceback: "TB\n" }],
-    ["interrupted", ["interrupted", undefined, "KeyboardInterrupt\n", undefined], { kind: "interrupted", traceback: "KeyboardInterrupt\n" }],
+    [
+      "error",
+      ["error", "ValueError", "TB\n", undefined],
+      { kind: "error", errorType: "ValueError", traceback: "TB\n" },
+    ],
+    [
+      "interrupted",
+      ["interrupted", undefined, "KeyboardInterrupt\n", undefined],
+      { kind: "interrupted", traceback: "KeyboardInterrupt\n" },
+    ],
     ["exit", ["exit", undefined, undefined, 3], { kind: "exit", code: 3 }],
     ["exit 0", ["exit", undefined, undefined, 0], { kind: "exit", code: 0 }],
-  ])("Python 결말 %s를 유니온 모양 그대로 옮긴다(불필요한 필드 없음)", async (_name, raw, expected) => {
-    const session = createRunSession(OPTIONS);
-    session.createConsole(createFakes(async () => raw).context);
+  ])(
+    "Python 결말 %s를 유니온 모양 그대로 옮긴다(불필요한 필드 없음)",
+    async (_name, raw, expected) => {
+      const session = createRunSession(OPTIONS);
+      session.createConsole(createFakes(async () => raw).context);
 
-    expect(await session.handlers.runCode!("x" as never)).toStrictEqual(expected);
-  });
+      expect(await session.handlers.runCode!("x" as never)).toStrictEqual(
+        expected,
+      );
+    },
+  );
 
   test.each<[string, Raw]>([
     ["알 수 없는 종류", ["restarted", undefined, undefined, undefined]],
     ["error인데 errorType 없음", ["error", undefined, "TB\n", undefined]],
     ["error인데 traceback 없음", ["error", "ValueError", undefined, undefined]],
-    ["interrupted인데 traceback 없음", ["interrupted", undefined, undefined, undefined]],
+    [
+      "interrupted인데 traceback 없음",
+      ["interrupted", undefined, undefined, undefined],
+    ],
     ["exit인데 code 없음", ["exit", undefined, undefined, undefined]],
     ["exit인데 code가 BigInt", ["exit", undefined, undefined, 2n ** 60n]],
-  ])("형식이 어긋난 Python 결말(%s)은 거부하고 실행 중 표시를 지운다", async (_name, raw) => {
-    const session = createRunSession(OPTIONS);
-    session.createConsole(createFakes(async () => raw).context);
+  ])(
+    "형식이 어긋난 Python 결말(%s)은 거부하고 실행 중 표시를 지운다",
+    async (_name, raw) => {
+      const session = createRunSession(OPTIONS);
+      session.createConsole(createFakes(async () => raw).context);
 
-    await expect(session.handlers.runCode!("x" as never)).rejects.toThrow("결과 형식 오류");
+      await expect(session.handlers.runCode!("x" as never)).rejects.toThrow(
+        "결과 형식 오류",
+      );
 
-    expect(session.atPrompt()).toBe(true);
-  });
+      expect(session.atPrompt()).toBe(true);
+    },
+  );
 
-  test.each([[undefined], [null], [3], [["x"]], [{}]])("문자열이 아닌 source(%j)는 Python을 부르지 않고 거부한다", async (source) => {
-    const runCodePy = vi.fn<(...args: unknown[]) => Promise<Raw>>(async () => ["ok", undefined, undefined, undefined]);
-    const session = createRunSession(OPTIONS);
-    session.createConsole(createFakes(runCodePy).context);
+  test.each([[undefined], [null], [3], [["x"]], [{}]])(
+    "문자열이 아닌 source(%j)는 Python을 부르지 않고 거부한다",
+    async (source) => {
+      const runCodePy = vi.fn<(...args: unknown[]) => Promise<Raw>>(
+        async () => ["ok", undefined, undefined, undefined],
+      );
+      const session = createRunSession(OPTIONS);
+      session.createConsole(createFakes(runCodePy).context);
 
-    await expect(session.handlers.runCode!(source as never)).rejects.toThrow("source");
+      await expect(session.handlers.runCode!(source as never)).rejects.toThrow(
+        "source",
+      );
 
-    expect(runCodePy).not.toHaveBeenCalled();
-    expect(session.atPrompt()).toBe(true);
-  });
+      expect(runCodePy).not.toHaveBeenCalled();
+      expect(session.atPrompt()).toBe(true);
+    },
+  );
 
   test("콘솔을 만들기 전에는 거부한다", async () => {
     const session = createRunSession(OPTIONS);
 
-    await expect(session.handlers.runCode!("x" as never)).rejects.toThrow("콘솔이 아직 없다");
+    await expect(session.handlers.runCode!("x" as never)).rejects.toThrow(
+      "콘솔이 아직 없다",
+    );
 
     expect(session.atPrompt()).toBe(true);
   });
@@ -231,7 +310,9 @@ describe("atPrompt 전이와 재진입 거부", () => {
     session.createConsole(createFakes(runCodePy).context);
     const first = session.handlers.runCode!("first" as never);
 
-    await expect(session.handlers.runCode!("second" as never)).rejects.toThrow("재진입 거부");
+    await expect(session.handlers.runCode!("second" as never)).rejects.toThrow(
+      "재진입 거부",
+    );
 
     expect(runCodePy).toHaveBeenCalledTimes(1);
     // 거부된 호출이 실행 중 표시를 지우지 않는다.
@@ -242,7 +323,12 @@ describe("atPrompt 전이와 재진입 거부", () => {
   });
 
   test("끝난 뒤에는 다시 받는다", async () => {
-    const runCodePy = vi.fn<(...args: unknown[]) => Promise<Raw>>(async () => ["ok", undefined, undefined, undefined]);
+    const runCodePy = vi.fn<(...args: unknown[]) => Promise<Raw>>(async () => [
+      "ok",
+      undefined,
+      undefined,
+      undefined,
+    ]);
     const session = createRunSession(OPTIONS);
     session.createConsole(createFakes(runCodePy).context);
 
@@ -272,7 +358,9 @@ describe("run(ctx) 세션 수명", () => {
 
   test("run이 끝나지 않는 동안에도 runCode는 계속 받는다", async () => {
     const session = createRunSession(OPTIONS);
-    session.createConsole(createFakes(async () => ["ok", undefined, undefined, undefined]).context);
+    session.createConsole(
+      createFakes(async () => ["ok", undefined, undefined, undefined]).context,
+    );
     void session.run({} as RunContext);
 
     await session.handlers.runCode!("a" as never);

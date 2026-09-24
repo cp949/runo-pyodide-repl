@@ -115,7 +115,12 @@ function splitKeys(text: string): string[] {
 export function createFakeTerminal(
   options: FakeTerminalOptions = {},
 ): FakeTerminal {
-  const { asyncWrite = false, cols = 80, rows = 24, withElement = false } = options;
+  const {
+    asyncWrite = false,
+    cols = 80,
+    rows = 24,
+    withElement = false,
+  } = options;
   const written: string[] = [];
   const dataListeners = new Set<(data: string) => void>();
   const addons: ITerminalAddon[] = [];

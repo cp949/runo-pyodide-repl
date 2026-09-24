@@ -29,7 +29,7 @@ export interface ReplReader {
   read(
     prompt: string,
     pending: string | undefined,
-    cancelable: boolean
+    cancelable: boolean,
   ): Promise<string | null>;
 }
 
@@ -43,7 +43,7 @@ export function createReplReader(
   term: RewindTerminal,
   sinks: Pick<TerminalSinks, "tail" | "resetTail">,
   readOptions: ReadOptionsProvider,
-  onOpen?: (read: Promise<string | null>, tail: string) => void
+  onOpen?: (read: Promise<string | null>, tail: string) => void,
 ): ReplReader {
   return {
     async read(prompt, pending, cancelable) {

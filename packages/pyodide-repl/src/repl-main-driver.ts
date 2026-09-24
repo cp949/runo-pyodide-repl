@@ -7,11 +7,18 @@
 import { ReadCancelledError } from "@cp949/runo-xterm-readline";
 import type { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
-import type { InterruptSender, MainDriver, OutputChunk } from "@cp949/runo-pyodide-core";
+import type {
+  InterruptSender,
+  MainDriver,
+  OutputChunk,
+} from "@cp949/runo-pyodide-core";
 import type { ReplDriverOptions } from "./driver-options";
 import type { ReadLineOutcome, ReadLineReply } from "./repl-protocol";
 import type { SourceLink } from "./run-source";
-import { createSourceBridge, type SourcePrompt } from "./terminal/source-bridge";
+import {
+  createSourceBridge,
+  type SourcePrompt,
+} from "./terminal/source-bridge";
 import { createAutoIndent } from "./terminal/auto-indent";
 import { createBlockHistory } from "./terminal/block-history";
 import { mergeReadOptions } from "./terminal/read-options";
@@ -38,7 +45,10 @@ export interface ReplMainDriverOptions {
    * worker의 `complete`를 부른다(core 세션의 `call`). 실제 Tab을 누를 때(세션이 이미 시작된 뒤)만 실행되므로 core 세션을
    * 이 함수가 늦게 참조해도 된다.
    */
-  complete: (source: string, pending: string | undefined) => Promise<SourceCompletion>;
+  complete: (
+    source: string,
+    pending: string | undefined,
+  ) => Promise<SourceCompletion>;
   /** 핸들이 소유한 `runSource` 슬롯과 만나는 창구. 세션을 넘어 사는 슬롯을 이 세션의 읽기 흐름에 잇는다(RD-022a). */
   source: SourceLink;
 }
@@ -125,8 +135,11 @@ export function createReplMainDriver(
   // 프롬프트를 기다리는 동안 worker의 배경 콜백이 `input()`을 부르면 stdin 읽기가 REPL 읽기를 교체해 REPL 읽기가
   // 고아가 된다. stdin 읽기를 활성 REPL 읽기가 끝난 뒤로 미룬다(04-stdin-input.md 3.2).
   const guard = createReadGuard({
-    readLine: (prompt: string, pending: string | undefined, cancelable: boolean) =>
-      replReader.read(prompt, pending, cancelable),
+    readLine: (
+      prompt: string,
+      pending: string | undefined,
+      cancelable: boolean,
+    ) => replReader.read(prompt, pending, cancelable),
     readInput: (cancelable: boolean) => inputReader.read(cancelable),
     // 미뤄지는 stdin 읽기는 배경 `input()`이 REPL 줄 앞 접두로 남긴 프롬프트를 넘겨받는다(RD-022b).
     inputDeferred: () => sinks.moveAbovePrefixToTail(),

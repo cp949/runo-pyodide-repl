@@ -4,7 +4,11 @@
  */
 import { describe, expect, test, vi } from "vitest";
 import { createFakeTerminal } from "@repo/pyodide-testkit/fake-terminal";
-import { createSelectionCopy, decideKey, type CopyResult } from "./selection-copy";
+import {
+  createSelectionCopy,
+  decideKey,
+  type CopyResult,
+} from "./selection-copy";
 
 describe("decideKey", () => {
   test.each([
@@ -19,16 +23,22 @@ describe("decideKey", () => {
   ] as const)(
     "%s ctrl=%s alt=%s meta=%s key=%s hasSelection=%s -> %s",
     (type, ctrlKey, altKey, metaKey, key, hasSelection, expected) => {
-      expect(decideKey({ type, ctrlKey, altKey, metaKey, key }, hasSelection)).toBe(
-        expected,
-      );
+      expect(
+        decideKey({ type, ctrlKey, altKey, metaKey, key }, hasSelection),
+      ).toBe(expected);
     },
   );
 
   test("Ctrl+Shift+C도 선택이 있으면 copy다", () => {
     expect(
       decideKey(
-        { type: "keydown", ctrlKey: true, altKey: false, metaKey: false, key: "c" },
+        {
+          type: "keydown",
+          ctrlKey: true,
+          altKey: false,
+          metaKey: false,
+          key: "c",
+        },
         true,
       ),
     ).toBe("copy");
@@ -197,7 +207,10 @@ describe("createSelectionCopy", () => {
     const fake = createFakeTerminal({ withElement: true });
     fake.select("dragged");
     const { writeText, calls } = stubWriteText();
-    const policy = createSelectionCopy(fake.term, { copyOnSelect: false, writeText });
+    const policy = createSelectionCopy(fake.term, {
+      copyOnSelect: false,
+      writeText,
+    });
     const element = fake.term.element!;
 
     element.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
@@ -214,7 +227,10 @@ describe("createSelectionCopy", () => {
     const fake = createFakeTerminal({ withElement: true });
     fake.select("dragged");
     const { writeText, calls } = stubWriteText();
-    const policy = createSelectionCopy(fake.term, { copyOnSelect: false, writeText });
+    const policy = createSelectionCopy(fake.term, {
+      copyOnSelect: false,
+      writeText,
+    });
     const element = fake.term.element!;
 
     policy.setCopyOnSelect(true);
@@ -228,7 +244,10 @@ describe("createSelectionCopy", () => {
     const fake = createFakeTerminal({ withElement: false });
     fake.select("hello");
     const { writeText, calls } = stubWriteText();
-    const policy = createSelectionCopy(fake.term, { copyOnSelect: true, writeText });
+    const policy = createSelectionCopy(fake.term, {
+      copyOnSelect: true,
+      writeText,
+    });
 
     expect(fake.term.element).toBeUndefined();
     const handled = policy.onKeyEvent(ctrlC());
@@ -241,7 +260,10 @@ describe("createSelectionCopy", () => {
     const fake = createFakeTerminal({ withElement: true });
     fake.select("hello");
     const { writeText, calls } = stubWriteText();
-    const policy = createSelectionCopy(fake.term, { copyOnSelect: true, writeText });
+    const policy = createSelectionCopy(fake.term, {
+      copyOnSelect: true,
+      writeText,
+    });
     const element = fake.term.element!;
 
     policy.dispose();

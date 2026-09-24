@@ -28,11 +28,7 @@ describe("composeRpcHandlers: core·driver 핸들러 표 합성", () => {
 
   test("세 표 이상에서도 뒤쪽 표끼리 겹치면 예외를 던진다", () => {
     expect(() =>
-      composeRpcHandlers(
-        { a: () => 1 },
-        { b: () => 2 },
-        { b: () => 3 },
-      ),
+      composeRpcHandlers({ a: () => 1 }, { b: () => 2 }, { b: () => 3 }),
     ).toThrow(/b/);
   });
 });

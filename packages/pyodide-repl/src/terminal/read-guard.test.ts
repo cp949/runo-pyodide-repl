@@ -12,7 +12,10 @@ import { VtScreen, attachVtScreen } from "@repo/pyodide-testkit/vt-screen";
 import { createAutoIndent } from "./auto-indent";
 import { createReadGuard } from "./read-guard";
 import { createReplReader } from "./repl-reader";
-import { createInputReader, createTerminalSinks } from "@cp949/runo-pyodide-terminal/internal";
+import {
+  createInputReader,
+  createTerminalSinks,
+} from "@cp949/runo-pyodide-terminal/internal";
 
 /** 매크로태스크 한 번. 가드가 걸어 둔 then 체인(마이크로태스크 여러 번)이 끝나기를 기다린다. */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -304,8 +307,11 @@ describe.each([
       // 실제 `read`를 그대로 호출하면서 받은 프롬프트를 기록한다.
       const read = vi.spyOn(readline, "read");
       const autoIndent = createAutoIndent(readline);
-      const replReader = createReplReader(readline, fake.term, sinks, (pending) =>
-        autoIndent.readOptions(pending),
+      const replReader = createReplReader(
+        readline,
+        fake.term,
+        sinks,
+        (pending) => autoIndent.readOptions(pending),
       );
       const inputReader = createInputReader(readline, fake.term, sinks);
       const guard = createReadGuard({

@@ -87,7 +87,7 @@ function observe(promise: Promise<unknown>): () => Outcome {
     },
     (reason) => {
       outcome = { state: "rejected", reason };
-    }
+    },
   );
   return () => outcome;
 }
@@ -427,7 +427,7 @@ describe("takeRead와 다른 API의 상호작용", () => {
     const result = outcome();
     expect(result.state).toBe("rejected");
     expect((result as { reason: unknown }).reason).toBeInstanceOf(
-      ReadTakenError
+      ReadTakenError,
     );
     expect(term.vt.screen()).toBe(screenBefore);
     expect(term.vt.cursor()).toEqual(cursorBefore);
@@ -537,7 +537,7 @@ describe("takeRead와 그리기 전 읽기(pendingReads)", () => {
     const result = outcome();
     expect(result.state).toBe("rejected");
     expect((result as { reason: unknown }).reason).toBeInstanceOf(
-      ReadTakenError
+      ReadTakenError,
     );
     // 프롬프트가 늦게 그려지지 않는다.
     expect(term.vt.screen()).toBe("");
@@ -566,9 +566,9 @@ describe("takeRead와 그리기 전 읽기(pendingReads)", () => {
 describe("ReadOptions.prefillCursor", () => {
   test("prefill 뒤 커서를 지정한 위치에 둔다", () => {
     const { term, readline } = setup();
-    void readline.read(">>> ", { prefill: "print", prefillCursor: 2 }).catch(
-      () => {}
-    );
+    void readline
+      .read(">>> ", { prefill: "print", prefillCursor: 2 })
+      .catch(() => {});
 
     expect(readline.getLine()).toBe("print");
     expect(readline.getCursor()).toBe(2);
@@ -582,16 +582,16 @@ describe("ReadOptions.prefillCursor", () => {
   test("0이면 맨 앞, 길이와 같으면 끝이다", () => {
     {
       const { readline } = setup();
-      void readline.read(">>> ", { prefill: "abc", prefillCursor: 0 }).catch(
-        () => {}
-      );
+      void readline
+        .read(">>> ", { prefill: "abc", prefillCursor: 0 })
+        .catch(() => {});
       expect(readline.getCursor()).toBe(0);
     }
     {
       const { readline } = setup();
-      void readline.read(">>> ", { prefill: "abc", prefillCursor: 3 }).catch(
-        () => {}
-      );
+      void readline
+        .read(">>> ", { prefill: "abc", prefillCursor: 3 })
+        .catch(() => {});
       expect(readline.getCursor()).toBe(3);
     }
   });
@@ -599,16 +599,16 @@ describe("ReadOptions.prefillCursor", () => {
   test("범위를 벗어나면 [0, prefill 길이]로 자른다", () => {
     {
       const { readline } = setup();
-      void readline.read(">>> ", { prefill: "abc", prefillCursor: 99 }).catch(
-        () => {}
-      );
+      void readline
+        .read(">>> ", { prefill: "abc", prefillCursor: 99 })
+        .catch(() => {});
       expect(readline.getCursor()).toBe(3);
     }
     {
       const { readline } = setup();
-      void readline.read(">>> ", { prefill: "abc", prefillCursor: -5 }).catch(
-        () => {}
-      );
+      void readline
+        .read(">>> ", { prefill: "abc", prefillCursor: -5 })
+        .catch(() => {});
       expect(readline.getCursor()).toBe(0);
     }
   });
@@ -623,9 +623,9 @@ describe("ReadOptions.prefillCursor", () => {
     }
     {
       const { readline } = setup();
-      void readline.read(">>> ", { prefill: "", prefillCursor: 2 }).catch(
-        () => {}
-      );
+      void readline
+        .read(">>> ", { prefill: "", prefillCursor: 2 })
+        .catch(() => {});
       expect(readline.getCursor()).toBe(0);
     }
   });
@@ -639,7 +639,8 @@ describe("ReadOptions.prefillCursor", () => {
 
   test("멀티라인 prefill에서 첫 줄 중간에 커서를 두면 화면 커서도 그 자리다", () => {
     const { term, readline } = setup(40, 10);
-    void readline.read(">>> ", { prefill: "if a:\n    x", prefillCursor: 3 })
+    void readline
+      .read(">>> ", { prefill: "if a:\n    x", prefillCursor: 3 })
       .catch(() => {});
 
     expect(readline.getCursor()).toBe(3);
@@ -649,7 +650,8 @@ describe("ReadOptions.prefillCursor", () => {
 
   test("감긴 긴 prefill에서 커서를 중간에 두면 화면 커서가 그 행·열이다", () => {
     const { term, readline } = setup(8, 10);
-    void readline.read("> ", { prefill: "abcdefghijkl", prefillCursor: 7 })
+    void readline
+      .read("> ", { prefill: "abcdefghijkl", prefillCursor: 7 })
       .catch(() => {});
 
     // "> " 뒤 7글자 → 9칸째 = 둘째 행 열 1.
@@ -659,9 +661,9 @@ describe("ReadOptions.prefillCursor", () => {
   test("지연된 write 콜백 뒤에도 커서가 유지된다", () => {
     const { term, readline } = setup();
     term.asyncWrite = true;
-    void readline.read(">>> ", { prefill: "print", prefillCursor: 2 }).catch(
-      () => {}
-    );
+    void readline
+      .read(">>> ", { prefill: "print", prefillCursor: 2 })
+      .catch(() => {});
     term.flush();
 
     expect(readline.getCursor()).toBe(2);

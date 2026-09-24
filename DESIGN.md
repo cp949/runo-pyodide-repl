@@ -25,21 +25,21 @@
 
 ## 결정된 스택
 
-| 항목 | 결정 |
-| --- | --- |
-| 워크스페이스 | pnpm 11 + turbo, `apps/*`·`packages/*`. Node 24+, TypeScript 6 |
-| core | `packages/pyodide-core` = `@cp949/runo-pyodide-core`(private, RD-020). 프로토콜(RPC·메일박스·interrupt)·worker 커널·main 세션·실행 driver(`runDriver`, RD-022)·`createRunner`. tsdown ESM + d.ts. UI·xterm·coincident 비의존 |
-| REPL | `packages/pyodide-repl` = `@cp949/runo-pyodide-repl`. REPL driver + REPL 프런트(core·terminal 위). tsdown ESM + d.ts. 프레임워크 무관. React·MUI 의존 없음 |
-| 실행창 | `packages/pyodide-terminal` = `@cp949/runo-pyodide-terminal`(private, RD-022). xterm 실행창 `createTerminalRunner`와 repl이 공유하는 부품 5종(`./internal`, repl 전용·lockstep). tsdown ESM + d.ts. coincident 비의존 |
-| React | `packages/pyodide-react` = `@cp949/runo-pyodide-react`(private, RD-024). `<PythonRunner>`·`<PythonRepl>`·`usePythonRunner`. core·terminal·repl 위에서 xterm 생성·`FitAddon`·dispose 순서·StrictMode를 처리한다. peer `react`·`react-dom` ^19·`@xterm/xterm` ^6, `xterm.css`는 소비자가 import. tsdown ESM + d.ts. coincident 비의존 |
-| 줄 편집 | `packages/xterm-readline` = `@cp949/runo-xterm-readline`. strtok/xterm-readline 1.2.2 소스 벤더링(MIT). 원본 `/work/thrd/xterm-readline` |
-| 터미널 | `@xterm/xterm` 6 |
-| 데모 | `apps/demo`: Vite 8 + React 19. UI 라이브러리 미정(필수 아님) |
-| Python | pyodide `314.0.7`(Python 3.14.2), CDN `loadPyodide`. 버전 원천은 `pnpm-workspace.yaml` catalog 한 곳이고 코드는 `pyodide/package.json`에서 유도한다(ADR-0007, `13-version-upgrade.md`). `pyodide` npm 패키지는 타입·node 시험용 devDependency이며 core가 optional peer로도 선언한다 |
-| 동등성 기준 | CPython 3.14.4 `_pyrepl`, pty 24×80 `TERM=xterm` 실측 |
-| 통신 | 네이티브 Worker + MessageChannel RPC + `input()` 전용 SAB 메일박스 + interrupt buffer. coincident 없음 |
-| 테스트 | vitest 5. node 환경에서 실제 pyodide 로드, jsdom + 가짜 터미널, 브라우저는 Playwright 수동 하니스. 시험 도우미는 `packages/pyodide-testkit` = `@repo/pyodide-testkit`(private, 빌드·pack 없음). 패키지 경계 검사(의존 트리 시험·`check-dist`·`pnpm smoke:pack`)는 `09-testing.md` 9.8 |
-| 호스팅 | cross-origin isolated 필수(COOP/COEP). dev·preview·배포 모두 |
+| 항목         | 결정                                                                                                                                                                                                                                                                                                                                |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 워크스페이스 | pnpm 11 + turbo, `apps/*`·`packages/*`. Node 24+, TypeScript 6                                                                                                                                                                                                                                                                      |
+| core         | `packages/pyodide-core` = `@cp949/runo-pyodide-core`(private, RD-020). 프로토콜(RPC·메일박스·interrupt)·worker 커널·main 세션·실행 driver(`runDriver`, RD-022)·`createRunner`. tsdown ESM + d.ts. UI·xterm·coincident 비의존                                                                                                        |
+| REPL         | `packages/pyodide-repl` = `@cp949/runo-pyodide-repl`. REPL driver + REPL 프런트(core·terminal 위). tsdown ESM + d.ts. 프레임워크 무관. React·MUI 의존 없음                                                                                                                                                                          |
+| 실행창       | `packages/pyodide-terminal` = `@cp949/runo-pyodide-terminal`(private, RD-022). xterm 실행창 `createTerminalRunner`와 repl이 공유하는 부품 5종(`./internal`, repl 전용·lockstep). tsdown ESM + d.ts. coincident 비의존                                                                                                               |
+| React        | `packages/pyodide-react` = `@cp949/runo-pyodide-react`(private, RD-024). `<PythonRunner>`·`<PythonRepl>`·`usePythonRunner`. core·terminal·repl 위에서 xterm 생성·`FitAddon`·dispose 순서·StrictMode를 처리한다. peer `react`·`react-dom` ^19·`@xterm/xterm` ^6, `xterm.css`는 소비자가 import. tsdown ESM + d.ts. coincident 비의존 |
+| 줄 편집      | `packages/xterm-readline` = `@cp949/runo-xterm-readline`. strtok/xterm-readline 1.2.2 소스 벤더링(MIT). 원본 `/work/thrd/xterm-readline`                                                                                                                                                                                            |
+| 터미널       | `@xterm/xterm` 6                                                                                                                                                                                                                                                                                                                    |
+| 데모         | `apps/demo`: Vite 8 + React 19. UI 라이브러리 미정(필수 아님)                                                                                                                                                                                                                                                                       |
+| Python       | pyodide `314.0.7`(Python 3.14.2), CDN `loadPyodide`. 버전 원천은 `pnpm-workspace.yaml` catalog 한 곳이고 코드는 `pyodide/package.json`에서 유도한다(ADR-0007, `13-version-upgrade.md`). `pyodide` npm 패키지는 타입·node 시험용 devDependency이며 core가 optional peer로도 선언한다                                                 |
+| 동등성 기준  | CPython 3.14.4 `_pyrepl`, pty 24×80 `TERM=xterm` 실측                                                                                                                                                                                                                                                                               |
+| 통신         | 네이티브 Worker + MessageChannel RPC + `input()` 전용 SAB 메일박스 + interrupt buffer. coincident 없음                                                                                                                                                                                                                              |
+| 테스트       | vitest 5. node 환경에서 실제 pyodide 로드, jsdom + 가짜 터미널, 브라우저는 Playwright 수동 하니스. 시험 도우미는 `packages/pyodide-testkit` = `@repo/pyodide-testkit`(private, 빌드·pack 없음). 패키지 경계 검사(의존 트리 시험·`check-dist`·`pnpm smoke:pack`)는 `09-testing.md` 9.8                                               |
+| 호스팅       | cross-origin isolated 필수(COOP/COEP). dev·preview·배포 모두                                                                                                                                                                                                                                                                        |
 
 ## 문서 규칙
 

@@ -24,7 +24,10 @@ function patterned(length: number): string {
 function setup() {
   const mailbox = createStdinMailbox();
   const writer = createMailboxWriter(mailbox);
-  const role = spawnRole(new URL("../test/roles/mailbox-reader.ts", import.meta.url), mailbox);
+  const role = spawnRole(
+    new URL("../test/roles/mailbox-reader.ts", import.meta.url),
+    mailbox,
+  );
   return {
     writer,
     /** worker가 `wait()`에 들어가게 하고 그 결과를 기다린다. */

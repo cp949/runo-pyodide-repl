@@ -373,7 +373,11 @@ describe("type-ahead Shift+Enter", () => {
     term.type("b");
     void readline.read(">>> ", { onKey });
 
-    expect(seen).toEqual([InputType.Text, InputType.ShiftEnter, InputType.Text]);
+    expect(seen).toEqual([
+      InputType.Text,
+      InputType.ShiftEnter,
+      InputType.Text,
+    ]);
     // 벤더가 개행을 한 번 더 넣었다면 "a\n\n  b"가 된다.
     expect(readline.getLine()).toBe("a\n  b");
   });
@@ -446,7 +450,12 @@ describe("type-ahead 제어 키 재생(pty 대조 값)", () => {
     const { term, readline } = setup();
     for (const key of keys) term.feed(key);
     void readline.read(">>> ");
-    return { screen: term.vt.screen(), line: readline.getLine(), cursor: readline.getCursor(), cursorCol: term.vt.cursor()[1] };
+    return {
+      screen: term.vt.screen(),
+      line: readline.getLine(),
+      cursor: readline.getCursor(),
+      cursorCol: term.vt.cursor()[1],
+    };
   }
 
   test("Backspace는 재생 때 앞 글자를 지운다: abx⌫c → abc, 커서 끝", () => {

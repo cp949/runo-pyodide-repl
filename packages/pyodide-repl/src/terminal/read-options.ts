@@ -22,7 +22,10 @@ export type ReadOptionsProvider = (
 export function mergeReadOptions(...parts: ReplReadOptions[]): ReplReadOptions {
   const onKeys = parts
     .map((part) => part.onKey)
-    .filter((onKey): onKey is NonNullable<ReplReadOptions["onKey"]> => onKey !== undefined);
+    .filter(
+      (onKey): onKey is NonNullable<ReplReadOptions["onKey"]> =>
+        onKey !== undefined,
+    );
 
   const result: ReplReadOptions = {};
   if (onKeys.length > 0) {
@@ -30,7 +33,8 @@ export function mergeReadOptions(...parts: ReplReadOptions[]): ReplReadOptions {
   }
   for (const part of parts) {
     if (part.prefill !== undefined) result.prefill = part.prefill;
-    if (part.historyEntry !== undefined) result.historyEntry = part.historyEntry;
+    if (part.historyEntry !== undefined)
+      result.historyEntry = part.historyEntry;
   }
   return result;
 }

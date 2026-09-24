@@ -102,7 +102,9 @@ async function runScenario(options: ScenarioOptions = {}) {
   });
   onTestFinished(() => rpc.dispose());
 
-  const role = spawnRole(new URL("../test/roles/repl-worker.ts", import.meta.url));
+  const role = spawnRole(
+    new URL("../test/roles/repl-worker.ts", import.meta.url),
+  );
   postInitFrame(
     { postMessage: (message, transfer) => role.post(message, transfer) },
     frame,

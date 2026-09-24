@@ -37,6 +37,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 시나리오: `pnpm dev`로 뜬 페이지와 `pnpm build && pnpm preview`로 뜬 페이지 모두 `crossOriginIsolated === true`다. worker가 생성되고 main이 보낸 초기화 프레임을 받아 `console.log`로 에코한다.
 
 완료 기준:
+
 - 벤더링 패키지의 이식된 시험 8개 파일이 vitest에서 통과한다. 원본 대비 변경은 export 추가·`persist` 옵션·빌드 설정뿐이다(기능 수정은 뒤 항목에서).
 - dev·preview 양쪽에서 `crossOriginIsolated`가 참이다(브라우저 콘솔 확인 또는 Playwright 1회).
 - 프로덕션 빌드에서 worker가 ES 모듈로 번들되고 top-level `await`가 든 worker 파일이 빌드에 실패하지 않는다.
@@ -53,6 +54,7 @@ RD-001, RD-002, ... 순증가. 완료 후 사이에 항목을 끼워 넣어야 �
 시나리오: node `worker_threads`에서 main 역할 스레드가 worker 역할 스레드에 초기화 프레임을 보내고, worker가 `readLine` 요청 → main 응답, main `complete` 요청 → worker 응답, worker `readInput` 알림 → `mailbox.wait()` 정지 → main `deliver("abc")` → worker가 `"abc"`를 받는다.
 
 완료 기준:
+
 - RPC: 요청/응답/알림, `null` 결과 보존, 핸들러 예외 → `ok:false`, 없는 메서드, `dispose()` 시 대기 요청 reject. 실제 `MessageChannel`로 시험.
 - 메일박스: `01-protocols.md` 2.4의 시험 전부(한 청크, 정확히 64KiB, 64KiB+1 두 청크, 멀티바이트 경계, 빈 문자열, `cancel`, `fail`). `Atomics.waitAsync` 없는 환경의 폴링 폴백 시험.
 - interrupt buffer: `signalInterrupt`(SEQ 먼저, SIGNAL 나중), `acknowledgeInterrupt`, `discardPendingInterrupt`(지운 경우만 ack), `hasProtocolSlots` 시험.
@@ -81,6 +83,7 @@ worker 진입점 `runReplWorker()`: 초기화 프레임 수신 → CDN `loadPyod
 시나리오: 페이지를 열면 `Python 3.14.2 (...)` 배너가 뜬다. `print("x", end="")`가 개행 없이 즉시 보이고, `print("\r50%", end="")` → `print("\r100%", end="")`가 같은 줄에서 갱신된다. `print("err", file=sys.stderr)`가 빨강이고 뒤에 빈 줄이 없다. CDN을 막고 열면 앱이 죽지 않고 터미널에 로드 실패가 찍히며 상태 Chip이 실패를 보인다. `crossOriginIsolated`가 거짓인 페이지에서는 경고 한 줄이 나온다.
 
 완료 기준:
+
 - 개행 계약: `writeOutput`/`writeError`는 끝 개행 없는 텍스트를 받고 sink가 `\r\n`을 붙인다. `write`/`writeErrorRaw`는 조각 그대로, 빈 조각은 무출력, stderr 빨강은 조각마다 열고 닫는다. 실제 sink + `Readline`로 터미널 바이트를 검사하는 시험(이전 `terminal-sinks.test.ts` 상당).
 - 3.14.4 pty 기준표와 같다: `print("err", file=sys.stderr)` → `err\r\n`, `sys.stderr.write("a\nb\n")` 뒤 빈 줄 없음, stdout/stderr 교차 순서 보존.
 - 전역 스트림 Writer: 바이트 수 반환, 청크 경계의 멀티바이트 이어 붙임(node + 실제 pyodide, 변이 검사 6종 상당).
@@ -97,6 +100,7 @@ worker의 REPL 루프(`readLine` 요청 → `submission-runner.run`)와 main의 
 시나리오: `>>> 1 + 1` Enter → `2` → `>>> `. 빈 줄 Enter는 무해하다. `if True:` Enter → `... ` → `    print(1)` Enter → 빈 줄 Enter → `1`. `1 +` Enter → SyntaxError 즉시 표시. `1/0` → 트레이스백에 `__repl_run`/`push`/`runcode` 프레임이 없다. `print("t", end="")` 실행 뒤 다음 프롬프트가 `t>>> `로 같은 줄에 붙는다. `exit()` → "Python session terminated." 안내, 이후 입력 무응답.
 
 완료 기준:
+
 - 위 시나리오 전부(브라우저). (RD-004에서 완료) 배너 뒤·값 에코 뒤 빈 줄 없음. `sys.ps1`/`ps2` 설정과 배너 `writeOutput`도 RD-004에서 끝났다.
 - EOF에서 끊긴 문법 오류(`1 +`·`foo bar`)는 pyodide 314.0.7 콘솔이 `SyntaxError: invalid syntax`가 아니라 `_IncompleteInputError: incomplete input`으로 표시한다(`runLine`은 `syntax-error`로 분류하고 `formattedError`를 그대로 돌려준다). 위 `1 +` 시나리오의 화면 마지막 줄을 3.14.4 pty와 비교해 맞추거나 편차로 등록한다(근거·표: `.scratch/incomplete-input-error-display/issues/01-incomplete-input-error-display.md`). 결과: 재컴파일 정규화를 채택해 `1 +`·`foo bar`·블록 안 `1 +`가 3.14.4 pty와 캐럿까지 일치하고 본문 없는 중첩 블록은 `IndentationError` 문구가 같다(이슈 `done`, 편차 13은 즉시 표시(편차 11)만 남는다).
 - `ConsoleFuture`는 Python 쪽 `await_fut` 헬퍼로만 await한다. `run(null)` 선분기(버퍼 clear → `KeyboardInterrupt` 빨강 → `>>> `). `run()` 안전망(`ConversionError` 판별)이 있다. node + 실제 pyodide 시험(이전 `submission-runner.test.ts` 상당).
@@ -114,6 +118,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 시나리오: `name = input("x: ")` → `x: ` 뒤에서 대기, `abc` Enter → 화면은 `x: abc` 한 줄, `name == "abc"`. `input()`·`sys.stdin.readline()`은 프롬프트 없이 읽는다. flush한 `print("t", end="")` 뒤 `input()`은 `tabc`. 프롬프트 대기 중 `asyncio.get_event_loop().call_later(1, lambda: print(input()))`처럼 배경 콜백이 `input()`을 불러도 REPL이 멈추지 않고, 순서는 REPL 줄 → 배경 `input` 줄 → 콜백 출력 → REPL 줄 실행이다. 같은 대기 중 `call_later(2, print, 'TICK')`의 `TICK`이 2초 뒤 바로 보인다.
 
 완료 기준:
+
 - `x: abc` 한 줄, 프롬프트 없는 `input()`, `tabc`·`tp: abc`, 130자·200자·전각·정확히 폭 프롬프트에서 앞 행 중복 없음. 이전 RD-006b 브라우저 74개 중 stdin 해당 23개(E1·K1~K3·L1·M1·M2·N1~N3·O1·O2·P1~P9·R1·U1 원형)와 ROADMAP 시나리오(`x: abc`, `TICK`)를 옮겨 dev 확인 19개 전부 PASS, preview(빌드 산출물) ROADMAP 시나리오 8/8 PASS(`pageerror`·콘솔 경고 0). 세션 리셋 뒤 프롬프트가 이전 꼬리를 물려받지 않는 성질은 새 sink 세트가 빈 꼬리로 시작하는 단위 시험까지만 본다(브라우저 확인은 RD-010).
 - `input()`/`sys.stdin.readline()/read()/readlines()`/`for line in sys.stdin` 전부 같은 경로로 값이 들어온다(node + 실제 pyodide, `worker/stdin-callback.test.ts`). `read()`·`readlines()`·반복은 EOF가 없어 끝나지 않는다(편차 34).
 - read-guard 단위 시험(RED 확인, 변이 검사 9/9)과 브라우저 프로브(`bg-input-guard-probe.mjs`: 가드를 빼면 REPL 읽기가 고아가 되어 시간 초과, 넣으면 REPL 줄 → 배경 `input` 줄 → 콜백 출력 → REPL 줄 실행 순서이고 이어서 `1+1`이 `2`). 브라우저 양성 대조 3/3(`resetTail` 삭제, 알림을 `wait()` 뒤로 이동, 가드 대기 삭제)이 해당 확인만 실패했다가 원복 후 통과했다.
@@ -133,6 +138,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 시나리오: `while True: pass` 중 Ctrl+C → `^C` + `KeyboardInterrupt` 트레이스백 → `>>> `. Ctrl+C를 누르고 있어도(키 반복 30회) 프롬프트가 돌아온다. 새 worker 로드 중 Ctrl+C를 눌러도 시작 코드가 죽지 않는다. `KeyboardInterrupt`를 잡고 계속 도는 프로그램은 눌림 한 번에 한 번만 중단된다.
 
 완료 기준(전부 충족, 실측):
+
 - 단일 눌림 소실 0: node 눌림 주입 N=3000 **소실 0**(자연 발생 소실 76건을 재전송이 전부 복구했다 — 재전송 1회 74건·2회 2건), 브라우저 N=200 **HANG 0**. catch-loop 3000회 **누락 0·이중 0**. 재전송 복구 지연 p50 5.2ms·**max 10.3ms**(기준 20ms 안팎).
 - 연타 매트릭스: 0ms 30회, 1·5·20·50ms 30회, 키 반복, 2·5회, 웜 0ms 각 N=20 → **9셀 180시행 전부 프롬프트 복귀**, 대상 `pageerror` 0. TLA 켜짐 0ms 30회는 node 시험(`sigint-handler.test.ts`)이 본다(브라우저 TLA 셀은 RD-012).
 - 부팅 중 Ctrl+C `boot-press` dev N=30·preview N=10 **전부 정상**(시행당 60~64회가 실제 부팅 중에 들어갔다).
@@ -159,6 +165,7 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 시나리오: `if True:` Enter → `... `에서 Ctrl+C → 빨간 `KeyboardInterrupt` 한 줄(`^C` 없음, 빈 줄 없음) → `>>> ` → `print(1)`이 `1`. `x = input()` 대기에서 `abc`를 치다 Ctrl+C → 입력 줄 아래 표준 트레이스백(`File "<console>", line 1, in <module>` / `KeyboardInterrupt`) → `>>> `, `x` 미대입. 함수 안 `input()` 취소는 그 프레임을 표시한다.
 
 완료 기준(실측):
+
 - 프롬프트 취소: 빈 `>>> `·`>>> abc`·본문이 쌓인 블록·Shift+Enter 버퍼·커서를 앞에 둔 버퍼·꼬리가 든 프롬프트(`t>>> abc`)에서 모두 `\r\n` + 빨간 `KeyboardInterrupt` 한 줄(`^C` 없음, 빈 줄 없음). 다음 입력에 취소된 글자가 섞이지 않고 취소한 입력은 history에 없다(↑ 30회). 브라우저 `prompt-cancel-check.mjs` **23/23**(dev), 세션 리셋 뒤는 RD-010.
 - `input()` 취소: `null` → `signalInterrupt`(요청 번호 +1) → `checkInterrupt()` → `KeyboardInterrupt`가 `input()` 호출 지점에서 난다. `try/except KeyboardInterrupt`가 잡고 `except Exception`은 못 잡으며 `finally`·`with`의 `__exit__`가 실행된다. `sys.stdin.readline()`·`read()`·`for line in sys.stdin`·함수 안 `input()`도 같다. 브라우저 `input-cancel-check.mjs` **26/26**(dev). 요청 번호를 올리지 않은 전송이 무시되는 것을 node 시험(TRP-035 검출)과 브라우저 양성 대조 ②가 잡는다.
 - 연타: `input()` 대기 5셀(0ms 2회·5회·키 반복 20회·긴/짧은 프롬프트 + 5회)과 `... ` 프롬프트 3셀(0ms 2회·5회·키 반복 20회) × N=20 = **160시행 전부 OK**, 대상 `pageerror` 0. `... ` 셀은 `^C` 0(게이트 항의 직접 관측).
@@ -177,36 +184,39 @@ worker `stdin-callback.ts`(`setStdin`, 취소 변환은 RD-008이 넣었다), ma
 시나리오: `while True: time.sleep(0.1)` 중 Ctrl+C 한 번 → 200ms 안에 트레이스백과 `>>> `. `time.sleep(5)` 단발도 끊긴다(JSPI 유무 무관). `asyncio.run(main())`·`run_until_complete`·`run_sync`·top-level await 대기 중 Ctrl+C가 사용자 지점에서 중단된다. sleep 중에는 `call_later` 콜백이 돌지 않는다. 프롬프트 대기 중 눌린 낡은 SIGINT가 배경 콜백을 끊지 않고 조용히 버려진다. 정상 중단·`input()` 취소·`exit()`에서 브라우저 `pageerror`가 0이다.
 
 완료 기준(실측. 형식 판정의 2셀 제외는 RD-009a가 해소했다):
+
 - **브라우저 12조합 × N=20 = 240시행 전부 복귀**, 총 `pageerror` **0**(재보고 포함), 복귀(keydown → 새 프롬프트 행) 중앙값 12/12셀 모두 30ms 이내. dev(`localhost:5173`, Chromium headless), 측정은 페이지 내부 시계(keydown 리스너 + `MutationObserver`)다 — Node↔CDP 왕복으로 재면 문턱 근처에서 5~8ms 과대 측정된다.
 
-  | 셀 | 프로그램 | 중앙값(ms) | 최대(ms) | 형식 판정 |
-  | --- | --- | --- | --- | --- |
-  | `sleep-0.01` | `while True: time.sleep(0.01)` | 29.61 | 33.76 | 20/20 |
-  | `sleep-0.1` | `while True: time.sleep(0.1)` | 26.36 | 34.03 | 20/20 |
-  | `sleep-1` | `while True: time.sleep(1)` | 27.61 | 33.94 | 20/20 |
-  | `sleep5` | `time.sleep(5)` 단발 | 28.67 | 33.44 | 20/20 |
-  | `arun5` | `asyncio.run(asyncio.sleep(5))` | 25.47 | 35.04 | 20/20 |
-  | `ruc5` | `run_until_complete(asyncio.sleep(5))` | 26.39 | 34.08 | 20/20 |
-  | `runsync5` | `run_sync(asyncio.sleep(5))` | 29.98 | 34.27 | 20/20 |
-  | `arun-sleep` | `async def main(): time.sleep(5)` + `asyncio.run(main())` | 26.23 | 34.34 | 20/20(RD-009a) |
-  | `catch3j` | `KeyboardInterrupt`를 잡고 도는 루프에 3회 | 22.19 | 34.21 | 20/20 |
-  | `arun-loop` | `async def main():` / `while True: await asyncio.sleep(0.1)` | 23.25 | 38.44 | 20/20 |
-  | `runsync-sleep` | 같은 `main` + `run_sync(main())` | 27.12 | 33.89 | 20/20(RD-009a) |
-  | `sleep-burst` | `while True: time.sleep(0.1)` 중 0ms 연타 5회 | 28.47 | 37.47 | 20/20 |
+  | 셀              | 프로그램                                                     | 중앙값(ms) | 최대(ms) | 형식 판정      |
+  | --------------- | ------------------------------------------------------------ | ---------- | -------- | -------------- |
+  | `sleep-0.01`    | `while True: time.sleep(0.01)`                               | 29.61      | 33.76    | 20/20          |
+  | `sleep-0.1`     | `while True: time.sleep(0.1)`                                | 26.36      | 34.03    | 20/20          |
+  | `sleep-1`       | `while True: time.sleep(1)`                                  | 27.61      | 33.94    | 20/20          |
+  | `sleep5`        | `time.sleep(5)` 단발                                         | 28.67      | 33.44    | 20/20          |
+  | `arun5`         | `asyncio.run(asyncio.sleep(5))`                              | 25.47      | 35.04    | 20/20          |
+  | `ruc5`          | `run_until_complete(asyncio.sleep(5))`                       | 26.39      | 34.08    | 20/20          |
+  | `runsync5`      | `run_sync(asyncio.sleep(5))`                                 | 29.98      | 34.27    | 20/20          |
+  | `arun-sleep`    | `async def main(): time.sleep(5)` + `asyncio.run(main())`    | 26.23      | 34.34    | 20/20(RD-009a) |
+  | `catch3j`       | `KeyboardInterrupt`를 잡고 도는 루프에 3회                   | 22.19      | 34.21    | 20/20          |
+  | `arun-loop`     | `async def main():` / `while True: await asyncio.sleep(0.1)` | 23.25      | 38.44    | 20/20          |
+  | `runsync-sleep` | 같은 `main` + `run_sync(main())`                             | 27.12      | 33.89    | 20/20(RD-009a) |
+  | `sleep-burst`   | `while True: time.sleep(0.1)` 중 0ms 연타 5회                | 28.47      | 37.47    | 20/20          |
 
   형식 판정(시간 기반 중단 = 트레이스백 정확히 1개 + `KeyboardInterrupt` 마지막 줄 + `>>> ` 복귀 + 우리 프레임 0)은 지금 **12/12셀 통과**다. RD-009 당시 10/12셀이었고 남은 2셀(`arun-sleep`·`runsync-sleep`, **복귀 자체는 20/20 정상**이고 지연도 문턱 안이지만 코루틴 프레임 안에서 동기 `time.sleep` 조각을 직접 부르는 조합이라 pyodide가 `sys.excepthook`으로 한 번 더 찍는 트레이스백에 우리 파일명이 노출됐다, **편차 28**)은 RD-009a가 해소해 12/12다.
+
 - 재보고 0(브라우저 재실행 4종, 총 `pageerror`): `repl-check.mjs normal` ⑦ **0**(기준선 RD-005 1건), `ctrl-c-check.mjs` **0**(기준선 RD-007 시행당 2건), `prompt-cancel-check.mjs` 23/23·**0**(기준선 RD-008 4건), `input-cancel-check.mjs` 26/26·**0**(기준선 RD-008 28건).
 - node(JSPI 있음·없음 각 N=30 × 5 프로그램 = 300시행): 전부 30/30 중단, stderr가 표준 트레이스백과 정확 일치 300/300, 추가 stderr 0, 200ms 초과 0. 눌림 → stderr 지연(ms):
 
-  | 프로그램 | jspi 중앙값 | jspi p90 | jspi 최대 | nojspi 중앙값 | nojspi p90 | nojspi 최대 |
-  | --- | --- | --- | --- | --- | --- | --- |
-  | `sleep5` | 12.1 | 20.7 | 41.9 | 10.9 | 20.8 | 46.3 |
-  | `loop01`(0.1) | 10.3 | 18.7 | 21.5 | 13.7 | 20.6 | 21.2 |
-  | `loop002`(0.02) | 12.2 | 19.9 | 20.4 | 11.4 | 21.0 | 21.4 |
-  | `loop0015`(0.015) | 7.9 | 15.6 | 16.5 | 10.5 | 15.5 | 16.7 |
-  | `loop001`(0.01) | 6.7 | 11.4 | 11.8 | 7.6 | 10.8 | 11.2 |
+  | 프로그램          | jspi 중앙값 | jspi p90 | jspi 최대 | nojspi 중앙값 | nojspi p90 | nojspi 최대 |
+  | ----------------- | ----------- | -------- | --------- | ------------- | ---------- | ----------- |
+  | `sleep5`          | 12.1        | 20.7     | 41.9      | 10.9          | 20.8       | 46.3        |
+  | `loop01`(0.1)     | 10.3        | 18.7     | 21.5      | 13.7          | 20.6       | 21.2        |
+  | `loop002`(0.02)   | 12.2        | 19.9     | 20.4      | 11.4          | 21.0       | 21.4        |
+  | `loop0015`(0.015) | 7.9         | 15.6     | 16.5      | 10.5          | 15.5       | 16.7        |
+  | `loop001`(0.01)   | 6.7         | 11.4     | 11.8      | 7.6           | 10.8       | 11.2        |
 
   ≤20ms 폴링 1회를 지우면 `loop002` 중앙값 12.2 → 187.6ms(15.4배)·최대 20.4 → 339.5ms(16.6배), `loop001` 중앙값 6.7 → 66.6ms(9.9배)다(TRAP-25 재확인, 이전 구현 실측 약 13배와 같은 자릿수).
+
 - 무효 인자(`-1`·`'a'`·NaN·inf·키워드·인자 2개·`9.3e9`)는 로컬 3.14.4와 같은 예외 문구, `0`·`True`는 오류 없음(`sigint-handler-sleep-slice.test.ts`).
 - 프롬프트 유휴 폐기(`interrupt-watch.test.ts` 15건 + `boot.test.ts` 통합 3건, RED 확인 + 변이 검사), 실행 중 규칙(깨울 수 없으면 남긴다) 유지.
 - 설치 가드 5종(`pyodide.webloop.run_sync`·`pyodide.ffi.run_sync`·`console.runcode` 코루틴 여부·`time.sleep.__wrapped__`가 builtin·`pyodide_js.checkInterrupt` 호출 가능)이 가드마다 `warn` 정확히 1회를 내고 나머지 부분은 계속 동작한다. webloop 억제도 속성이 빠지면 전부 건너뛰고 경고한다.
@@ -237,6 +247,7 @@ RD-009 브라우저 12조합에서 형식 판정을 제외한 `arun-sleep`·`run
 시나리오: `<console>`에서 정의한 `async def main():` / `    time.sleep(5)`를 `asyncio.run(main())`·`run_until_complete(main())`·`run_sync(main())`으로 실행하는 중 Ctrl+C → 트레이스백 정확히 1개(`File "<console>", line 1, in <module>` / `File "<console>", line 2, in main` / `KeyboardInterrupt`) → `>>> `. 화면 어디에도 `<sigint-handler>`·`<sleep-slice>`·`webloop.py` 프레임이 없다. `main` 안의 `try/except KeyboardInterrupt`·`finally`는 그대로 동작한다. `main`이 `raise ValueError('boom')`이면 트레이스백 1개에 `main` 줄과 `ValueError: boom`, `raise KeyboardInterrupt('custom')`이면 `KeyboardInterrupt: custom` 1회, `except ValueError:` 안의 sleep을 끊으면 `During handling of the above exception…` 사슬이 1회, `sys.exit(3)`이면 인쇄 없이 종료.
 
 완료 기준(실측):
+
 - node: `sigint-handler-idle.test.ts`에 러너 3종 × (sleep 눌림·ValueError·`KeyboardInterrupt('custom')`·컨텍스트 사슬·`except`/`finally`·`sys.exit`·사용자 `CancelledError`·사용자가 잡은 객체의 `__traceback__`에 `guard`·`sleep`·`poll`·`sigint_handler`·`wasm://` 없음·중첩 `helper`·`asyncio.sleep('x')`의 `TypeError`에 `tasks.py` 프레임 잔존) 40건 추가, 5파일(`sigint-handler-idle`·`sigint-handler-sleep-slice`·`sigint-handler`·`sigint-handler-nojspi`·`boot`) 105/105 통과. 변이 검사 6종(DELTA-01 2종 + DELTA-02 4종) 전부 killed. `pnpm --filter @cp949/runo-pyodide-repl test` 32파일 598/598 통과. 취소 깨우기 3종 `toBe(CONSOLE_TRACEBACK)`·연타·`ensure_future` 누출·중첩·무효 인자 문구 시험 불변.
 - 브라우저(dev, Chromium headless, pyodide 314.0.7): `arun-sleep`·`runsync-sleep` N=20 40/40(중앙값 28.42·29.73ms, 최대 34.26·34.16ms), `pageErrors` 0. 나머지 10셀 N=5 50/50, `pageErrors` 0(중앙값 24.68~32.20ms). 화면 원문에 `main` 프레임(`File "<console>", line 1, in main`) 확인.
 - 문서: 편차 28 해소로 표시(번호 유지, 기전을 실측대로 정정), 새 편차 39(콘솔 실행 중 JS→Python 콜백 예외의 중복 인쇄 — `run_sync` 밖이라 이 RD 범위 밖), TRP-021 재작성(ACTIVE 유지, 제목·적용 조건·원인·해소·재발 조건), `03-ctrl-c.md` 2.4, RD-009 표의 두 행을 20/20(RD-009a)으로, `09-testing.md` 9.3의 "10/12셀" 문구를 12/12로, `sigint-handler.py` 머리 주석.
@@ -360,12 +371,12 @@ RD-013 완료 반영: `shift` 절(Shift+Enter로 블록 진행)은 프리필이 
 
 브라우저 TLA 셀(RD-007·RD-009가 node 시험으로 대체하고 이 RD에 넘긴 것. node 결과와 브라우저 결과를 병기한다): `sleep-await-check.mjs`(RD-009 사본)에 `tla: true` 셀 4개를 더해 각 N=20 전부 통과, 총 `pageerror` 0.
 
-| 셀 | 프로그램(TLA 켜짐) | 판정 형식 | node(RD-009 대체) | 브라우저(RD-012, N=20) |
-| --- | --- | --- | --- | --- |
-| `await5` | `await asyncio.sleep(5)` | `line`: 트레이스백 0 + `KeyboardInterrupt` 한 줄(콘솔 task 취소, `10-parity-deviations.md` 1절 끝 "편차 아님" 문단) | `sigint-handler-idle.test.ts` TLA 4건 중 1건 | 20/20, 중앙값 27.28ms |
-| `awaitloop` | `while True: await asyncio.sleep(0.1)` | `either`: `line` 규칙 또는 `tb1` 규칙 중 하나(가지 비율은 판정 안 함, 기록만) | 〃 | 20/20(전부 `line` 가지), 중앙값 25.03ms |
-| `tla-sleep-0.1` | `while True: time.sleep(0.1)` | `tb1`: 트레이스백 1개 + 우리 프레임 0 | 〃 | 20/20, 중앙값 24.58ms |
-| `tla-burst` | `while True: pass` 0ms 30회 연타 | `burst`(`sleep-await-check.mjs` 판정): 트레이스백 정확히 1개 + `print('ok')` 복귀(`pageerror` 0) — RD-007 `burst-matrix.mjs`의 프롬프트 복귀 판정(`CRASH>HANG>DIRTY>OK`)보다 엄격하다 | (해당 없음, 브라우저 전용 신규 셀) | 20/20, 중앙값 57.88ms(허용 편차 — 30회 연타라 RD-009 `sleep-burst`의 5회 연타 30.23ms보다 "첫 눌림 기준" 측정 구간이 길다, 사용자 확인) |
+| 셀              | 프로그램(TLA 켜짐)                     | 판정 형식                                                                                                                                                                             | node(RD-009 대체)                            | 브라우저(RD-012, N=20)                                                                                                                  |
+| --------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `await5`        | `await asyncio.sleep(5)`               | `line`: 트레이스백 0 + `KeyboardInterrupt` 한 줄(콘솔 task 취소, `10-parity-deviations.md` 1절 끝 "편차 아님" 문단)                                                                   | `sigint-handler-idle.test.ts` TLA 4건 중 1건 | 20/20, 중앙값 27.28ms                                                                                                                   |
+| `awaitloop`     | `while True: await asyncio.sleep(0.1)` | `either`: `line` 규칙 또는 `tb1` 규칙 중 하나(가지 비율은 판정 안 함, 기록만)                                                                                                         | 〃                                           | 20/20(전부 `line` 가지), 중앙값 25.03ms                                                                                                 |
+| `tla-sleep-0.1` | `while True: time.sleep(0.1)`          | `tb1`: 트레이스백 1개 + 우리 프레임 0                                                                                                                                                 | 〃                                           | 20/20, 중앙값 24.58ms                                                                                                                   |
+| `tla-burst`     | `while True: pass` 0ms 30회 연타       | `burst`(`sleep-await-check.mjs` 판정): 트레이스백 정확히 1개 + `print('ok')` 복귀(`pageerror` 0) — RD-007 `burst-matrix.mjs`의 프롬프트 복귀 판정(`CRASH>HANG>DIRTY>OK`)보다 엄격하다 | (해당 없음, 브라우저 전용 신규 셀)           | 20/20, 중앙값 57.88ms(허용 편차 — 30회 연타라 RD-009 `sleep-burst`의 5회 연타 30.23ms보다 "첫 눌림 기준" 측정 구간이 길다, 사용자 확인) |
 
 `sleep-await-check.mjs`에는 `tb1`·`catch3`·`burst` 판정만 있었으므로 이 RD가 `line`·`either`를 추가했다. 코루틴 안 동기 `time.sleep`(편차 28)은 이 셀들과 무관하다(RD-009a).
 
@@ -476,6 +487,7 @@ Ctrl+U로 지운 줄)뿐이고, RD-014의 ↑ 삼킴은 이 경로만 다룬다.
 시나리오: `a.` 뒤 Tab → 후보 하나면 삽입, 여럿이면 공통 접두사. 같은 자리 두 번째 Tab → 열 우선 목록(셀 폭 = 최장 + 2, 200개 상한). 빈 스템은 `4 - (열 % 4)`칸 공백을 왕복 없이. `important = ` 뒤 Tab 8연타(0ms) → 32칸. `__getattr__`가 무한 루프인 객체에서 `a.x` Tab 뒤 Ctrl+C → 세션 리셋 없이 `>>> `.
 
 완료 기준(전부 충족, 실측 — `_works/_completed/20260923-16-rd-015-tab-completion/`의 DELTA-01~05):
+
 - 이전 RD-016 브라우저 58개(C1~C12)가 3.14 pty 목록 화면 행과 일치(`res_s10_0.json` `screen2`와 `a.`·
   `A.`·`x.__cl`·`print` 전부 행 단위 정확 일치, 열 폭 계산 버그·후보 집합 차이 관찰 안 됨) + **C13**(큐:
   `a.` Tab 2연타 0ms → 왕복 1회 뒤 목록 1번) + **C14**(완성 중 Ctrl+C, 아래) 전부 PASS —
@@ -544,6 +556,7 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 시나리오: `import os.pa` Tab → `import os.path`. `import xml.dom.m` Tab → `xml.dom.mini`. `import ` Tab 두 번 → 모듈 목록. `from os import pa` → `path`. `import os; os.pa`는 속성 완성.
 
 완료 기준(2026-09-24 그릴링 확정 — 이전 RD-016a 129/129·A 32개·코퍼스 53줄은 이력이며 합격 조건이 아니다, 검증은 L0 + L1, `docs/agents/rubber-workflow.md` "검증 실행 예산"):
+
 - L0 정확성(node + 실제 pyodide): `complete_source` 결과를 3.14.4 pty 기준 A01~A36·X01~X04 전부와 대조(기대값은 케이스 ID와 함께 시험 리터럴로 옮김, 원본 JSON은 `apps/demo/e2e/pty/rd-016/`). 네이티브와 pyodide 모듈 집합이 갈리는 케이스(편차 18, `native_vs_pyodide.json`)는 후보 리터럴이 아니라 삽입 결과 구조로 판정(TRAP-27). A37은 3.14 quirk 단위 시험.
 - 게이트 코퍼스 55줄(53 + 대소문자 변형 2): JS 게이트 `mentionsImportKeyword` 단위 시험 + "게이트 거짓인 줄은 `ModuleCompleter`가 `None`" 안전성 시험(node + 실제 pyodide, TRAP-33).
 - zip stdlib 보정: 원본 `ModuleCompleter`가 `import collections.a`에 `[]`이고 보정 서브클래스가 `['collections.abc']`, 사설 이름(`_stdlib_path` str·`_is_stdlib_module`) 사전 조건 단정(TRAP-10). 호출마다 새 인스턴스(site-packages 가짜 패키지 `zz_fake_pkg`로 대리 시험). `_pyrepl` import 실패는 worker 부팅 실패. 모듈 분기도 `KeyboardInterrupt`를 삼키지 않는다.
@@ -554,6 +567,7 @@ interruptCompletion })`(세션 소유 정책 객체, `session.ts`가 `blockHisto
 결과(2026-09-24, L0 + L1, `docs/agents/rubber-workflow.md` "검증 실행 예산"): worker `worker/complete-source.py`에
 `ZipStdlibModuleCompleter`(`_is_stdlib_module`만 오버라이드) 모듈 분기, main `terminal/tab-completion.ts`에
 `mentionsImportKeyword`(`/import|from/`, 부분 문자열)와 `planTab(buf, pos, pending?)`, `terminal/tab-reader.ts`가 `pending`을 전달한다(RPC 변경 없음).
+
 - L0: 3.14.4 pty 대조 `worker/module-completion-parity.test.ts` **40/40**(A01~A36·X01~X04, 편차 18 케이스 A11·A12 두 번째 Tab 목록만 구조 판정),
   A37·편차 23 quirk 단위 통과. 게이트 코퍼스 `terminal/import-gate.test.ts` **61/61**(55줄 + 대소문자 변형 확인) + `complete-source.test.ts` 133건(게이트 안전성 "거짓 ⇒ `None`",
   zip 보정 사전 조건, 새 인스턴스 `zz_fake_pkg`, 정렬 없음, `KeyboardInterrupt` 통과, `_pyrepl` import 실패 시 `loadCompleteSource` 실패) 통과.
@@ -618,6 +632,7 @@ RD-005~016의 `verify/` 스크립트도 같은 패턴이라 RD-018 전체가 이
 시나리오: `time.sleep(2)` 실행 중 `abc`를 치면 실행이 끝난 뒤 프롬프트에 `>>> abc`가 보이고 커서가 그 끝에 있다. 실행 중 `print(1)` Enter를 치면 실행이 끝난 뒤 그 줄이 제출돼 `1`이 나온다. Enter 직후(다음 프롬프트가 그려지기 전) 친 키가 다음 프롬프트에 들어온다. 실행 중 친 키 뒤 `input()`이 다음 읽기면 그 키는 `input()` 값이 된다(다음 읽기가 소비 — tty 입력 큐와 같다). 실행 중 Ctrl+C는 버퍼에 쌓이지 않고 기존 중단 경로(RD-007)로 가며, 그때까지 쌓인 키는 버린다(tty `ISIG`의 입력 큐 비움과 같다). 창 안의 붙여넣기는 낡은 `State`에 그려지지 않고 버퍼에 들어간다.
 
 완료 기준:
+
 - 위 시나리오 전부를 새 판정 스크립트 `apps/demo/e2e/checks/type-ahead-check.mjs`로 확인(L1, dev). 판정은 마커 배리어·`waitFor`로만 한다 — 고정 대기 뒤 부재·존재 판정과 ms 상한 없음(`09-testing.md` 9.7). "Enter 직후" 셀은 지연 0ms 입력 1회 결정적 판정이다(통계 반복 없음).
 - 3.14.4 pty 기준 데이터(`apps/demo/e2e/pty/rd-019/`)와 대조: 실행 뒤 프롬프트 줄 내용·커서 위치, 선입력 줄 제출 결과, Ctrl+C 뒤 선입력 폐기. pty에서 실행 **중**에 tty가 키를 에코하는 동작은 따르지 않는다(웹은 다음 읽기에서 그린다) — 실측에서 에코가 확인되면 `10-parity-deviations.md`에 편차로 등록한다.
 - 단위(jsdom + 실제 `Readline` + 가짜 터미널, `09-testing.md` 9.2): 비활성 구간 키가 다음 활성 읽기에 순서대로 재생된다, Ctrl+C는 쌓이지 않고 버퍼를 비운다, `dispose()` 뒤 버퍼가 비고 재생하지 않는다, 붙여넣기가 버퍼에 들어간다 — 전부 RED 확인 + 변이 검사.
@@ -634,6 +649,7 @@ Ctrl+C는 활성 읽기가 없으면 게이트와 무관하게 버퍼를 비운 
 Backspace·←·Ctrl+U·Ctrl+D·Tab은 관찰 뒤 웹과 다르면 편차 등록(완료 기준 아님). 분할: DELTA-01 벤더 버퍼(L0), 02 하니스·`type-ahead-check`·L1 회귀, 03 pty, 04 문서.
 
 결과: 벤더 `Readline`이 활성 읽기 없는 구간의 `onData` 덩어리를 원본 문자열째 쌓았다가(Ctrl+C·Ctrl+L 단독 제외, 상한 4096 UTF-16 코드 유닛, 초과 덩어리 통째 폐기) `read()` write 콜백 안 `new State`·`prefill` 직후 `readData`로 재생한다(공개 API 추가 없음, `06-editing.md` 6.7). 편차 32 해소.
+
 - 벤더 단위 `type-ahead.test.ts` 21건(계획 11 + 보조 5 + pty 대조 제어 키 5), 벤더 전체 18 파일 151/151, 코어 43 파일 1185/1185. 변이 검사 14/14 killed(재생 제거·순서 뒤집기·스냅샷 미비움·Ctrl+C 비움 제거·`dispose`/`cancelRead` 비움 제거·상한 제거 등).
 - 브라우저 `type-ahead-check.mjs`(dev L1) 13/13: T01~T09·T11 통과, `pageerror` 0. T10(상한)은 브라우저 셀 없이 벤더 단위로 대체했다. **T11은 Tab이 마지막 키인 입력(`os.getc`+Tab → `os.getcwd`)만 판정한다** — Tab 뒤에 키가 이어지면 Tab의 worker 왕복 응답 전에 뒤 키가 삽입돼 완성이 버려진다(편차 48, 키 순서 역전·중복은 없음). 양성 대조 1건(재생 제거 → `ONLY=T01` FAIL → 원복 → 통과).
 - 영향 L1 회귀 0: `stdin-input-check` 19/19, `input-cancel-check` 26/26, `ctrl-c-check ONLY=S1` 3/3, `prompt-cancel-check ONLY=E1` 2/2, `tab-check ONLY=C7,C9,C11` 14/14, `session-reset-check ONLY=reset,carry,exit` 14/14. 기대값이 바뀐 셀 없음. `lib.mjs`의 `typeWhenReading`·`cancelWhenReading` 재시도 루프는 제거했다(재시도하면 글자가 중복된다).
@@ -684,6 +700,7 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 시나리오: demo(`apps/demo`)가 import 경로 외 변경 없이 지금과 같은 REPL로 동작한다. 새 빈 프로젝트에 xterm-readline·core·repl tarball만 설치해도 import·타입이 해석되고 `node_modules`에 coincident가 없다.
 
 완료 기준:
+
 - 연결 지점: RPC 핸들러는 main·worker 모두 생성 시 core + driver 핸들러를 합성하고 이름 충돌은 생성 시 예외. "Python 실행 중" = `alive && inputReadsPending === 0 && !driver.isIdle()`(REPL `isIdle` = `readLinePending || cancelSettling`). core 출력은 stdout/stderr 원문 `{ stream, text }`, `writeOutput`·`writeError`는 REPL driver 핸들러. 초기화 프레임 `{ kind: "init", rpcPort, interruptBuffer, stdinCtrl, stdinData, pyodide: { indexURL }, driver }`(`topLevelAwait`는 `driver` 안). `runWorker({ driver })`만 구현(`plugins`는 RD-023).
 - worker init 수신은 모듈 본문 동기 등록 + `!Array.isArray(data) && data.kind === "init"`만 받고 제거(첫 메시지 무조건 소비 금지). 단위 시험: 배열 메시지가 먼저 와도 init을 받는다, 늦은 등록 변이는 실패한다.
 - 시험 제목 목록은 `dev` 대비 삭제 0, 추가는 이번 RD의 신규 시험만(패키지 경계를 넘은 경로 변화 허용). 모듈 시험은 모듈과 함께 이동.
@@ -692,6 +709,7 @@ rd-008.py #2의 RM2 셀은 docstring 오류로 판정돼 정정
 - 문서: `00-architecture.md` 4절 재작성, `CONTEXT-MAP.md`에 core 컨텍스트, 02~08은 경로만 갱신.
 
 결과: `packages/pyodide-core`(`@cp949/runo-pyodide-core`)에 프로토콜·`output-tail`·worker 커널(`runWorker({ driver })`, 콘솔 뼈대·인터럽트·stdin·sleep 조각·webloop 억제)·main 세션(`startCoreSession`)을 옮겼고, 비공개 `packages/pyodide-testkit`(`@repo/pyodide-testkit`)을 두었다. `pyodide-repl`은 REPL driver(`repl-driver.ts`·`repl-main-driver.ts`)와 REPL 프런트만 남고 공개 API(`createRepl`, `./worker`의 `runReplWorker`)는 그대로다. 초기화 프레임에 `driver` 필드가 생겼고(`topLevelAwait`는 그 안), RPC 핸들러는 core + driver 생성 시 합성(이름 충돌은 생성 시 예외), worker init은 필터 수신이다. 패키지 경계 검사(의존 트리 시험·`scripts/check-dist.mjs`·`pnpm smoke:pack`)를 더했다.
+
 - L0: `pnpm check-types`·`lint`·`test`·`build` 각 `--force` 1회 통과. 실행한 시험 **1435**(core 199·repl 1034·testkit 39·xterm-readline 160·demo 3, 이동 전 1348 → +87 = 신규 시험). `pnpm smoke:pack` 통과.
 - 시험 제목(`vitest list`): `dev` 대비 **삭제 0**, 추가 70(전부 신규 시험), 경로만 바뀐 152건. repl `dist/index.d.mts`·`dist/worker.d.mts` export 이름 diff 0. `packages/*/dist`의 `coincident` 0.
 - L1 4종 각 1회 `BASELINE.md`와 같다: `repl-check`(normal) 15/15·`ctrl-c` 10/10·`stdin-input` 19/19·`prompt-cancel` 23/23.
@@ -711,6 +729,7 @@ pyodide 버전 원천을 `pnpm-workspace.yaml`의 catalog 한 곳(`catalog: pyod
 완료 기준(사용자 확정 2026-09-24로 정정: "`package.json` 밖" → "`pnpm-workspace.yaml` catalog 밖", "L0만" → "L0 + L1 `repl-check`(normal) 1회", 리터럴 범위·허용 목록 명시): 버전 리터럴 `314.0.7`이 `packages`·`apps/demo/src`·`scripts`(주석 포함)에 0건. 허용은 core `package.json`의 peer 범위 한 줄(`"^314.0.7"`, 원천이 아니라 호환 범위)과 `packages/pyodide-repl/src/terminal/import-gate-corpus.ts`(3.14.4 pty 실측 데이터)뿐이다. 경로 밖이라 대상이 아닌 것: `apps/demo/e2e/results/*.json`, `apps/demo/e2e/pty/**/*.meta.json`, `docs/`, `ROADMAP.md`. `dist`가 `pyodide`를 런타임 import하지 않는다(`pnpm check-dist`). 저하 지점별 속성 제거(문구 변조) 단위 시험이 `degraded` 항목과 해당 기능 꺼짐을 확인하고, interrupt 공개 API 부재 시 시작 거부 시험, `versionMismatch` 참/거짓 시험, 탐지 분기 제거 변이 시 실패. 업그레이드 절차(patch·minor, 판단 자료를 만들고 멈춘다, 재측정은 사용자 결정)를 `13-version-upgrade.md`에 적는다. L0 + L1 `repl-check`(normal) 1회. RD-020 인계(core `peerDependencies`(optional)·core 타입 소비자의 `pyodide` 요구사항)를 함께 정한다.
 
 결과: 위 구조를 구현했다. 리터럴 grep(위 명령) 0줄. `dist` 인라인은 `version` 문자열 하나만 남는다(tsdown `deps.neverBundle` 예외 + `deps.alwaysBundle: ["pyodide/package.json"]`, 둘 다 필요 — `docs/traps/TRP-038`). core에 `peerDependencies.pyodide: "^314.0.7"` + `optional: true`(소비자 요구사항은 core `README.md`와 `13-version-upgrade.md` 13.7). worker의 개별 `console.warn`(webloop-reraise·sigint `find_problems`·sleep-slice)은 없애고 저하 보고(`report(id, detail)`)를 수집기로 모아 `ready`로 보낸다. `_compile.compiler.flags` 부재 fallback은 `setTopLevelAwait` 건너뜀·`normalizeSyntaxError` 원문·`compilerFlags()` 0x2000으로 고정했다(`docs/traps/TRP-039`).
+
 - L0: `pnpm check-types`·`lint`·`build`·`test --force`(check-dist 포함)·`smoke:pack` 통과. 실행한 시험 **1511**(core 240·repl 1063·testkit 45·xterm-readline 160·demo 3, RD-020 기준 1435 → +76 = 신규 시험). 신규 시험 RED 확인(구현 전 실패), 변이 검사(탐지 분기 제거·`versionMismatch` 비교 뒤집기·경고 조건 제거·시작 거부 검사 제거 등) core 25/25·repl 12/12 killed(최종). 고정 버전 pyodide 부팅이 `degraded: []`·`versionMismatch: false`인 시험 2건(core `boot-compat.test.ts`, repl `repl-driver-probe.test.ts`)이 업그레이드 알림 역할을 한다. 기존 시험 제목 7건은 경고 단정을 저하 보고(`report`)·`degraded` 단정으로 바꿨고 삭제·기대 약화는 없다.
 - L1 `pnpm --filter demo e2e:repl-check`(normal) 1회 `BASELINE.md`와 같은 **15/15**, `pageErrors` 0, 결과의 `problemLogs`(콘솔 warning·error) 빈 배열 — 실제 CDN 고정 버전 pyodide에서 `[session] pyodide 호환 경고`가 나오지 않았다("콘솔 경고·오류가 없다(exit() 이전)" 셀 통과).
 - 예외·미확인: L2·L3 미실행. 브라우저에서 저하 상태와 버전 불일치 경고 시나리오(`indexURL`로 다른 버전 로드)를 재현하지 않았다(단위·node 시험만: `session/core-session.test.ts`의 호환 경고, `worker/boot-compat.test.ts`). `cdn-blocked`·`not-isolated` 모드 L1은 범위 밖이라 돌리지 않았다. 병렬 `pnpm test --force`에서 `sigint-handler-sleep-slice.test.ts`의 `time.sleep(2**31)도 조각돼 눌림에 끊긴다`가 1회 104.5ms(<100 판정)로 실패했고 단독 재실행·전체 재실행은 통과했다(원인 조사 없이 `.scratch/sigint-test-isolation/issues/04-sleep-slice-2pow31-timing-flake.md`, deferred). `incomplete-input-message` 탐지는 클래스 수준 문구만 보고 인스턴스에만 걸린 패치는 못 본다. `apps/demo/e2e/node/rd-007/{poll-overhead,press-loss}.mjs`는 원래 `warn`을 넘기지 않아 저하 시에만 던지는 잠복 상태이고 손대지 않았다(L3 도구). 완료 조건 문구 정정은 위 세 곳이다(약화가 아니라 원천 이동·L1 추가·범위 명시). `pnpm up -r pyodide@<버전>`은 catalog를 리터럴로 덮어써서 문서화하지 않았다(`13-version-upgrade.md` 13.1, pnpm 11.25.0 실측).
@@ -728,6 +747,7 @@ core에 실행 driver(`runDriver`)를, `packages/pyodide-terminal`에 xterm 실�
 완료 기준: 첫 DELTA에서 `PyodideConsole(filename="main.py")` + `compile(..., "exec")` → `console.runcode` 재사용 가설을 확인한다(실패 시 SIGINT 계층을 "실행 호스트"(`filename`·실행 래퍼·트레이스백 포맷터) 인터페이스로 일반화하고 같은 RD에서 처리). 위 시나리오의 단위·jsdom 시험(RED + 변이 검사). 실행창용 새 e2e 판정 스크립트(demo에 실행창 화면 추가) L1. REPL 회귀는 영향 스크립트 `ONLY=` L1. coincident 비의존 검사를 terminal에 확장.
 
 결과: core에 worker 실행 driver `runDriver`(RPC `runCode`, run마다 새 globals·`CodeRunner(exec)` + `console.runcode`, 결말 4종 분류)와 main `createRunner`(상태 8종, `run`·`stop`·`interrupt`·`reset`·`dispose`, `RunRejectedError`, `InputProvider`, 1000ms 폴백)를 두었다. 새 `packages/pyodide-terminal`(`@cp949/runo-pyodide-terminal`)에 `createTerminalRunner`와 repl 공유 부품 5종(`./internal`, repl → terminal 단방향)을 두었고, 벤더 `ReadlineOptions.typeAhead`를 더했다. demo는 `?view=runner`로 실행창 화면을 갖는다. 규칙 본문은 `docs/design/14-runner.md`, 편차 50~53 등록(`10-parity-deviations.md`), ADR-0006 갱신, 함정 `docs/traps/TRP-040`~`TRP-050`.
+
 - 가설: `CodeRunner(exec)` + `console.runcode` 경로가 SIGINT 계층(`sigint-handler.py`)을 수정 없이 재사용한다(8항목 통과, 멈추는 지점 1 미발동). SIGINT 계층·REPL 동작·repl 공개 export는 바뀌지 않았다.
 - L0(각 `--force`, 마무리 시점 1회): `pnpm check-types`(10/10)·`lint`(6/6)·`build`(5/5)·`test --force --concurrency=1`(15 태스크, `check-dist` 포함) 통과. 실행한 시험 **1799**(core 448·repl 978·terminal 149·xterm-readline 176·testkit 45·demo 3), 기준 1512 대비 +287: core +208(실행 driver 시험 126 = 가설 26 + 분류·옵션·재진입·stdin 100, `createRunner` 73, 폴백 뒤 interrupt 시험 9), repl −86(부품 5종 시험이 terminal로 이동), terminal +149(이동 86 + 경계 시험 3 + `createTerminalRunner`·`stdin-reader` 신규 60), xterm-readline +16(`typeAhead`). 시험 제목은 `dev` 대비 삭제 0. repl `dist/index.d.mts`·`dist/worker.d.mts` export 이름 diff 0. `pnpm smoke:pack`(4 tarball)·`pnpm check-dist`(terminal 포함) 통과, terminal `dist`에 `coincident` 0.
 - 실제 pyodide 시험(node): `while` 루프·`time.sleep(10)` 중단, TLA `await` 깨움, `input()` 한 줄·취소, `sys.exit(3)`·`sys.exit("x")`, `1/0` 트레이스백의 `File "main.py"` + 소스 줄, 문법 오류, 새 globals(`NameError`·`__name__`·`__file__`), TLA 끔·켬(`core/src/worker/run-driver-pyodide.test.ts` 38·`run-driver-classify.test.ts` 49·`session/runner-pyodide.test.ts` 13).
@@ -750,6 +770,7 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 완료 기준: 단위·jsdom 시험(RED + 변이 검사), 영향 받는 REPL L1 스크립트 `ONLY=`, `runSource` 새 판정 셀(브라우저 L1). L2는 사용자 지시 때만.
 
 결과: `ReplHandle.runSource(code): Promise<RunResult>`와 `readonly busy: boolean`을 추가했다. 실행 경로: main이 열린 `readLine` RPC에 줄 대신 `{ source }`로 응답하면 worker 루프가 제출 한 건처럼 받아 REPL 콘솔(`pyodide.globals`, 파일명 `<console>`, exec)에서 실행하고 결말을 다음 `readLine` 요청의 네 번째 인자로 보낸다. 그래서 Ctrl+C·`input()`·감시 타이머·type-ahead가 평소 명령 실행과 같은 경로다. core `run-driver.py`의 `run_code`를 공용 `exec_in_console`(컴파일·`console.runcode`·결말 분류)과 runner 전용 준비로 나눠 `./worker`가 `loadExecInConsole`·`toRunOutcome`을 export한다. 벤더 `Readline`에 `takeRead()`·`ReadTakenError`·`ReadOptions.prefillCursor`를 더했다. 결과·거부 표(`RunRejectedError` reason `busy`/`unavailable`/`disposed`/`crashed`, `restarted`)는 runner 14.3.2를 REPL 상태로 옮겼다. 규칙 본문은 `02-console-core.md` 5.6, `01-protocols.md` 1.2, `06-editing.md` 6.1, `14-runner.md` 14.2.1, 함정 `docs/traps/TRP-052`~`TRP-056`.
+
 - 확정 밖 구현 판단(각 근거는 작업 기록): (1) `SystemExit` 결말 직후 닫힌 `sys.stdin`(`exit()`·`quit()`이 닫는다)을 다시 연다. (2) 결말이 도착한 뒤 복원한 줄이 그려지기 전의 `reset()`·`dispose()`·크래시는 그 결말로 resolve한다. (3) 대기 범위는 `loading` + `ready` 알림 뒤 첫 `readLine` 요청 전이고, 프롬프트가 그려지기 전·`input()` 대기 중·Tab 왕복 중은 `busy`다. (4) worker 내부 오류는 `error{ errorType: "InternalError" }`다. (5) `takeRead()`는 읽기를 `ReadTakenError`로 reject한다(`ReadCancelledError`의 하위 클래스 아님).
 - L0(각 `--force` 1회): 루트 `pnpm check-types`(10 tasks)·`lint`(6)·`build`(5) 통과. `pnpm test --force`는 병렬 실행에서 기존 flake `sigint-handler-sleep-slice.test.ts` 3건이 실패해 turbo가 core 시험을 중단했고(단독 재실행 26/26 통과, `.scratch/sigint-test-isolation/issues/04-*.md`), `--concurrency=1` 재실행이 15 태스크 전부 통과했다. 실행한 시험 **1948**(core 473·repl 1060·terminal 152·xterm-readline 215·testkit 45·demo 3), 기준 1816 대비 +132 = 신규 시험(core +11, xterm-readline +39, repl +82). 기존 시험 수정은 벤더 `index.test.ts`의 export 목록 기대 배열 1줄(제목 불변)과 repl `repl-loop.test.ts`의 가짜 deps 타입 변경·필수 의존 `runSource` 9곳 추가(제목·단정 불변)뿐이다.
 - 시험 제목(`vitest list`, `test.each` 미펼침 TRP-037): `dev` 대비 삭제 **0**, 추가 110(전부 신규 시험). repl `dist/index.d.mts`의 변화는 `runSource`·`busy`·`RunRejectedError`·`RunRejectedReason`·`RunResult` 추가뿐이고 core `./worker`는 `loadExecInConsole`·`toRunOutcome`(+타입 `ExecInConsolePy`·`RawOutcome`)만 추가됐다.
@@ -773,6 +794,7 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 완료 기준: 벤더·sink·REPL jsdom·runner jsdom 시험(RED + 변이), 새 브라우저 스크립트 `bg-output-check.mjs`와 영향 L1 스크립트 각 1회. L2·L3은 사용자 지시 때만. 계획서 `_works/_completed/20260924-28-rd-022b-bg-output-above-read/`.
 
 결과: 열린 읽기(벤더 `activeRead` 있음) 중 sink 4종의 출력을 벤더 새 공개 API `Readline.printAboveRaw(lines, prefix)`로 보내 입력줄을 지우고 → 완성 행을 쓰고 → 개행 없는 나머지를 프롬프트 앞 접두로 실어 같은 읽기(버퍼·커서)를 그 아래에 다시 그린다(write 콜백에서 앵커 갱신). 읽기 중 출력은 꼬리 추적기에 먹이지 않는다. 벤더: `isReading()`·`abovePrefix()`·`printAboveRaw()`·`State.setPromptPrefix()`/`promptPrefix()`, 재그리기 병합(`RedrawRun`, 마지막 콜백만 다시 그리고 앞선 프로미스도 그 뒤 resolve), 저장 커서 처음 값(이슈 02), Tab `printAbove`의 접두 비우기·재그리기 대기 중 앞 `\r\n` 생략. terminal: `splitAboveRead(prefix, text)`(꼬리 규칙은 `createOutputTail` 재사용)·`TerminalSinks.moveAbovePrefixToTail()`. repl: `runSource` 브리지가 `takeRead()` 직전 `abovePrefix()`를 읽어 `접두\x1b[0m꼬리\x1b[0m\r\n`으로 복원, read-guard `inputDeferred`(미뤄지는 stdin 읽기가 REPL 줄 접두를 프롬프트로 넘겨받음, 사용자 확정), `repl-reader` 머리 주석 정정. 시험용 `VtScreen`을 `@repo/pyodide-testkit/vt-screen`으로 옮겼다. 규칙 본문은 `05-output.md` 4.4, 함정 `docs/traps/TRP-058`~`TRP-060`(TRP-037 보강).
+
 - L0(마무리, 2026-09-24): 루트 `pnpm check-types` 10/10·`lint` 6/6(`--max-warnings 0`)·`build` 5/5·`pnpm test --concurrency=1` 15/15 태스크, `pnpm test --force --concurrency=1` 15/15(캐시 0)·시험 **2062**(xterm-readline 249·testkit 45·core 474·terminal 188·repl 1103·demo 3). 시작 기준 1958 대비 +104 = 벤더 +34(`print-above-raw.test.ts`)·terminal +36(sink 33 + 실행창 3)·repl +34(`read-guard.test.ts` 6 + `run-source.test.ts` 28). 기존 시험 제목 삭제 0(`vitest list` 전후, `describe.each` 미펼침 TRP-037), 기존 시험의 단정 변경 0(수정은 import 경로·하니스 연결 줄과 `index.test.ts`의 `fake.flush()` 1줄). `e2e:check` 31/31. 이번 마무리 L0에서는 flake가 나지 않았다. 앞선 단계의 1회차 flake(repl `sigint-handler-sleep-slice` 시간 판정 2회, `sigint-handler-idle` 새 모양 1회)는 단독 재실행과 2회차가 통과했고 이 RD의 변경 경로가 아니다(아래 후속 이슈).
 - RED: 벤더 새 시험 32/32 실패(새 API 없음 31, 이슈 02 `expected 3 to be 2`), sink·실행창 30개 중 27 실패(3개는 불변 경로 가드), 선택지 C 시험 RED, REPL 새 시험 26 + H4 원본 탐침 1 = 27/27 실패(수정 전 화면 `>>> pritick`). 멈추는 지점 1 미발동.
 - 변이 검사(`mutate-safe.mjs`): 총 **60개 중 56 killed, 4 SURVIVED(전부 동등 근거)** — 벤더 27/31(살아남은 `dispose()` 무효화·콜백 방어 분기는 서로를 대신하고 둘을 함께 뺀 변이는 killed, `layout.promptSize` 갱신은 읽히지 않음, 빈 `lines`의 `\x1b[0m`은 화면·속성 불변), sink 13/13, read-guard·driver 6/6, 브리지·교차 10/10.
@@ -808,6 +830,7 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 시나리오: React 19 StrictMode 앱에서 `<PythonRepl>`을 마운트하면 worker가 하나만 살아 있고, 창 크기를 바꾸면 터미널이 맞춰진다. `<PythonRunner>`의 `ref.current.run(code)`가 실행창에서 실행된다.
 
 완료 기준:
+
 - StrictMode 이중 마운트에서 살아 있는 worker 1개(시험, worker는 2개 생성되고 1개 terminate), 언마운트 시 worker·Terminal 정리, 인라인 콜백 재렌더에서 worker 수 불변.
 - `fit`: 브라우저 창 크기를 바꾸면 xterm `cols`가 바뀌고 유휴·`input()` 대기 두 상태에서 이후 입력이 정상이다(새 L1 `react-fit-check`). demo 기본 화면은 `fit={false}`라 기존 L1 결과가 바뀌지 않는다.
 - demo 이전 뒤 RD-020 L1 4종(`repl-check`·`ctrl-c`·`stdin-input`·`prompt-cancel`)과 RD-022 `runner-check`(normal·not-isolated)가 같은 결과. handle 통과 확인으로 `run-source`·`session-reset`·`selection-copy`·`tla` 각 1회.
@@ -816,6 +839,7 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 - L2는 사용자 지시 때만.
 
 결과: `packages/pyodide-react`(`@cp949/runo-pyodide-react`, private, 진입점 `.` 하나)에 `PythonRunner`(terminal `createTerminalRunner`)·`PythonRepl`(repl `createRepl`)·`usePythonRunner`(core `createRunner`, xterm 없음)를 두고 demo(`ReplView`·`RunnerView`)를 이 컴포넌트로 옮겼다. 컴포넌트가 xterm `Terminal` 생성·`FitAddon`·dispose(하위 핸들 → fit → `Terminal`)·StrictMode를 처리한다. handle(`ref`, React 19 ref-as-prop)은 컴포넌트 수명 내내 같은 객체이고 "살아 있는 하위 핸들"로 위임한다. 핸들이 없는 구간은 `run`·`runSource` `disposed` reject, `stop()` `"idle"`, `busy` `false`, 나머지 no-op이다. 콜백은 latest-ref, 생성 옵션은 마운트 때만, `copyOnSelect`만 반응형이다. demo 기본 화면은 `fit={false}`(80×24)이고 쿼리 `?fit=1`에서 fit이 켜진다. 규칙 본문은 `15-react.md`, 결정은 ADR-0006 "갱신(RD-024)", 함정 `docs/traps/TRP-061`~`TRP-064`.
+
 - 확정 밖 구현 판단(근거는 작업 기록): (1) `autoFocus` prop을 추가하지 않았다(부모의 마운트 effect에서 `ref.current?.focus()`가 StrictMode 재마운트 뒤에도 살아 있는 `Terminal`에 닿는다, 시험). (2) `terminalOptions`는 병합하지 않고 `new Terminal(terminalOptions)`로 넘긴다(demo는 `{ cursorBlink: true }`). (3) `inputProvider`의 "있음/없음"은 마운트 때 정해지고 함수 값만 latest-ref다. (4) `createWorker`는 마운트 때 함수를 계속 쓴다(`reset()`의 새 worker도). (5) `@xterm/xterm`은 네임스페이스로 받고 마운트 때 `Terminal`을 고른다(번들 없는 Node ESM에서 이름 import가 `SyntaxError`, `pnpm smoke:pack` 첫 실행이 잡음). (6) latest-ref는 `useLayoutEffect`로 갱신한다. (7) `@xterm/addon-fit`은 `0.11.0` 정확 고정, tsconfig 기반은 `react-library.json`. (8) `cols` 측정은 DOM 기하(`.xterm-screen` 너비 ÷ 셀 너비)와 `x` 400자 줄바꿈 폭 교차 확인(데모가 `Terminal`을 노출하지 않는다). (9) 이중 마운트 관측은 Playwright 이벤트가 아니라 페이지 안 `Worker` 계측 병용(첫 worker가 이벤트에 보이지 않는다, 계획서 측정법 보정, 완료 조건은 그대로).
 - L0(마무리, 2026-09-25): 루트 `pnpm check-types --force` 12/12·`lint --force` 7/7(`--max-warnings 0`)·`build --force` 6/6·`pnpm test --force --concurrency=1` 18/18 태스크(xterm-readline 261·testkit 45·core 474·terminal 208·repl 1105·react 107·demo 31 = **2231**, `check-dist` 5개 패키지 통과)·`pnpm --filter demo e2e:check` "33개 중 0개 실패"·`pnpm smoke:pack` 통과(tarball 5개, 공개 진입점 import 8개 중 react export 4개, 소비자 `tsc --noEmit` `skipLibCheck: false`, 설치 트리 `.pnpm` 25개 항목에 coincident·reflected-ffi 없음, 설치된 dist 5개 `check-dist`). 병렬 `pnpm test --force`는 16/18에서 repl `sigint-handler-sleep-slice.test.ts` 2건(`time.sleep(5)`·`time.sleep(2**31)`, 100ms 상한)이 실패했고 이슈 `sigint-test-isolation/04`(deferred)의 기존 간헐 실패다(이번 변경은 repl 패키지를 건드리지 않았다, `git diff dev --stat`에 core·repl·terminal·xterm-readline·testkit 0). `--concurrency=1`로 재실행해 통과. 로그 `verify/delta-06b/`.
 - 시험 제목: `dev` 대비 삭제 **0**(`git diff dev --name-status -- '*.test.*'`가 전부 `A`, `-test/it/describe` 0줄). 추가 135 = react 107(경계 2 + `use-python-runner.test.tsx` 25 + `python-runner.test.tsx` 41 + `python-repl.test.tsx` 39) + demo `react-judge.test.mjs` 28.
@@ -844,13 +868,13 @@ RD-018·019가 `apps/demo/e2e/pty/`에 rd-008·015·016·019 기준 데이터와
 
 이전 구현에서 보류·미착수였던 항목. 시나리오와 완료 기준이 갖춰지면 위 규칙으로 등록한다.
 
-| 항목 | 이전 | 사유 |
-| --- | --- | --- |
-| `input()` 안 Tab 완성 | RD-016b | `input()`은 메일박스 대기라 worker가 멈춰 있어 worker 완성이 불가. main 쪽 완성이나 별도 배선이 필요 |
-| `time.sleep` 대기 중 워커 CPU 점유 | RD-012j | 정확성 영향 없음. 재측정 비용이 이득보다 큼 |
-| 후보 선택 UI(popover) | RD-016d | 3.14 동등 밖 UI 기능 |
-| "Python 정지" 플래그(송신기 잔류 제거) | RD-012h(a) | 정확성 영향 없음 |
-| Ctrl+D(빈 줄 EOF) | 없음 | 이전 구현 미구현. 시나리오 정하면 등록 |
+| 항목                                   | 이전       | 사유                                                                                                 |
+| -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------- |
+| `input()` 안 Tab 완성                  | RD-016b    | `input()`은 메일박스 대기라 worker가 멈춰 있어 worker 완성이 불가. main 쪽 완성이나 별도 배선이 필요 |
+| `time.sleep` 대기 중 워커 CPU 점유     | RD-012j    | 정확성 영향 없음. 재측정 비용이 이득보다 큼                                                          |
+| 후보 선택 UI(popover)                  | RD-016d    | 3.14 동등 밖 UI 기능                                                                                 |
+| "Python 정지" 플래그(송신기 잔류 제거) | RD-012h(a) | 정확성 영향 없음                                                                                     |
+| Ctrl+D(빈 줄 EOF)                      | 없음       | 이전 구현 미구현. 시나리오 정하면 등록                                                               |
 
 ## 범위 밖
 

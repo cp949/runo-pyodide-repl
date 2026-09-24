@@ -37,17 +37,19 @@
 - 업스트림 추적: 원격을 연결하지 않는다(runo-coincident와 같은 방식). 업스트림 변경을 가져올 때는 `CHANGELOG.md`의 버전 기준으로 수동 diff한다.
 
 ## 6.2 이전 구현이 적용한 수정(무엇을 / 어떤 방법으로) — 새 구현은 6.1 방침대로 소스에서 처리
-| 항목 | 증상 | 들어간 방법 |
-| --- | --- | --- |
-| TRP-004 | `read(prompt)`가 커서 행을 열 0부터 다시 그려(`\r\x1b[J`) 개행 없는 출력이 지워짐 | 라이브러리를 고치지 않고 **브리지에서 꼬리를 프롬프트로 넘겨** 그 자리에 다시 그린다(`repl-reader.ts`, `stdin-reader.ts`). 옛 `cursorX !== 0` 개행 가드는 제거했다(`cursorX`는 비동기 파싱 값이라 낡는다) |
-| TRP-008(이전 구현 문서, 이 저장소 `docs/traps/TRP-008`과 다름) | `read()`가 입력 상태를 **비동기로** 만들어 직후의 버퍼 조작이 사라짐 | 이전 구현: `term.write('', cb)` 콜백 안에서 `updateLine`/커서 복원/`editing` 복원을 한다. 취소 방어 해제도 `read()` 호출이 아니라 `activeRead`로 판단한다. 새 구현(RD-013): `ReadOptions.prefill`이 같은 콜백 안에서 처리하므로 코어가 콜백 타이밍을 알 필요가 없다 |
-| TRP-016 | 여러 행으로 감기는 프롬프트의 첫 재그리기가 앞 행을 남김 | `read()` 앞에 `rewindTail`이 `\x1b[nA`로 첫 행까지 올린다(flush 후 `isWrapped` 카운트) |
-| TRP-017 | 뷰포트를 채운 레이아웃에서 행이 늘 때 스크롤백 맨 윗행이 사라짐 | **미해결**. 보이는 화면은 정상이라 관찰로만 남겼다(꼬리 상한을 두려던 계획은 근거가 없어 폐기) |
-| TRP-030 | `moveCursorBack(0)`은 줄 맨 앞으로 가고 `n`은 코드포인트 수 | 목록 재그리기 뒤 커서 복원에서 **0이면 호출을 생략**하고 개수는 `[...text]` 코드포인트로 센다 |
-| TRP-006 | `readPaste`가 붙여넣은 `\t`를 버림 | 새 구현: `readPaste`(벤더 소스)가 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격해 버퍼에 보존한다(RD-011). 이전 구현은 `preservePastedTabs(readline)`가 `readPaste`를 런타임 패치했다 |
-| TRP-001 | StrictMode 이중 마운트에서 dispose된 인스턴스의 지연 콜백 | 이전 구현: 상시 `while read()` 루프를 없애(필요할 때만 `read()` 호출) 재현이 사라졌다. 새 구현: `Readline.dispose()`가 `term`을 비워 소스에서 막는다(6.1). 마운트 직후 읽기를 시작해도 안전하다 |
+
+| 항목                                                           | 증상                                                                              | 들어간 방법                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TRP-004                                                        | `read(prompt)`가 커서 행을 열 0부터 다시 그려(`\r\x1b[J`) 개행 없는 출력이 지워짐 | 라이브러리를 고치지 않고 **브리지에서 꼬리를 프롬프트로 넘겨** 그 자리에 다시 그린다(`repl-reader.ts`, `stdin-reader.ts`). 옛 `cursorX !== 0` 개행 가드는 제거했다(`cursorX`는 비동기 파싱 값이라 낡는다)                                                           |
+| TRP-008(이전 구현 문서, 이 저장소 `docs/traps/TRP-008`과 다름) | `read()`가 입력 상태를 **비동기로** 만들어 직후의 버퍼 조작이 사라짐              | 이전 구현: `term.write('', cb)` 콜백 안에서 `updateLine`/커서 복원/`editing` 복원을 한다. 취소 방어 해제도 `read()` 호출이 아니라 `activeRead`로 판단한다. 새 구현(RD-013): `ReadOptions.prefill`이 같은 콜백 안에서 처리하므로 코어가 콜백 타이밍을 알 필요가 없다 |
+| TRP-016                                                        | 여러 행으로 감기는 프롬프트의 첫 재그리기가 앞 행을 남김                          | `read()` 앞에 `rewindTail`이 `\x1b[nA`로 첫 행까지 올린다(flush 후 `isWrapped` 카운트)                                                                                                                                                                              |
+| TRP-017                                                        | 뷰포트를 채운 레이아웃에서 행이 늘 때 스크롤백 맨 윗행이 사라짐                   | **미해결**. 보이는 화면은 정상이라 관찰로만 남겼다(꼬리 상한을 두려던 계획은 근거가 없어 폐기)                                                                                                                                                                      |
+| TRP-030                                                        | `moveCursorBack(0)`은 줄 맨 앞으로 가고 `n`은 코드포인트 수                       | 목록 재그리기 뒤 커서 복원에서 **0이면 호출을 생략**하고 개수는 `[...text]` 코드포인트로 센다                                                                                                                                                                       |
+| TRP-006                                                        | `readPaste`가 붙여넣은 `\t`를 버림                                                | 새 구현: `readPaste`(벤더 소스)가 `UnsupportedControlChar`+단일 `\t` 토큰만 `Text`로 승격해 버퍼에 보존한다(RD-011). 이전 구현은 `preservePastedTabs(readline)`가 `readPaste`를 런타임 패치했다                                                                     |
+| TRP-001                                                        | StrictMode 이중 마운트에서 dispose된 인스턴스의 지연 콜백                         | 이전 구현: 상시 `while read()` 루프를 없애(필요할 때만 `read()` 호출) 재현이 사라졌다. 새 구현: `Readline.dispose()`가 `term`을 비워 소스에서 막는다(6.1). 마운트 직후 읽기를 시작해도 안전하다                                                                     |
 
 ## 6.3 자동 들여쓰기 규칙(`createAutoIndent(readline)`, RD-013 완료)
+
 - 기준은 `_pyrepl/readline.py`의 `maybe_accept`/`backspace_dedent`. `terminal/auto-indent.ts`의 순수 함수
   (`nextIndentation`·`backspaceCount`·`indentUnitWidth`, `DEFAULT_UNIT = '    '`)가
   `_get_previous_line_indent`, `_get_first_indentation`, `_should_auto_indent`를 그대로 옮겼다(줄 끝 `#`
@@ -64,13 +66,13 @@
   벤더 `read()`가 `ReadOptions.prefill`을 write 콜백 안, `new State` 직후 1회 넣는다(6.1, TRP-008 문제
   해소).
 - Backspace: `onKey`가 `InputType.Backspace`를 받으면 `backspaceCount(getLine(), getCursor(),
-  indentUnitWidth(lastUsedIndentation), pendingBlock !== "")`가 1보다 클 때만 `editBackspace(n)`을 부르고
+indentUnitWidth(lastUsedIndentation), pendingBlock !== "")`가 1보다 클 때만 `editBackspace(n)`을 부르고
   `true`(소비)를 돌려준다 — 커서 앞이 스페이스뿐이고 `... ` 입력줄이거나(`pendingBlock` 있음) 여러 줄
   버퍼의 첫 줄이 아니면 직전 단위 배수까지 지운다. `>>> ` 첫 줄·탭 혼합·글자 뒤·줄 시작은 1(미소비, 벤더가
   원본대로 처리).
 - Shift+Enter/Alt+Enter: `onKey`가 두 타입 모두에서 `prefix = pendingBlock ? pendingBlock + "\n" : ""`로
   이미 제출된 줄을 앞에 붙여 `nextIndentation(prefix + getLine(), prefix.length + getCursor(),
-  lastUsedIndentation)`을 계산하고 `editInsert("\n" + indentation)` 한 번으로 개행+들여쓰기를 같이 넣은
+lastUsedIndentation)`을 계산하고 `editInsert("\n" + indentation)` 한 번으로 개행+들여쓰기를 같이 넣은
   뒤 `true`를 돌려준다(`lastUsedIndentation`도 이 호출에서 갱신). **일반 Enter와 붙여넣기는 채우지 않는다**
   (`onKey`는 그 둘을 소비하지 않고 `false`를 돌려준다). 자동 dedent는 없다. 켜고 끄는 스위치도 없다.
 - `input()` 읽기(stdin 리더)에는 `prefill`도 `onKey`도 전혀 넘기지 않는다 — 프리필·Shift+Enter 들여쓰기·
@@ -95,6 +97,7 @@
   통과시킨다. stdin 리더(`stdin-reader.ts`)는 `autoIndent`를 받지 않는다.
 
 ## 6.4 블록 히스토리 규칙(`createBlockHistory(readline)`, RD-014 완료)
+
 - 블록(`... `) 입력의 줄들을 history 항목 하나로 묶는 **세션 소유** 정책 객체(`terminal/block-history.ts`).
   `createReplMainDriver`(`repl-main-driver.ts`)가 `createAutoIndent` 옆에서 만든다(`08-session.md` 8.1). 노출은
   `readOptions(pending): Pick<ReplReadOptions, "historyEntry" | "onKey">`와 `discard(): void` 둘뿐이다 —
@@ -136,10 +139,11 @@
 - 재호출한 블록은 Enter 1회로 실행된다(여러 줄 제출 경로). history는 중복을 제거한다(3.14는 안 한다,
   편차 9).
 - 리더 합성 순서: `repl-main-driver.ts`가 `mergeReadOptions(blockHistory.readOptions(pending),
-  autoIndent.readOptions(pending))`로 합성한다(blockHistory 먼저 — ↑ 삼킴은 blockHistory만 보고 겹치는
+autoIndent.readOptions(pending))`로 합성한다(blockHistory 먼저 — ↑ 삼킴은 blockHistory만 보고 겹치는
   키가 없다). `mergeReadOptions`는 `terminal/read-options.ts`의 순수 함수다(6.3·`00-architecture.md` 4.2).
 
 ## 6.5 붙여넣기
+
 - 개행은 `\n`으로 편집 버퍼에 삽입되고 자동 제출하지 않는다. Enter 1회로 실행한다(러너의 여러 줄 분할 규칙은
   `02-console-core.md` 5.2).
 - `\t`는 벤더 `readPaste`가 보존한다(6.1·6.2, RD-011). 직접 Tab 키 입력은 REPL 읽기의 `onKey`(Tab 리더)가

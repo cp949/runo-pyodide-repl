@@ -52,7 +52,15 @@ describe.each([
     const lastPrompt = () => read.mock.calls.at(-1)?.[0];
     /** 마지막 `readline.read`가 받은 옵션. */
     const lastOptions = () => read.mock.calls.at(-1)?.[1];
-    return { fake, sinks, readline, reader, startRead, lastPrompt, lastOptions };
+    return {
+      fake,
+      sinks,
+      readline,
+      reader,
+      startRead,
+      lastPrompt,
+      lastOptions,
+    };
   }
 
   test("꼬리가 없으면 프롬프트를 그대로 읽는다(SGR 리셋 없음)", async () => {

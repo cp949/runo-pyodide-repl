@@ -247,12 +247,7 @@ async function startRead(
   const { fake, workerRpc } = session;
   const flushRequests = () => fake.written.filter((text) => text === "").length;
   const before = flushRequests();
-  const line = workerRpc.call<string | null>(
-    "readLine",
-    prompt,
-    pending,
-    true,
-  );
+  const line = workerRpc.call<string | null>("readLine", prompt, pending, true);
   // 시험이 읽기 결과를 기다리지 않고 끝나도 afterEach의 rpc 정리가 처리되지 않은 rejection을 만들지 않게 한다.
   void line.catch(() => {});
   await Promise.race([
@@ -740,12 +735,10 @@ describe("Tab 완성 배선(RD-015 DELTA-04)", () => {
   });
 
   test("세션 리셋 뒤 새 세션에서 Tab이 한 번만 적용된다(C11a 대응)", async () => {
-    const complete = vi.fn(
-      async (): Promise<SourceCompletion> => ({
-        completions: ["os.path"],
-        start: 0,
-      }),
-    );
+    const complete = vi.fn(async (): Promise<SourceCompletion> => ({
+      completions: ["os.path"],
+      start: 0,
+    }));
     const session = startResettableSession({}, {}, { complete });
 
     const { line: l1 } = await startRead(session);
@@ -1730,7 +1723,11 @@ describe("reset()(RD-010)", () => {
 
     session.handle.reset();
 
-    const { line: fresh } = await startRead(session, "... ", "for i in range(2):");
+    const { line: fresh } = await startRead(
+      session,
+      "... ",
+      "for i in range(2):",
+    );
     session.fake.type("print(i)\r");
 
     await expect(fresh).resolves.toBe("    print(i)");
@@ -1868,7 +1865,9 @@ describe("크래시 감지(RD-010)", () => {
     const onCrash = vi.fn();
     const session = startSession({ onCrash });
 
-    session.workerRpc.notify("crashed", { message: "부팅 뒤 잡히지 않은 예외" });
+    session.workerRpc.notify("crashed", {
+      message: "부팅 뒤 잡히지 않은 예외",
+    });
     await waitFor(() => session.onStatus.mock.calls.at(-1)?.[0] === "crashed");
 
     expect(onCrash).toHaveBeenCalledWith("부팅 뒤 잡히지 않은 예외");

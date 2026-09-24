@@ -36,12 +36,10 @@ describe("mergeReadOptions", () => {
   test("prefill·historyEntry는 제공한 쪽 것이고 둘 다 주면 뒤가 이긴다", () => {
     const f = vi.fn();
 
-    expect(
-      mergeReadOptions({ prefill: "a" }, { prefill: "b" }).prefill,
-    ).toBe("b");
-    expect(
-      mergeReadOptions({ historyEntry: f }, {}).historyEntry,
-    ).toBe(f);
+    expect(mergeReadOptions({ prefill: "a" }, { prefill: "b" }).prefill).toBe(
+      "b",
+    );
+    expect(mergeReadOptions({ historyEntry: f }, {}).historyEntry).toBe(f);
   });
 
   test("인자가 없으면 빈 객체", () => {

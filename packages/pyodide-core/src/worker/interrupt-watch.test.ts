@@ -24,11 +24,13 @@ interface Rig {
   stop: () => void;
 }
 
-function setup(options: {
-  buffer?: Int32Array;
-  interruptIdle?: ReturnType<typeof vi.fn<() => boolean>>;
-  atPrompt?: ReturnType<typeof vi.fn<() => boolean>>;
-} = {}): Rig {
+function setup(
+  options: {
+    buffer?: Int32Array;
+    interruptIdle?: ReturnType<typeof vi.fn<() => boolean>>;
+    atPrompt?: ReturnType<typeof vi.fn<() => boolean>>;
+  } = {},
+): Rig {
   const buffer = options.buffer ?? createInterruptBuffer();
   const interruptIdle = options.interruptIdle ?? vi.fn(() => false);
   const atPrompt = options.atPrompt ?? vi.fn(() => false);

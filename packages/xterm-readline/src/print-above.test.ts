@@ -203,7 +203,7 @@ describe("printAbove", () => {
     // 재그리기 뒤에도 버퍼가 소실되지 않는다.
     expect(readline.getLine()).toBe("for x in y:\n    x.");
     expect(term.vt.screen()).toBe(
-      ">>> for x in y:\n    x.\nx.a  x.b\n>>> for x in y:\n    x."
+      ">>> for x in y:\n    x.\nx.a  x.b\n>>> for x in y:\n    x.",
     );
 
     term.type("a");
@@ -220,7 +220,7 @@ describe("printAbove", () => {
     // 목록뿐 아니라 옛 입력의 마지막 행까지 지워지는 회귀를 막는다.
     expect(readline.getLine()).toBe("if a:\n  if b:\n    x.");
     expect(term.vt.screen()).toBe(
-      ">>> if a:\n  if b:\n    x.\nx.a  x.b\n>>> if a:\n  if b:\n    x."
+      ">>> if a:\n  if b:\n    x.\nx.a  x.b\n>>> if a:\n  if b:\n    x.",
     );
   });
 

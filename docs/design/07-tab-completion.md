@@ -5,6 +5,7 @@
 `complete(source, pending)` 요청은 main→worker RPC 요청이다(`01-protocols.md` 1절). worker가 프롬프트 대기 중(`readLine` 요청을 보내고 응답을 기다리는 동안)에만 답하고, `input()` 메일박스 대기 중에는 worker가 멈춰 있어 답하지 못한다(그 구간의 Tab은 main이 무동작 처리). `pending`은 main이 넘기고 worker는 RD-016 전까지 무시한다.
 
 ## 7.1 요청 프로토콜
+
 - 요청: `complete(source, pending)` → 응답 `{ completions: string[], start: number }`(repl `worker/complete-source.ts`
   의 `SourceCompletion`). `source`는 커서 앞 텍스트(`buf.slice(0, pos)`), `pending`은 `... ` 블록의 이전 줄들
   (`\n`으로 이음).
@@ -14,11 +15,11 @@
 - main은 `terminal/tab-reader.ts`의 `createTabReader(readline, { complete, interruptCompletion })`(세션
   소유 정책 객체, `repl-main-driver.ts`가 `blockHistory`·`autoIndent` 옆에서 만든다)가 벤더 readline의 **키 가로채기
   공개 훅**(`ReadOptions.onKey`, RD-013이 범용으로 이미 추가)으로 Tab(`UnsupportedControlChar`, `data:
-  ['\t']`)을 가로챈다(이전 구현은 private `readKey`를 런타임 래핑했다. 벤더링 뒤에는 `06-editing.md` 6.1
+['\t']`)을 가로챈다(이전 구현은 private `readKey`를 런타임 래핑했다. 벤더링 뒤에는 `06-editing.md` 6.1
   규칙대로 private 멤버를 쓰지 않는다). 노출은 둘뿐이다: `readOptions(pending)`(세대 `generation` +1,
   `ended=false`, `pendingBlock` 저장, `lastKeyWasTab=false`, `queuedTabs=[]` — `repl-main-driver.ts`가
   `mergeReadOptions(blockHistory.readOptions(pending), autoIndent.readOptions(pending),
-  tabReader.readOptions(pending))`로 3항 합성해 `createReplReader`에 넘긴다)와 `readEnded(line)`(세션이
+tabReader.readOptions(pending))`로 3항 합성해 `createReplReader`에 넘긴다)와 `readEnded(line)`(세션이
   `readLine` continuation에서 `null`·문자열 둘 다에 호출, `blockHistory.discard()`와 같은 자리 — 순서는
   `readEnded` 먼저). `getLine`·`getCursor`·`editInsert`·`tty`·`printAbove`(RD-013·RD-015가 더한 접근자)로
   버퍼·커서를 읽고 고친다. 응답(`applyResume`)은 **세대가 같고, 읽기가 끝나지 않았고(`!ended`), 버퍼·커서가
@@ -38,6 +39,7 @@
   사례가 남는다(`10-parity-deviations.md`).
 
 ## 7.2 스템과 공백(32칸 규칙)
+
 - `STEM_DELIMITERS`는 pyodide `Console.completer_word_break_characters`와 같은 **33자**
   (`` ` ``~`?`까지, 공백·탭·개행 포함). 스템은 커서가 있는 논리 줄에서 마지막 구분자 뒤이고 커서 뒤
   텍스트는 보지 않는다.
@@ -47,6 +49,7 @@
   (옛 동기 모드는 버려진 Tab 때문에 4칸이었다). 게이트가 참인 빈 스템 줄(`important = ` 등)도 마찬가지.
 
 ## 7.3 후보 표시
+
 - 삽입: `cand[len(stem):]`을 커서 위치에 넣는다(후보 하나면 그 후보, 여럿이면 공통 접두사). 채울 것이
   없을 때만 **연속 두 번째 Tab**(`second`)이 목록을 연다. 후보 하나가 이미 입력과 같으면 목록을 열지 않는다.
 - 목록은 열 우선이다: `CELL_GAP = 2`, 셀 폭 = 최장 후보 길이 + 2, 열 수 = `floor(터미널 열 / 셀 폭)`
@@ -56,7 +59,7 @@
   (State 재생성 없음, TRP-030 해당 없음) — `text`는 `formatCompletionList`가 만든 행을 `\n`으로 이은
   문자열이고, `printAbove`가 `state.moveCursorToEnd()`(원래 논리 커서를 먼저 저장) → `\r\n` + `text` +
   `\r\n` 원시 쓰기 → `term.write("", cb)` 콜백에서 `Tty.anchorRow`를 실제 물리 커서(`term.buffer.active.
-  cursorY`)로 갱신 → `State.restoreCursor(cursor)`(저장해 둔 논리 커서 위치로 되돌림) → `State.resetLayout()`
+cursorY`)로 갱신 → `State.restoreCursor(cursor)`(저장해 둔 논리 커서 위치로 되돌림) → `State.resetLayout()`
   (`moveCursorToEnd()`가 남긴 옛 레이아웃을 0으로 되돌려, 다중 행 블록 입력에서 재그리기가 옛 줄을 지우지
   않게 함, DELTA-01a) → `state.refresh()` 순서로 처리한다. `printAbove`가 돌려주는 `Promise<void>`는 이
   전체가 끝난 뒤에만 resolve하고, `tab-reader.ts`의 `applyResume`이 `list` 분기에서 이 프로미스를 그대로
@@ -78,11 +81,13 @@
   `.scratch/repl-run-source-followups/issues/16-*.md` `deferred`.
 
 ## 7.4 인덱스 변환
+
 - Python `start`는 **코드포인트 인덱스**, `xterm-readline`의 `pos`는 **UTF-16**이다.
   `resolveCompletion`이 `[...buf.slice(0, pos)].slice(start).join('')`로 스템을 구하고 공통 접두사도
   코드포인트 단위로 계산한다(서로게이트 쌍의 절반만 남기면 삽입이 깨진다, TRP-031).
 
 ## 7.5 모듈(`import`/`from`) 후보
+
 - main 사전 게이트: `mentionsImportKeyword(text) = /import|from/.test(text)` — **부분 문자열, 단어 경계
   없음**. 입력은 커서 앞 텍스트에 `pending`을 `\n`으로 앞에 붙인 것(worker가 `ModuleCompleter`에 넣는 것과 동일).
   거짓이면 스템이 빈 곳은 왕복 없이 main이 공백을 넣고 스템이 있으면 요청한다. 참이면 스템이 비어도 항상
@@ -119,4 +124,3 @@
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/06-tab-completion.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/{tab-completion,tab-reader,complete-source}.ts`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/complete-source.py`
-

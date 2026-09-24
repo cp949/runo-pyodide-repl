@@ -4,14 +4,14 @@ REPL 외에 두 소비자가 생겼다. (1) host(`example.com`)의 monaco에서 
 
 결정: 패키지를 다음으로 나눈다(이름 `@cp949/runo-pyodide-*`, 전부 이 저장소 `packages/`, 버전 동기).
 
-| 패키지 | 내용 | xterm | coincident |
-| --- | --- | --- | --- |
-| `xterm-readline` | 벤더링 줄 편집기(기존) | O | X |
-| `pyodide-core` | 프로토콜(RPC·메일박스·interrupt), worker 커널(로드·출력·stdin·SIGINT·sleep 조각·webloop), 실행 driver, main 세션. UI 비의존 | X | X |
-| `pyodide-terminal` | xterm 실행창: `input()` 중에만 한 줄 입력, 그 외 키 무시, Ctrl+C | O | X |
-| `pyodide-repl` | REPL driver + REPL 프런트(기존 패키지 축소, 공개 API 유지) | O | X |
-| `pyodide-dom-bridge` | coincident로 `runo.browser`(window/document) 프록시만 | X | O |
-| `pyodide-react` | `<PythonRepl>`·`<PythonRunner>`·hook | — | — |
+| 패키지               | 내용                                                                                                                        | xterm | coincident |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----- | ---------- |
+| `xterm-readline`     | 벤더링 줄 편집기(기존)                                                                                                      | O     | X          |
+| `pyodide-core`       | 프로토콜(RPC·메일박스·interrupt), worker 커널(로드·출력·stdin·SIGINT·sleep 조각·webloop), 실행 driver, main 세션. UI 비의존 | X     | X          |
+| `pyodide-terminal`   | xterm 실행창: `input()` 중에만 한 줄 입력, 그 외 키 무시, Ctrl+C                                                            | O     | X          |
+| `pyodide-repl`       | REPL driver + REPL 프런트(기존 패키지 축소, 공개 API 유지)                                                                  | O     | X          |
+| `pyodide-dom-bridge` | coincident로 `runo.browser`(window/document) 프록시만                                                                       | X     | O          |
+| `pyodide-react`      | `<PythonRepl>`·`<PythonRunner>`·hook                                                                                        | —     | —          |
 
 - core는 한 벌이다. coincident는 core의 변형이 아니라 DOM 접근 전용 플러그인이며, `input()`·출력·중단은 coincident를 거치지 않고 core 채널로 간다. core·repl·terminal·react는 coincident에 의존하지 않는다(시험으로 강제).
 - REPL + dom-bridge 조합은 지원하지 않는다(문서화만). REPL은 프롬프트 대기 중 main→worker 요청(Tab 완성)이 필요한데 coincident 동기 대기가 그것을 막는다(이전 구현 TRP-005, [ADR-0001](./0001-no-sync-bridge-library.md)).

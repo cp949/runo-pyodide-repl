@@ -11,7 +11,10 @@ import {
   type WorkerDriver,
   type WorkerDriverSession,
 } from "@cp949/runo-pyodide-core/worker";
-import { parseReplDriverOptions, type ReplDriverOptions } from "../driver-options";
+import {
+  parseReplDriverOptions,
+  type ReplDriverOptions,
+} from "../driver-options";
 import type { ReadLineReply } from "../repl-protocol";
 import { loadCompleteSource, type CompleteSource } from "./complete-source";
 import { createConsole, type ReplConsole } from "./console";

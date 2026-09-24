@@ -47,7 +47,6 @@ test("backspace", () => {
   }
 });
 
-
 test("deleteEndOfLine", () => {
   {
     const line = new LineBuffer();

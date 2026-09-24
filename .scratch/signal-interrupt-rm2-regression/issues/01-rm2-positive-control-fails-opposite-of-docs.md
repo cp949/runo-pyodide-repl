@@ -91,7 +91,7 @@ RD-018 DELTA-04(양성 대조 드라이버를 저장소 `apps/demo/e2e/positive-
    `CONTROLS["2"]["scripts"]`는 손대지 않는다(T35·RM2 유지, 드라이버는 실패 셀을 단언하지 않고 보고만 한다).
 2. `_works/_completed/20260922-08-rd-008-prompt-and-input-cancel/DELTA-05.md` 105행("## 결정" 첫 항목): 원문
    삭제 없이 항목 끝에 `[정정 2026-09-23: 계획 단계 문장. 실측은 RM2도 실패 — 같은 절 네 번째 항목·"발견/처리"
-   참조. .scratch/signal-interrupt-rm2-regression/issues/01]` 덧붙임.
+참조. .scratch/signal-interrupt-rm2-regression/issues/01]` 덧붙임.
 3. `apps/demo/e2e/BASELINE.md` 101~112행 "양성 대조(positive-controls) 허용 예외 2건": 제목을 "허용 예외 1건"으로,
    rd-008 #2 항목(109~112행)을 예외에서 빼고 같은 절에 "rd-008.py #2는 docstring 오류였다(T35·RM2 동시 실패가 정상
    검출, 이 이슈 파일 참조). 정정 뒤 재실행 로그는 아래 Comments." 한 줄로 대체. 102~104행 "이 둘을 예외로 확정" →
@@ -101,7 +101,7 @@ RD-018 DELTA-04(양성 대조 드라이버를 저장소 `apps/demo/e2e/positive-
    판정돼 정정(`.scratch/signal-interrupt-rm2-regression/issues/01`)". 이슈 경로 링크는 유지.
 5. `_works/_completed/20260923-18-rd-018-e2e-baseline/checklist.md` 195~198행(각주 `[^pc-exceptions]`)과
    217~219행(rd-008.py #2 항목): 원문 보존, 각각 끝에 `[정정 2026-09-23: docstring 오류로 판정, 예외 아님 —
-   .scratch/signal-interrupt-rm2-regression/issues/01]` 덧붙임.
+.scratch/signal-interrupt-rm2-regression/issues/01]` 덧붙임.
 6. `docs/traps/TRP-029-<slug>.md` 신설 + `docs/traps/INDEX.md` 행 추가(TRP-028 형식 그대로: 제목, 상태 ACTIVE,
    적용 조건, "## 오해하기 쉬운 신호", "## 원인", "## 탐지/회피"). 내용: 계획 단계에 쓴 양성 대조 드라이버
    docstring(기대 실패·통과 셀)이 실측 뒤 정정 목록(ROADMAP 인계·시험 주석)에서 빠져 다음 RD로 그대로 이관됐다.

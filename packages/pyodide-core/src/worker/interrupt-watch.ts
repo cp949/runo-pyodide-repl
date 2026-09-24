@@ -30,8 +30,14 @@ export interface InterruptWatchDeps {
 
 /** REPL 루프 직전에 켜고, 루프가 끝나면(`exit()`) 반환값을 불러 끈다. */
 export function startInterruptWatch(deps: InterruptWatchDeps): () => void {
-  const { interruptIdle, atPrompt, hasPending, consume, discard, tickMs = 20 } =
-    deps;
+  const {
+    interruptIdle,
+    atPrompt,
+    hasPending,
+    consume,
+    discard,
+    tickMs = 20,
+  } = deps;
   const timer = setInterval(() => {
     try {
       if (!hasPending()) return;

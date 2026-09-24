@@ -6,11 +6,11 @@ Status: deferred
 
 2026-09-24 코드 읽기로 확인(실행 없음). 벽시계 ms 상한으로 실패를 던지는 곳:
 
-| 위치 | 판정 | 재는 구간 | 측정 방식 |
-| --- | --- | --- | --- |
-| `checks/stdin-input-check.mjs:258` | `elapsed > 2500` 실패 | `call_later(2, print, 'TICK')` 뒤 TICK 출현 | Node `Date.now()` + `waitFor` 폴링 |
-| `checks/input-cancel-check.mjs:324` | `elapsed > 500` 실패 | Ctrl+C → `KeyboardInterrupt` 출현 | Node `Date.now()` + 25ms 폴링 |
-| `checks/tab-check.mjs:637` | `max > 200` 실패 | C12 Tab 후보 왕복(a.·빈 스템, 표본 20) | 스크립트 내 통계 |
+| 위치                                | 판정                  | 재는 구간                                   | 측정 방식                          |
+| ----------------------------------- | --------------------- | ------------------------------------------- | ---------------------------------- |
+| `checks/stdin-input-check.mjs:258`  | `elapsed > 2500` 실패 | `call_later(2, print, 'TICK')` 뒤 TICK 출현 | Node `Date.now()` + `waitFor` 폴링 |
+| `checks/input-cancel-check.mjs:324` | `elapsed > 500` 실패  | Ctrl+C → `KeyboardInterrupt` 출현           | Node `Date.now()` + 25ms 폴링      |
+| `checks/tab-check.mjs:637`          | `max > 200` 실패      | C12 Tab 후보 왕복(a.·빈 스템, 표본 20)      | 스크립트 내 통계                   |
 
 하한 판정(`stdin-input-check.mjs:257` `< 1000`, `tla-check.mjs:119` `< 500`)은 느린 장비에서 더 빨라질 수 없어 해당 없음.
 

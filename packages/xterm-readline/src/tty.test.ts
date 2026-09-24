@@ -56,7 +56,7 @@ test("splitIntoVisualRows expands tab to next tabstop", () => {
   const rows = tty.splitIntoVisualRows("a\tb");
   expect(rows).toEqual(["a\tb"]);
   expect(tty.calculatePosition("a\tb", new Position(0, 0))).toEqual(
-    new Position(0, 5)
+    new Position(0, 5),
   );
 });
 
@@ -77,7 +77,7 @@ test("calculate position", () => {
   expect(tty.calculatePosition("foo", orig)).toEqual(new Position(0, 3));
 
   expect(tty.calculatePosition("\x1b[1;32mfoo", orig)).toEqual(
-    new Position(0, 3)
+    new Position(0, 3),
   );
 
   expect(tty.calculatePosition("foo\nbar", orig)).toEqual(new Position(1, 3));

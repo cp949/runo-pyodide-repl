@@ -18,8 +18,12 @@ beforeAll(async () => {
   pyodide = await loadPyodide();
   splitPaste = loadSplitPaste(pyodide);
   const sinks = { write: vi.fn(), writeErrorRaw: vi.fn() };
-  flagsOff = createConsole(pyodide, sinks, { topLevelAwait: false }).compilerFlags();
-  flagsOn = createConsole(pyodide, sinks, { topLevelAwait: true }).compilerFlags();
+  flagsOff = createConsole(pyodide, sinks, {
+    topLevelAwait: false,
+  }).compilerFlags();
+  flagsOn = createConsole(pyodide, sinks, {
+    topLevelAwait: true,
+  }).compilerFlags();
 }, 60_000);
 
 describe("split_paste: 문장 단위 분할", () => {
@@ -30,7 +34,10 @@ describe("split_paste: 문장 단위 분할", () => {
     );
 
     expect(error).toBeUndefined();
-    expect(chunks).toEqual([["def add(a, b):", "    return a + b"], ["print(add(1, 2))"]]);
+    expect(chunks).toEqual([
+      ["def add(a, b):", "    return a + b"],
+      ["print(add(1, 2))"],
+    ]);
   });
 
   it("클래스 메서드 사이에 빈 줄이 있어도 클래스 하나를 chunk 하나로 묶는다", () => {
@@ -47,7 +54,8 @@ describe("split_paste: 문장 단위 분할", () => {
   });
 
   it("데코레이터 줄부터 chunk를 시작한다", () => {
-    const source = "def deco(f):\n    return f\n\n@deco\ndef foo():\n    return 1";
+    const source =
+      "def deco(f):\n    return f\n\n@deco\ndef foo():\n    return 1";
 
     const [error, chunks] = splitPaste(source, flagsOff);
 
@@ -94,7 +102,10 @@ describe("split_paste: 문장 단위 분할", () => {
   });
 
   it("탭 들여쓰기를 그대로 보존한다", () => {
-    const [error, chunks] = splitPaste("def f():\n\treturn 1\nprint(f())", flagsOff);
+    const [error, chunks] = splitPaste(
+      "def f():\n\treturn 1\nprint(f())",
+      flagsOff,
+    );
 
     expect(error).toBeUndefined();
     expect(chunks).toEqual([["def f():", "\treturn 1"], ["print(f())"]]);
@@ -107,7 +118,11 @@ describe("split_paste: 문장 단위 분할", () => {
     );
 
     expect(error).toBeUndefined();
-    expect(chunks).toEqual([["import asyncio"], ["await asyncio.sleep(0)"], ["print(1)"]]);
+    expect(chunks).toEqual([
+      ["import asyncio"],
+      ["await asyncio.sleep(0)"],
+      ["print(1)"],
+    ]);
   });
 
   it("함수 밖 return은 파싱은 통과하지만 2차 compile 오류가 되어 아무 문장도 실행하지 않는다", () => {
@@ -120,14 +135,20 @@ describe("split_paste: 문장 단위 분할", () => {
 
 describe("split_paste: 입력 정규화", () => {
   it("CRLF와 CR 줄바꿈을 LF로 정규화한다", () => {
-    const [error, chunks] = splitPaste("a = 1\r\nb = 2\rprint(a + b)", flagsOff);
+    const [error, chunks] = splitPaste(
+      "a = 1\r\nb = 2\rprint(a + b)",
+      flagsOff,
+    );
 
     expect(error).toBeUndefined();
     expect(chunks).toEqual([["a = 1"], ["b = 2"], ["print(a + b)"]]);
   });
 
   it("전체가 들여쓰인 입력은 공통 들여쓰기를 제거한다", () => {
-    const [error, chunks] = splitPaste("    def f():\n        return 1\n    print(f())", flagsOff);
+    const [error, chunks] = splitPaste(
+      "    def f():\n        return 1\n    print(f())",
+      flagsOff,
+    );
 
     expect(error).toBeUndefined();
     expect(chunks).toEqual([["def f():", "    return 1"], ["print(f())"]]);

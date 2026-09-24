@@ -6,10 +6,10 @@ Status: deferred
 
 2026-09-24, chromium, 매번 새로 띄운 dev 서버, `apps/demo/e2e/measure/burst-matrix.mjs`:
 
-| 코드 | 조건 | a | b1 | b5 | b20 | b50 | c | d2 | d5 | warm-a |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `dev`(이슈 `sigint-test-isolation/02` 수정 전) | `N=10 COMBOS=b1,b5,b20,c` | — | 10/10 | 5/10(DIRTY) | ABORTED | — | ABORTED | — | — | — |
-| 이슈 `sigint-test-isolation/02` 수정 후 | `N=20` 9셀 | 20/20 | 19/20 | 12/20 | ABORTED | ABORTED | ABORTED | 20/20 | 20/20 | 20/20 |
+| 코드                                           | 조건                      | a     | b1    | b5          | b20     | b50     | c       | d2    | d5    | warm-a |
+| ---------------------------------------------- | ------------------------- | ----- | ----- | ----------- | ------- | ------- | ------- | ----- | ----- | ------ |
+| `dev`(이슈 `sigint-test-isolation/02` 수정 전) | `N=10 COMBOS=b1,b5,b20,c` | —     | 10/10 | 5/10(DIRTY) | ABORTED | —       | ABORTED | —     | —     | —      |
+| 이슈 `sigint-test-isolation/02` 수정 후        | `N=20` 9셀                | 20/20 | 19/20 | 12/20       | ABORTED | ABORTED | ABORTED | 20/20 | 20/20 | 20/20  |
 
 - ABORTED 메시지: `시간 초과: Ctrl+L 뒤 첫 행의 >>> — 화면 끝 ["KeyboardInterrupt",">>>"]`.
 - 실패 시행은 화면이 `KeyboardInterrupt` / `>>>` 반복이고 `tracebacks: 0, redraws: 0`. 대상 `pageerror` 0.

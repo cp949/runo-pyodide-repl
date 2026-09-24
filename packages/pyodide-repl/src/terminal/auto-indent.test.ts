@@ -8,7 +8,10 @@ import {
 } from "./auto-indent";
 
 // 커서가 버퍼 끝에 있을 때 Enter 뒤 개행 다음에 들어갈 공백.
-function indentationAfter(buffer: string, lastUsed: string | null = null): string {
+function indentationAfter(
+  buffer: string,
+  lastUsed: string | null = null,
+): string {
   return nextIndentation(buffer, buffer.length, lastUsed).indentation;
 }
 
@@ -34,7 +37,11 @@ describe("nextIndentation: 3.14 REPL 실측 동작", () => {
   it("이전 블록에서 본 들여쓰기 폭을 새 블록에서도 쓴다", () => {
     // 2칸으로 쓴 블록 뒤 새 블록의 자동 들여쓰기는 2칸이다. 새 세션(null)은 4칸.
     const buffer = "if True:\n  x=1";
-    const { lastUsedIndentation } = nextIndentation(buffer, buffer.length, null);
+    const { lastUsedIndentation } = nextIndentation(
+      buffer,
+      buffer.length,
+      null,
+    );
 
     expect(lastUsedIndentation).toBe("  ");
     expect(indentationAfter("if True:", lastUsedIndentation)).toBe("  ");
@@ -114,7 +121,9 @@ describe("backspaceCount", () => {
 });
 
 /** `createAutoIndent`가 받는 `readline`의 가짜. 버퍼·커서를 실제로 편집해 `onKey`의 결과를 관찰한다. */
-function createFakeReadline(initial: { buffer?: string; cursor?: number } = {}) {
+function createFakeReadline(
+  initial: { buffer?: string; cursor?: number } = {},
+) {
   let buffer = initial.buffer ?? "";
   let cursor = initial.cursor ?? buffer.length;
   const backspaceCalls: number[] = [];

@@ -245,7 +245,9 @@ describe("cancelRead()", () => {
       onResize: (_handler: (size: { cols: number; rows: number }) => void) => ({
         dispose: () => {},
       }),
-      attachCustomKeyEventHandler: (_fn: (event: KeyboardEvent) => boolean) => {},
+      attachCustomKeyEventHandler: (
+        _fn: (event: KeyboardEvent) => boolean,
+      ) => {},
       write: (text: string, callback?: () => void) => {
         written.push(text);
         if (callback) queue.push(callback);

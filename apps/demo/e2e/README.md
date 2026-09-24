@@ -30,39 +30,39 @@
 
 ## 명령 표(31항목, `apps/demo/package.json`)
 
-| 이름 | 실행 |
-| --- | --- |
-| `e2e:baseline` | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 19종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조 |
-| `e2e:measure` | `node e2e/run.mjs measure` — dev만 기동, 측정 5종(`boot-press` 제외) 순차 실행 |
-| `e2e:check` | `node e2e/run.mjs check` — `checks/`·`measure/`·`node/`의 `.mjs`를 `node --check`로 정적 구문 검사만(eslint·tsc는 `e2e/**` 계속 무시, 아래 "정적 검사" 참고) |
-| `e2e:repl-check` | `node e2e/checks/repl-check.mjs normal`(`cdn-blocked`·`not-isolated`는 인자로 직접 지정) |
-| `e2e:runner-check` | `node e2e/checks/runner-check.mjs normal`(실행창 `?view=runner`, `not-isolated`는 인자로 직접 지정하고 4174 정적 서버를 쓴다) |
-| `e2e:prompt-join` | `node e2e/checks/prompt-join-check.mjs` |
-| `e2e:trailing-newline` | `node e2e/checks/trailing-newline-check.mjs` |
-| `e2e:carryover` | `node e2e/checks/carryover-check.mjs` |
-| `e2e:stdin-input` | `node e2e/checks/stdin-input-check.mjs` |
-| `e2e:bg-input-guard` | `node e2e/checks/bg-input-guard-probe.mjs` |
-| `e2e:ctrl-c` | `node e2e/checks/ctrl-c-check.mjs` |
-| `e2e:prompt-cancel` | `node e2e/checks/prompt-cancel-check.mjs` |
-| `e2e:input-cancel` | `node e2e/checks/input-cancel-check.mjs` |
-| `e2e:session-reset` | `node e2e/checks/session-reset-check.mjs` |
-| `e2e:multiline` | `node e2e/checks/multiline-check.mjs` |
-| `e2e:tla` | `node e2e/checks/tla-check.mjs` |
-| `e2e:auto-indent` | `node e2e/checks/auto-indent-check.mjs` |
-| `e2e:block-history` | `node e2e/checks/block-history-check.mjs` |
-| `e2e:tab` | `node e2e/checks/tab-check.mjs` |
-| `e2e:selection-copy` | `node e2e/checks/selection-copy-check.mjs` |
-| `e2e:type-ahead` | `node e2e/checks/type-ahead-check.mjs` |
-| `e2e:run-source` | `node e2e/checks/run-source-check.mjs`(REPL 화면의 `source`·`run-source`·`source-result` 요소로 `runSource(code)`를 조작, RD-022a) |
-| `e2e:bg-output` | `node e2e/checks/bg-output-check.mjs`(열린 읽기 위 배경 출력 조율, RD-022b. 배경 출력은 Python BroadcastChannel 수신기, `input()` 중 출력은 `lib.mjs` `injectRpcNotice`로 합성) |
-| `e2e:react-strictmode` | `node e2e/checks/react-strictmode-check.mjs`(RD-024, REPL·`?view=runner` 두 화면의 StrictMode worker·xterm 수, dev 서버 전용. `ONLY=REPL`·`ONLY=RUNNER`로 화면 하나만) |
-| `e2e:react-fit` | `node e2e/checks/react-fit-check.mjs`(RD-024, `?fit=1` 두 화면의 창 크기 → `cols` 변화·이후 입력. `ONLY=REPL`·`ONLY=RUNNER`) |
-| `e2e:boot-press` | `node e2e/measure/boot-press.mjs` |
-| `e2e:press-loss` | `node e2e/measure/press-loss.mjs` |
-| `e2e:burst-matrix` | `node e2e/measure/burst-matrix.mjs` |
-| `e2e:input-burst-matrix` | `node e2e/measure/input-burst-matrix.mjs` |
-| `e2e:sleep-await` | `node e2e/measure/sleep-await-check.mjs` |
-| `e2e:keys-after-enter` | `node e2e/measure/keys-after-enter-probe.mjs` |
+| 이름                     | 실행                                                                                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `e2e:baseline`           | `node e2e/run.mjs baseline` — 서버 3개 관리 + 판정 19종(dev 전부 + preview 부분) + `boot-press` N=30, `results/summary.json`을 `baseline.json`과 대조                           |
+| `e2e:measure`            | `node e2e/run.mjs measure` — dev만 기동, 측정 5종(`boot-press` 제외) 순차 실행                                                                                                  |
+| `e2e:check`              | `node e2e/run.mjs check` — `checks/`·`measure/`·`node/`의 `.mjs`를 `node --check`로 정적 구문 검사만(eslint·tsc는 `e2e/**` 계속 무시, 아래 "정적 검사" 참고)                    |
+| `e2e:repl-check`         | `node e2e/checks/repl-check.mjs normal`(`cdn-blocked`·`not-isolated`는 인자로 직접 지정)                                                                                        |
+| `e2e:runner-check`       | `node e2e/checks/runner-check.mjs normal`(실행창 `?view=runner`, `not-isolated`는 인자로 직접 지정하고 4174 정적 서버를 쓴다)                                                   |
+| `e2e:prompt-join`        | `node e2e/checks/prompt-join-check.mjs`                                                                                                                                         |
+| `e2e:trailing-newline`   | `node e2e/checks/trailing-newline-check.mjs`                                                                                                                                    |
+| `e2e:carryover`          | `node e2e/checks/carryover-check.mjs`                                                                                                                                           |
+| `e2e:stdin-input`        | `node e2e/checks/stdin-input-check.mjs`                                                                                                                                         |
+| `e2e:bg-input-guard`     | `node e2e/checks/bg-input-guard-probe.mjs`                                                                                                                                      |
+| `e2e:ctrl-c`             | `node e2e/checks/ctrl-c-check.mjs`                                                                                                                                              |
+| `e2e:prompt-cancel`      | `node e2e/checks/prompt-cancel-check.mjs`                                                                                                                                       |
+| `e2e:input-cancel`       | `node e2e/checks/input-cancel-check.mjs`                                                                                                                                        |
+| `e2e:session-reset`      | `node e2e/checks/session-reset-check.mjs`                                                                                                                                       |
+| `e2e:multiline`          | `node e2e/checks/multiline-check.mjs`                                                                                                                                           |
+| `e2e:tla`                | `node e2e/checks/tla-check.mjs`                                                                                                                                                 |
+| `e2e:auto-indent`        | `node e2e/checks/auto-indent-check.mjs`                                                                                                                                         |
+| `e2e:block-history`      | `node e2e/checks/block-history-check.mjs`                                                                                                                                       |
+| `e2e:tab`                | `node e2e/checks/tab-check.mjs`                                                                                                                                                 |
+| `e2e:selection-copy`     | `node e2e/checks/selection-copy-check.mjs`                                                                                                                                      |
+| `e2e:type-ahead`         | `node e2e/checks/type-ahead-check.mjs`                                                                                                                                          |
+| `e2e:run-source`         | `node e2e/checks/run-source-check.mjs`(REPL 화면의 `source`·`run-source`·`source-result` 요소로 `runSource(code)`를 조작, RD-022a)                                              |
+| `e2e:bg-output`          | `node e2e/checks/bg-output-check.mjs`(열린 읽기 위 배경 출력 조율, RD-022b. 배경 출력은 Python BroadcastChannel 수신기, `input()` 중 출력은 `lib.mjs` `injectRpcNotice`로 합성) |
+| `e2e:react-strictmode`   | `node e2e/checks/react-strictmode-check.mjs`(RD-024, REPL·`?view=runner` 두 화면의 StrictMode worker·xterm 수, dev 서버 전용. `ONLY=REPL`·`ONLY=RUNNER`로 화면 하나만)          |
+| `e2e:react-fit`          | `node e2e/checks/react-fit-check.mjs`(RD-024, `?fit=1` 두 화면의 창 크기 → `cols` 변화·이후 입력. `ONLY=REPL`·`ONLY=RUNNER`)                                                    |
+| `e2e:boot-press`         | `node e2e/measure/boot-press.mjs`                                                                                                                                               |
+| `e2e:press-loss`         | `node e2e/measure/press-loss.mjs`                                                                                                                                               |
+| `e2e:burst-matrix`       | `node e2e/measure/burst-matrix.mjs`                                                                                                                                             |
+| `e2e:input-burst-matrix` | `node e2e/measure/input-burst-matrix.mjs`                                                                                                                                       |
+| `e2e:sleep-await`        | `node e2e/measure/sleep-await-check.mjs`                                                                                                                                        |
+| `e2e:keys-after-enter`   | `node e2e/measure/keys-after-enter-probe.mjs`                                                                                                                                   |
 
 개별 스크립트는 `node <파일> [url] [...]` 형태로도 직접 돌릴 수 있다(`url` 기본값
 `http://localhost:5173`). `ONLY=<이름 접두어,…>` 환경변수로 일부 확인만 골라 돌릴 수 있고, 측정
@@ -103,17 +103,17 @@
 
 ## 폴더 규칙
 
-| 폴더 | 내용 |
-| --- | --- |
-| `lib.mjs` | 공용 하니스(화면 읽기·입력·대기·pageerror 계수·`finish()`). eslint·tsc 대상 밖(`apps/demo/eslint.config.js`의 `ignores: ["e2e/**"]`, `tsconfig.json`의 `include`가 `src`뿐) |
-| `run.mjs` | 묶음 실행기(`baseline`\|`measure`\|`check`, 서버 관리 + 결과 대조) |
-| `checks/` | 판정 스크립트(pass/fail이 있는 확인) |
-| `measure/` | 측정 스크립트(판정선 있음, `e2e:baseline`·`e2e:measure`가 도는 것과 `boot-press`처럼 baseline 세트 소속인 것이 섞여 있다 — `BASELINE.md` 4절 참고) |
-| `node/rd-0NN/` | node 전용 통계(브라우저 미사용) |
-| `pty/rd-0NN/` | CPython 3.14.4 pty 기준 데이터(기대 행 스냅샷) |
-| `positive-controls/` | 양성 대조 드라이버(`.py`)·기록(`.md`) |
-| `results/` | 실행 결과 JSON(`.gitignore` 대상, 커밋하지 않는다) |
-| `BASELINE.md`·`baseline.json` | 기준선 문서(사람용)·기계용 사본(`run.mjs`가 읽는다) |
+| 폴더                          | 내용                                                                                                                                                                        |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib.mjs`                     | 공용 하니스(화면 읽기·입력·대기·pageerror 계수·`finish()`). eslint·tsc 대상 밖(`apps/demo/eslint.config.js`의 `ignores: ["e2e/**"]`, `tsconfig.json`의 `include`가 `src`뿐) |
+| `run.mjs`                     | 묶음 실행기(`baseline`\|`measure`\|`check`, 서버 관리 + 결과 대조)                                                                                                          |
+| `checks/`                     | 판정 스크립트(pass/fail이 있는 확인)                                                                                                                                        |
+| `measure/`                    | 측정 스크립트(판정선 있음, `e2e:baseline`·`e2e:measure`가 도는 것과 `boot-press`처럼 baseline 세트 소속인 것이 섞여 있다 — `BASELINE.md` 4절 참고)                          |
+| `node/rd-0NN/`                | node 전용 통계(브라우저 미사용)                                                                                                                                             |
+| `pty/rd-0NN/`                 | CPython 3.14.4 pty 기준 데이터(기대 행 스냅샷)                                                                                                                              |
+| `positive-controls/`          | 양성 대조 드라이버(`.py`)·기록(`.md`)                                                                                                                                       |
+| `results/`                    | 실행 결과 JSON(`.gitignore` 대상, 커밋하지 않는다)                                                                                                                          |
+| `BASELINE.md`·`baseline.json` | 기준선 문서(사람용)·기계용 사본(`run.mjs`가 읽는다)                                                                                                                         |
 
 ## 결과 파일 규칙
 

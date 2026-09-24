@@ -5,6 +5,7 @@
 새 구현에서 `readInput(cancelable)`은 coincident proxy 호출이 아니라 **stdin 메일박스**(`01-protocols.md` 2절)다: worker가 RPC 알림 `readInput`을 보낸 뒤 `Atomics.wait`로 멈추고, main이 메일박스에 줄(또는 취소 표식)을 써서 깨운다. worker 쪽 `stdin-callback`(core `worker/stdin-callback.ts`)은 `createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt })`다. core `worker/boot.ts`가 `requestInput`에 `rpc.notify("readInput", cancelable)`를, `wait`에 `createMailboxReader(...).wait`를, `signalInterrupt`에 `() => signalInterrupt(interruptBuffer)`를, `checkInterrupt`에 `() => pyodide.checkInterrupt()`를 주입하고 `readInput` 알림 → `wait()` 순서는 이 모듈이 소유한다(3.1).
 
 ## 3.1 stdin 콜백과 취소 변환 규칙(`createStdinCallback`)
+
 - `createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt })`. 호출마다 `requestInput(true)`(= `readInput` 알림) → `wait()`(메일박스 `Atomics.wait`) 순서로 돌고 `wait()`가 돌려준 줄을 그대로 반환한다. 순서를 이 모듈이 소유하므로 알림을 `wait()` 뒤로 옮기면 worker가 알림 없이 정지한다. `wait()`가 던진 오류(main의 `fail`)는 그대로 전파되어 `input()`에서 `OSError`가 된다. `null`(취소 표식)은 아래 변환을 거친다.
 - `pyodide.setStdin({ stdin })`만 쓴다(기본 `isatty: false`, `autoEOF: true`, pyodide 314.0.7 `LegacyReader`). 콜백이 돌려준 문자열 끝에 `\n`이 없으면 pyodide가 붙이고 마지막 바이트가 `\n`이면 EOF를 넣지 않으므로 콜백은 `\n`을 붙이지 않는다. `input()`은 `"abc"`, `readline()`은 `"abc\n"`이고 `read()`·`readlines()`·`for line in sys.stdin`은 줄마다 콜백을 다시 불러 끝나지 않는다(편차 34). `read(n)`은 줄 끝 `\n`을 남겨 다음 읽기를 콜백 없이 채운다(`docs/traps/TRP-010`).
 - 취소 변환(RD-008). 의존성은 **객체가 아니라 클로저 둘**(`signalInterrupt`·`checkInterrupt`)로 받는다: core `worker/stdin-callback.ts`는 `protocol/`을 import하지 않고(`00-architecture.md` 4.2), 실제 pyodide 없이도 변환 순서와 "재시도 없음"을 단위로 고정할 수 있다.
@@ -31,6 +32,7 @@
   건드리지 않아 전역 `setStdin` 설정이 그대로 쓰인다.
 
 ## 3.2 read-guard(`createReadGuard({ readLine, readInput })`)
+
 - REPL 읽기와 stdin 읽기가 같은 `readline`을 쓰고, `readline.read()`는 이미 열린 읽기를 교체하면서
   옛 읽기의 promise를 영영 끝내지 않는다. 프롬프트 대기 중 배경 콜백이 `input()`을 부르면 REPL 읽기가
   고아가 되어 입력이 멈춘다.
@@ -50,6 +52,7 @@
 - **경합: 두 알림 사이의 Enter**(RD-022b 리뷰, jsdom 재현): worker는 `write("bg> ")`와 `readInput` 알림을 같은 포트로 연달아 보낸다. 둘 사이(다음 메시지 태스크 한 번)에 REPL 줄 Enter가 처리되면 읽기가 끝나 `abovePrefix()`가 `""`이고 `inputDeferred`가 옮길 접두가 없다. 접두 `bg> `는 확정된 행(`bg> >>> x = 41`)에만 남고 꼬리는 비어 있어(열린 읽기 출력은 꼬리에 먹이지 않는다) stdin 읽기가 프롬프트 없이 열린다: 화면 `["bg> >>> x = 41", "hello"]`, 경합 없는 경로는 `[">>> x = 41", "bg> hello"]`. 고치지 않았다(`.scratch/repl-run-source-followups/issues/12-*.md` `deferred`). RD-022b 전에는 sink가 읽기 중 출력도 꼬리에 먹여 이 경합에서도 `bg> `가 stdin 프롬프트가 됐다(코드 읽기).
 
 ## 3.3 프롬프트 꼬리(output-tail) 렌더링
+
 - 꼬리 = 직전 출력의 **마지막 `\n` 뒤이면서 그 안에서 마지막 `\r` 뒤** 텍스트. 꼬리가 없으면 프롬프트 없이
   입력만 받는다. `input("x: ")`의 `x: `는 stdout으로 먼저 나가고, 읽기가 시작되면 그 꼬리를 프롬프트로
   같은 행에 다시 그린다(3.14의 `x: abc` 한 줄과 같다).
@@ -86,4 +89,3 @@
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/02b-input-ctrl-c.md`,
 이전 구현 설계 문서 `11-stdin-prompt.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/{stdin-callback,read-guard,stdin-reader,output-tail}.ts`
-

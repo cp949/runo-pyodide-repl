@@ -14,7 +14,10 @@
  */
 import { ReadTakenError } from "@cp949/runo-xterm-readline";
 import type { Readline } from "@cp949/runo-xterm-readline";
-import type { RewindTerminal, TerminalSinks } from "@cp949/runo-pyodide-terminal/internal";
+import type {
+  RewindTerminal,
+  TerminalSinks,
+} from "@cp949/runo-pyodide-terminal/internal";
 import type { ReadLineOutcome, ReadLineSourceReply } from "../repl-protocol";
 import type { SourceLink } from "../run-source";
 import type { ReplReadOptions } from "./read-options";
@@ -174,7 +177,8 @@ export function createSourceBridge(deps: SourceBridgeDeps): SourceBridge {
       // (`State.setPromptPrefix`) 꼬리가 열어 둔 색은 프롬프트가 닫았을 것이라, 비어 있지 않은 조각마다 뒤에서 닫는다. 열린 읽기가
       // 없으므로 이 쓰기는 sink의 읽기 밖 경로(꼬리 추적기 공급)로 간다.
       const erased = [prefix, openTail].filter((part) => part !== "");
-      if (erased.length > 0) sinks.write(`${erased.join("\x1b[0m")}\x1b[0m\r\n`);
+      if (erased.length > 0)
+        sinks.write(`${erased.join("\x1b[0m")}\x1b[0m\r\n`);
       return true;
     },
   };

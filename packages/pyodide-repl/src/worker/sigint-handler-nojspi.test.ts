@@ -11,7 +11,15 @@
  * 도중의 눌림도 조각 사이의 폴링이 끊는다. 조립은 `sigint-setup.ts`가 `sigint-handler.test.ts`와 공유한다.
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   BUSY,
   CONSOLE_TRACEBACK,
@@ -110,9 +118,7 @@ describe("JSPI 없는 경로", () => {
   // 눌림 스레드를 미리 예약해 두고 빈 줄 제출로 실행을 시작한다.
   it("무한 루프의 time.sleep(0.02) 중 눌림 스레드 300ms는 사용자 프레임만 남은 표준 트레이스백으로 끊는다", async () => {
     const runner = await setup();
-    expect((await runner.run("while True: time.sleep(0.02)")).prompt).toBe(
-      PS2,
-    );
+    expect((await runner.run("while True: time.sleep(0.02)")).prompt).toBe(PS2);
     const presser = runner.presser();
     presser.press({ offsets: [300], waitStarted: false });
 

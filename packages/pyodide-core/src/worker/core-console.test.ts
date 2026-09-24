@@ -42,7 +42,9 @@ describe("installStdioWriters·createCoreConsole", () => {
     const pyconsole = createCoreConsole(pyodide, sinks);
 
     pyodide.runPython('print("전역", flush=True)');
-    pyodide.runPython('import sys; sys.stderr.write("err\\n"); sys.stderr.flush()');
+    pyodide.runPython(
+      'import sys; sys.stderr.write("err\\n"); sys.stderr.flush()',
+    );
     await push(pyconsole, "print('콘솔')");
 
     const out = sinks.write.mock.calls.map((call) => call[0]).join("");

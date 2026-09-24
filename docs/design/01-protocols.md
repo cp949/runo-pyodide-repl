@@ -8,10 +8,10 @@
 
 ```ts
 type RpcMessage =
-  | { kind: 'req'; id: number; name: string; args: unknown[] }        // 응답을 기다린다
-  | { kind: 'res'; id: number; ok: true;  result: unknown }
-  | { kind: 'res'; id: number; ok: false; error: string }             // 핸들러가 던진 값의 String()
-  | { kind: 'ntf'; name: string; args: unknown[] }                    // 응답 없음
+  | { kind: "req"; id: number; name: string; args: unknown[] } // 응답을 기다린다
+  | { kind: "res"; id: number; ok: true; result: unknown }
+  | { kind: "res"; id: number; ok: false; error: string } // 핸들러가 던진 값의 String()
+  | { kind: "ntf"; name: string; args: unknown[] }; // 응답 없음
 ```
 
 - 값은 구조적 복제로 그대로 간다. `null`은 `null`로 도착한다(이전 구현의 TRP-010 같은 변환이 없다).
@@ -23,19 +23,19 @@ type RpcMessage =
 
 ### 1.2 메서드 표
 
-| 이름 | 종류 | 방향 | 인자 | 결과 | 시점 |
-| --- | --- | --- | --- | --- | --- |
-| `readLine` | req | worker→main | `prompt: string, pending: string \| undefined, cancelable: boolean, outcome?: RunOutcome` | `string \| null`(취소) `\| { source: string }`(루프 명령) | REPL 루프가 한 줄을 읽을 때. `outcome`(RD-022a)은 바로 앞 `{ source }` 응답을 실행한 결말이고 그 요청에만 실린다 |
-| `complete` | req | main→worker | `source: string, pending: string \| undefined` | `{ completions: string[], start: number }` | Tab. worker는 프롬프트 대기 중에만 계산 |
-| `readInput` | ntf | worker→main | `cancelable: boolean` | — | stdin 콜백 진입. 이 알림 직후 worker는 메일박스 대기에 들어간다 |
-| `write` | ntf | worker→main | `text: string` | — | stdout 조각(개행 미강제) |
-| `writeErrorRaw` | ntf | worker→main | `text: string` | — | stderr 조각(개행 미강제, main이 빨강) |
-| `writeOutput` | ntf | worker→main | `text: string` | — | 값 에코·배너(main이 개행을 붙인다) |
-| `writeError` | ntf | worker→main | `text: string` | — | 트레이스백·SyntaxError(main이 개행·빨강) |
-| `ready` | ntf | worker→main | `ReadyPayload` = `{ pyodideVersion: string, versionMismatch: boolean, degraded: string[], details?: Record<string, string[]> }` | — | 콘솔 생성·호환 탐지 뒤 REPL 루프 직전. 필드 규칙은 아래 "`ready` 페이로드" |
-| `loadFailed` | ntf | worker→main | `message: string` | — | pyodide 로드 실패. worker는 살아 있고 루프에 들어가지 않는다 |
-| `sessionTerminated` | ntf | worker→main | — | — | `exit()`/`quit()`/`SystemExit` |
-| `crashed` | ntf | worker→main | `{ message: string }` | — | 부팅 뒤(REPL 루프)의 잡히지 않은 예외. worker는 살아 있을 수 있으나 루프는 끝났다(RD-010) |
+| 이름                | 종류 | 방향        | 인자                                                                                                                            | 결과                                                      | 시점                                                                                                             |
+| ------------------- | ---- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `readLine`          | req  | worker→main | `prompt: string, pending: string \| undefined, cancelable: boolean, outcome?: RunOutcome`                                       | `string \| null`(취소) `\| { source: string }`(루프 명령) | REPL 루프가 한 줄을 읽을 때. `outcome`(RD-022a)은 바로 앞 `{ source }` 응답을 실행한 결말이고 그 요청에만 실린다 |
+| `complete`          | req  | main→worker | `source: string, pending: string \| undefined`                                                                                  | `{ completions: string[], start: number }`                | Tab. worker는 프롬프트 대기 중에만 계산                                                                          |
+| `readInput`         | ntf  | worker→main | `cancelable: boolean`                                                                                                           | —                                                         | stdin 콜백 진입. 이 알림 직후 worker는 메일박스 대기에 들어간다                                                  |
+| `write`             | ntf  | worker→main | `text: string`                                                                                                                  | —                                                         | stdout 조각(개행 미강제)                                                                                         |
+| `writeErrorRaw`     | ntf  | worker→main | `text: string`                                                                                                                  | —                                                         | stderr 조각(개행 미강제, main이 빨강)                                                                            |
+| `writeOutput`       | ntf  | worker→main | `text: string`                                                                                                                  | —                                                         | 값 에코·배너(main이 개행을 붙인다)                                                                               |
+| `writeError`        | ntf  | worker→main | `text: string`                                                                                                                  | —                                                         | 트레이스백·SyntaxError(main이 개행·빨강)                                                                         |
+| `ready`             | ntf  | worker→main | `ReadyPayload` = `{ pyodideVersion: string, versionMismatch: boolean, degraded: string[], details?: Record<string, string[]> }` | —                                                         | 콘솔 생성·호환 탐지 뒤 REPL 루프 직전. 필드 규칙은 아래 "`ready` 페이로드"                                       |
+| `loadFailed`        | ntf  | worker→main | `message: string`                                                                                                               | —                                                         | pyodide 로드 실패. worker는 살아 있고 루프에 들어가지 않는다                                                     |
+| `sessionTerminated` | ntf  | worker→main | —                                                                                                                               | —                                                         | `exit()`/`quit()`/`SystemExit`                                                                                   |
+| `crashed`           | ntf  | worker→main | `{ message: string }`                                                                                                           | —                                                         | 부팅 뒤(REPL 루프)의 잡히지 않은 예외. worker는 살아 있을 수 있으나 루프는 끝났다(RD-010)                        |
 
 표의 핸들러 소유(RD-020): `write`·`writeErrorRaw`·`readInput`·`ready`·`loadFailed`·`sessionTerminated`·`crashed`는 core 핸들러(main 쪽 표 `CORE_MAIN_HANDLER_NAMES`)이고, `readLine`(worker→main)·`writeOutput`·`writeError`는 REPL main driver 핸들러, `complete`(main→worker)는 REPL worker driver 핸들러다. 각 RPC 끝점은 생성 시 `composeRpcHandlers(core 표, driver 표)`로 표를 합치고 이름이 겹치면 예외를 던진다(늦은 등록 API 없음). core는 `write`·`writeErrorRaw`를 `{ stream: 'stdout' | 'stderr', text }` 원문으로 세션 `output` 콜백에 넘긴다.
 
@@ -70,14 +70,19 @@ main→worker 알림은 없다. 설정은 초기화 프레임(4절)으로만 간
 ### 2.1 배치
 
 ```ts
-const CAPACITY = 64 * 1024                       // 데이터 바이트. 고정 크기(ADR-0002)
-const sab  = new SharedArrayBuffer(16 + CAPACITY)
-const ctrl = new Int32Array(sab, 0, 4)           // [STATE, BYTE_LENGTH, FLAGS, RESERVED]
-const data = new Uint8Array(sab, 16, CAPACITY)
+const CAPACITY = 64 * 1024; // 데이터 바이트. 고정 크기(ADR-0002)
+const sab = new SharedArrayBuffer(16 + CAPACITY);
+const ctrl = new Int32Array(sab, 0, 4); // [STATE, BYTE_LENGTH, FLAGS, RESERVED]
+const data = new Uint8Array(sab, 16, CAPACITY);
 
-const STATE = 0, BYTE_LENGTH = 1, FLAGS = 2
-const IDLE = 0, READY = 1, CANCELLED = 2, ERROR = 3   // ctrl[STATE]
-const FLAG_LAST = 1                                   // ctrl[FLAGS] 비트: 마지막 청크
+const STATE = 0,
+  BYTE_LENGTH = 1,
+  FLAGS = 2;
+const IDLE = 0,
+  READY = 1,
+  CANCELLED = 2,
+  ERROR = 3; // ctrl[STATE]
+const FLAG_LAST = 1; // ctrl[FLAGS] 비트: 마지막 청크
 ```
 
 - 한 줄은 UTF-8로 인코딩해 `CAPACITY` 이하 청크로 나눈다. 대부분의 입력은 청크 1개다. 청크 경계는 바이트 단위라 UTF-8 시퀀스 중간일 수 있으므로 worker는 `TextDecoder`를 `{ stream: true }`로 이어 붙이고 마지막 청크 뒤 `decode()`로 닫는다.
@@ -135,10 +140,10 @@ untilIdle():
 ## 3. interrupt buffer
 
 ```ts
-const buffer = new Int32Array(new SharedArrayBuffer(4 * 4))
-const SIGNAL = 0   // main이 2를 쓴다. pyodide 폴링이 읽고 0으로 비운다
-const ACK    = 1   // worker만 올린다
-const SEQ    = 2   // 요청 번호. 새 눌림마다 +1, 재전송은 같은 번호
+const buffer = new Int32Array(new SharedArrayBuffer(4 * 4));
+const SIGNAL = 0; // main이 2를 쓴다. pyodide 폴링이 읽고 0으로 비운다
+const ACK = 1; // worker만 올린다
+const SEQ = 2; // 요청 번호. 새 눌림마다 +1, 재전송은 같은 번호
 //    [3]    예약
 ```
 
@@ -151,13 +156,13 @@ const SEQ    = 2   // 요청 번호. 새 눌림마다 +1, 재전송은 같은 �
 
 ```ts
 interface InitFrame {
-  kind: 'init'
-  rpcPort: MessagePort            // transfer
-  interruptBuffer: Int32Array     // SAB 뷰. 구조적 복제로 같은 메모리를 가리킨다
-  stdinCtrl: Int32Array           // 메일박스 제어
-  stdinData: Uint8Array           // 메일박스 데이터
-  driver: unknown                 // driver 전용 옵션. core는 모양을 모른다(REPL은 { topLevelAwait: boolean }, 실행 driver는 { filename?: string, topLevelAwait?: boolean })
-  pyodide: { indexURL: string }
+  kind: "init";
+  rpcPort: MessagePort; // transfer
+  interruptBuffer: Int32Array; // SAB 뷰. 구조적 복제로 같은 메모리를 가리킨다
+  stdinCtrl: Int32Array; // 메일박스 제어
+  stdinData: Uint8Array; // 메일박스 데이터
+  driver: unknown; // driver 전용 옵션. core는 모양을 모른다(REPL은 { topLevelAwait: boolean }, 실행 driver는 { filename?: string, topLevelAwait?: boolean })
+  pyodide: { indexURL: string };
 }
 ```
 
@@ -166,7 +171,7 @@ interface InitFrame {
   - 배열 메시지(다른 프로토콜의 것): 조용히 넘기고 리스너를 유지한다.
   - `kind === 'init'`인 객체(init 후보): 리스너를 떼고(이후 네이티브 `message` 채널은 쓰지 않는다) `parseInitFrame`으로 검증한다. 실패하면 필드 이름을 담아 `console.error("[worker] 초기화 프레임이 올바르지 않다", …)` 후 프레임을 버린다.
   - 그 밖의 메시지(`kind`가 다른 객체·`null`·원시값): 같은 `console.error`(`parseInitFrame`의 오류 메시지 포함)를 남기되 리스너를 **유지**해 뒤에 오는 init을 받는다. 무시하지 않고 로그를 남기는 것은 옛 `{ once: true }` 동작의 오류 표시를 유지하기 위해서다.
-  검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`).
+    검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`).
 - `driver` 필드: `parseInitFrame`은 필드가 있는지만 본다(`"driver" in frame`, 값은 `undefined`도 통과). 옛 모양(최상위 `topLevelAwait`, `driver` 없음)의 프레임을 worker가 조용히 받아 driver 옵션을 잃는 것을 막는다. 값은 worker 쪽 driver가 `WorkerDriver.parseOptions(frame.driver)`로 검증한다. REPL은 `{ topLevelAwait: boolean }`이고 repl `driver-options.ts`의 파서가 `driver: 객체 필요`·`topLevelAwait: boolean 필요` 오류를 낸다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 그 오류로 거부되고 `runWorker`가 `console.error("[worker] 부팅 시퀀스 예외", …)`로 남긴다. main 쪽 driver의 `options`가 프레임의 `driver` 필드로 실린다. 실행 driver의 `createRunner`는 worker를 만들기 전에 같은 파서(`parseRunDriverOptions`)로 먼저 검증한다(`docs/traps/TRP-042`, `14-runner.md` 14.2.3).
 - `SharedArrayBuffer` 뷰는 postMessage로 넘겨도 같은 메모리를 공유한다(coincident 프록시가 값으로 직렬화하던 문제가 없다).
 - 설정 변경(REPL의 `topLevelAwait`)은 새 프레임 = 새 worker다. worker가 main에 설정을 되묻는 호출은 없다.

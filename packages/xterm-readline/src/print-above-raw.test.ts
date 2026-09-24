@@ -110,7 +110,7 @@ function observe(promise: Promise<unknown>): () => Outcome {
     },
     (reason) => {
       outcome = { state: "rejected", reason };
-    }
+    },
   );
   return () => outcome;
 }

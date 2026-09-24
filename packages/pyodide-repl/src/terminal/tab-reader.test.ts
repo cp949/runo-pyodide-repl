@@ -40,7 +40,10 @@ function setup() {
   const blockHistory = createBlockHistory(readline);
   const complete = vi.fn<TabReaderDeps["complete"]>();
   const interruptCompletion = vi.fn();
-  const tabReader = createTabReader(readline, { complete, interruptCompletion });
+  const tabReader = createTabReader(readline, {
+    complete,
+    interruptCompletion,
+  });
   const reader = createReplReader(readline, fake.term, sinks, (pending) =>
     mergeReadOptions(
       blockHistory.readOptions(pending),
@@ -541,7 +544,8 @@ describe("createTabReader: 큐", () => {
 
 describe("createTabReader: 취소 인터럽트", () => {
   test("요청 진행 중 readEnded(null)이면 interruptCompletion을 1회 부른다", async () => {
-    const { tabReader, complete, interruptCompletion, startRead, fake } = setup();
+    const { tabReader, complete, interruptCompletion, startRead, fake } =
+      setup();
     await startRead();
     fake.type("os.pa");
     complete.mockReturnValueOnce(new Promise<SourceCompletion>(() => {}));
@@ -562,7 +566,8 @@ describe("createTabReader: 취소 인터럽트", () => {
   });
 
   test("응답이 이미 온 뒤면 interruptCompletion을 부르지 않는다", async () => {
-    const { tabReader, complete, interruptCompletion, startRead, fake } = setup();
+    const { tabReader, complete, interruptCompletion, startRead, fake } =
+      setup();
     await startRead();
     fake.type("os.pa");
     complete.mockResolvedValueOnce({ completions: ["os.path"], start: 0 });
@@ -575,7 +580,8 @@ describe("createTabReader: 취소 인터럽트", () => {
   });
 
   test("Enter로 끝나면(line !== null) interruptCompletion을 부르지 않는다", async () => {
-    const { tabReader, complete, interruptCompletion, startRead, fake } = setup();
+    const { tabReader, complete, interruptCompletion, startRead, fake } =
+      setup();
     await startRead();
     fake.type("os.pa");
     complete.mockReturnValueOnce(new Promise<SourceCompletion>(() => {}));
@@ -587,7 +593,8 @@ describe("createTabReader: 취소 인터럽트", () => {
   });
 
   test("큐에서 시작한 요청 중 취소도 interruptCompletion 1회다", async () => {
-    const { tabReader, complete, interruptCompletion, startRead, fake } = setup();
+    const { tabReader, complete, interruptCompletion, startRead, fake } =
+      setup();
     await startRead();
     fake.type("os.p");
     const first = deferredCompletion();

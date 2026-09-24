@@ -20,7 +20,7 @@ test("edit insert push", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   state.editInsert("a");
   state.editInsert("b");
@@ -38,7 +38,7 @@ test("edit insert", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   state.editInsert("a");
   state.editInsert("b");
@@ -55,7 +55,7 @@ test("edit insert wrap", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   state.editInsert("a");
   state.editInsert("b");
@@ -92,7 +92,7 @@ test("edit multiline backcursor", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   state.editInsert("a");
   state.editInsert("\n");
@@ -114,7 +114,7 @@ test("buffer taller than viewport scrolls window to cursor", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   // Insert 5 logical lines of content (5 visual rows including prompt)
   state.editInsert("a\nb\nc\nd\ne");
@@ -140,7 +140,7 @@ test("moveCursorUp past top of window triggers refresh and scrolls", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   state.editInsert("a\nb\nc\nd\ne");
   // Viewport now shows rows 2,3,4 ("c","d","e"); cursor at row 4.
@@ -165,7 +165,7 @@ test("single-viewport behavior unchanged for short buffers", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   // No scrolling needed: buffer fits comfortably in 24 rows.
   state.editInsert("a\nb\nc");
@@ -186,7 +186,7 @@ test("cursor arrow movement", () => {
     PROMPT,
     tty,
     new IdentityHighlighter(),
-    new History(50)
+    new History(50),
   );
   state.editInsert("abc\ndef\nghi");
   state.moveCursorBack(1);
@@ -215,7 +215,12 @@ class BracketHighlighter {
 test("refreshUnhighlighted strips highlighter SGR", () => {
   const out = new Output();
   const tty = new Tty(80, 24, 8, out);
-  const state = new State(PROMPT, tty, new BracketHighlighter(), new History(50));
+  const state = new State(
+    PROMPT,
+    tty,
+    new BracketHighlighter(),
+    new History(50),
+  );
   state.editInsert("(foo)");
 
   // Sanity: a normal refresh emits the highlighted form.

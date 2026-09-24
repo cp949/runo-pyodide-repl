@@ -7,7 +7,14 @@
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
-import { afterEach, beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+} from "vitest";
 import { createConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
 import { createSubmissionRunner } from "./submission-runner";
@@ -20,7 +27,9 @@ let realLoop: PyProxy;
 
 beforeAll(async () => {
   pyodide = await loadPyodide();
-  const namespace = pyodide.toPy({}) as PyProxy & { get(name: string): unknown };
+  const namespace = pyodide.toPy({}) as PyProxy & {
+    get(name: string): unknown;
+  };
   try {
     pyodide.runPython("import asyncio\nloop = asyncio.get_event_loop()", {
       globals: namespace,
@@ -215,7 +224,9 @@ describe("억제 설치 가드", () => {
 
     // asyncio.get_event_loop를 속성이 하나도 없는 객체를 돌려주는 함수로 바꾼다. install()은 이 함수가 돌려준 객체만
     // 만지므로, 실제 loop(realLoop)는 이 시험 동안 전혀 건드려지지 않아야 한다.
-    const namespace = pyodide.toPy({}) as PyProxy & { get(name: string): unknown };
+    const namespace = pyodide.toPy({}) as PyProxy & {
+      get(name: string): unknown;
+    };
     try {
       pyodide.runPython(
         [
@@ -254,7 +265,9 @@ describe("억제 설치 가드", () => {
     };
     try {
       namespace.set("loop", realLoop);
-      pyodide.runPython("del loop._system_exit_handler", { globals: namespace });
+      pyodide.runPython("del loop._system_exit_handler", {
+        globals: namespace,
+      });
     } finally {
       namespace.destroy();
     }

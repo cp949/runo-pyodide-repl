@@ -126,7 +126,8 @@ export class VtScreen {
       case "J": {
         // 0(기본): 커서부터 화면 끝까지. 다른 모드는 이 시험이 쓰지 않는다.
         const line = this.row(this.cursorRow);
-        for (let col = this.cursorCol; col < this.cols; col += 1) line[col] = " ";
+        for (let col = this.cursorCol; col < this.cols; col += 1)
+          line[col] = " ";
         for (let row = this.cursorRow + 1; row < this.rows; row += 1) {
           this.grid[row] = this.blankRow();
         }
@@ -134,7 +135,8 @@ export class VtScreen {
       }
       case "K": {
         const line = this.row(this.cursorRow);
-        for (let col = this.cursorCol; col < this.cols; col += 1) line[col] = " ";
+        for (let col = this.cursorCol; col < this.cols; col += 1)
+          line[col] = " ";
         return;
       }
       default:

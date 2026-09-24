@@ -145,7 +145,10 @@ export class VTerm implements Output {
   }
 
   private handleCSI(params: string, final: string): void {
-    const args = params.length === 0 ? [] : params.split(";").map((p) => parseInt(p, 10) || 0);
+    const args =
+      params.length === 0
+        ? []
+        : params.split(";").map((p) => parseInt(p, 10) || 0);
     const arg = (i: number, def: number) =>
       args[i] === undefined ? def : args[i] || def;
     switch (final) {

@@ -23,11 +23,11 @@
        └───────────────┴────────────────────┴────────────────────┘──────────────┘
 ```
 
-| 채널 | 매체 | 방향 | 동기성 | 나르는 것 |
-| --- | --- | --- | --- | --- |
-| ① RPC | 전용 `MessageChannel` 포트 | 양방향 | 비동기(요청/응답, 알림) | `readLine` 요청(worker→main), `complete` 요청(main→worker), 출력 알림 4종, `ready`/`loadFailed`/`sessionTerminated`, `readInput` 알림 |
-| ② stdin 메일박스 | `SharedArrayBuffer` | main→worker(응답만) | worker `Atomics.wait` 블로킹 | `input()` 한 줄(UTF-8 청크) 또는 취소·오류 표식 |
-| ③ interrupt buffer | `SharedArrayBuffer` `Int32Array(4)` | main→worker(신호), worker→main(ack) | pyodide 폴링(비동기) | SIGINT(2)·ack·요청 번호 |
+| 채널               | 매체                                | 방향                                | 동기성                       | 나르는 것                                                                                                                             |
+| ------------------ | ----------------------------------- | ----------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| ① RPC              | 전용 `MessageChannel` 포트          | 양방향                              | 비동기(요청/응답, 알림)      | `readLine` 요청(worker→main), `complete` 요청(main→worker), 출력 알림 4종, `ready`/`loadFailed`/`sessionTerminated`, `readInput` 알림 |
+| ② stdin 메일박스   | `SharedArrayBuffer`                 | main→worker(응답만)                 | worker `Atomics.wait` 블로킹 | `input()` 한 줄(UTF-8 청크) 또는 취소·오류 표식                                                                                       |
+| ③ interrupt buffer | `SharedArrayBuffer` `Int32Array(4)` | main→worker(신호), worker→main(ack) | pyodide 폴링(비동기)         | SIGINT(2)·ack·요청 번호                                                                                                               |
 
 원칙:
 
@@ -113,32 +113,32 @@ apps/
 
 ```ts
 // main 쪽 진입점
-export function createRepl(options: ReplOptions): ReplHandle
+export function createRepl(options: ReplOptions): ReplHandle;
 
 interface ReplOptions {
-  terminal: Terminal                       // @xterm/xterm. 호출자가 만들고 dispose한다
-  createWorker: () => Worker               // 리셋마다 다시 호출된다
-  pyodide?: { indexURL?: string }          // 기본 CDN `DEFAULT_PYODIDE_INDEX_URL` = https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/ (13-version-upgrade.md 13.1)
-  topLevelAwait?: boolean                  // 기본 false. 바꾸려면 reset()
-  onStatus?: (s: ReplStatus) => void       // 'loading' | 'ready' | 'load-failed' | 'not-isolated' | 'terminated' | 'crashed'
-  onCrash?: (message: string) => void
-  copyOnSelect?: boolean                   // 기본 true. 선택 시 자동 복사(RD-017). 바꾸려면 setCopyOnSelect()
-  onCopy?: (result: CopyResult) => void    // 복사 시도마다. { ok: true; chars } | { ok: false; error } (RD-017)
+  terminal: Terminal; // @xterm/xterm. 호출자가 만들고 dispose한다
+  createWorker: () => Worker; // 리셋마다 다시 호출된다
+  pyodide?: { indexURL?: string }; // 기본 CDN `DEFAULT_PYODIDE_INDEX_URL` = https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/ (13-version-upgrade.md 13.1)
+  topLevelAwait?: boolean; // 기본 false. 바꾸려면 reset()
+  onStatus?: (s: ReplStatus) => void; // 'loading' | 'ready' | 'load-failed' | 'not-isolated' | 'terminated' | 'crashed'
+  onCrash?: (message: string) => void;
+  copyOnSelect?: boolean; // 기본 true. 선택 시 자동 복사(RD-017). 바꾸려면 setCopyOnSelect()
+  onCopy?: (result: CopyResult) => void; // 복사 시도마다. { ok: true; chars } | { ok: false; error } (RD-017)
 }
 
 interface ReplHandle {
-  reset(options?: { topLevelAwait?: boolean }): void   // worker 교체. 화면 유지
-  runSource(code: string): Promise<RunResult>           // REPL globals에서 코드 실행, 치던 줄 보존(RD-022a, 02 5.6)
-  readonly busy: boolean                                // 지금 runSource()를 부르면 RunRejectedError("busy")인가
-  setCopyOnSelect(on: boolean): void                    // 선택 시 자동 복사 on/off. 리셋 없음(RD-017)
-  dispose(): void                                       // worker 종료·리스너 해제. Terminal은 호출자가 소유
-  readonly crossOriginIsolated: boolean                 // 거짓이면 worker가 없다(경고만 낸 상태)
+  reset(options?: { topLevelAwait?: boolean }): void; // worker 교체. 화면 유지
+  runSource(code: string): Promise<RunResult>; // REPL globals에서 코드 실행, 치던 줄 보존(RD-022a, 02 5.6)
+  readonly busy: boolean; // 지금 runSource()를 부르면 RunRejectedError("busy")인가
+  setCopyOnSelect(on: boolean): void; // 선택 시 자동 복사 on/off. 리셋 없음(RD-017)
+  dispose(): void; // worker 종료·리스너 해제. Terminal은 호출자가 소유
+  readonly crossOriginIsolated: boolean; // 거짓이면 worker가 없다(경고만 낸 상태)
 }
 
 // `RunRejectedError`·`RunResult`·`RunRejectedReason`은 core의 것을 repl `.`에서 다시 내보낸다(`instanceof` 성립)
 
 // worker 쪽 진입점(앱의 얇은 worker 파일이 부른다)
-export function runReplWorker(): void                   // '@cp949/runo-pyodide-repl/worker'
+export function runReplWorker(): void; // '@cp949/runo-pyodide-repl/worker'
 ```
 
 `ReplOptions`는 `terminal`·`createWorker`(필수)·`pyodide?`·`onStatus?`·`onCrash?`(RD-010)·`topLevelAwait?`(RD-012, 기본 `false`, `=== true`만 켠다)·`copyOnSelect?`·`onCopy?`(RD-017, 기본 `true`·`=== false`일 때만 끈다, `06-editing.md` 6.6)이고 `ReplHandle`은 `dispose()`·`reset(options?)`·`setCopyOnSelect(on)`(RD-017, 세션·화면에 영향 없음, `disposed` 뒤 no-op)·`crossOriginIsolated`·`runSource(code)`·`busy`(RD-022a, 규칙은 `02-console-core.md` 5.6)다. 선택 복사 리스너는 핸들 수명이라 `reset()`이 건드리지 않고 `dispose()`가 뗀다(`selectionCopy.dispose()`는 `session.terminate()` 뒤, `readline.dispose()` 앞). RD-003·004의 임시 `readLine(prompt)` 핸들 API는 RD-005에서 빠졌다. 줄 읽기는 worker가 보내는 `readLine` 요청이 유일한 경로다. `onStatus`는 `loading`(`createRepl` 반환 전에 동기로)·`ready`·`load-failed`·`not-isolated`·`terminated`(`sessionTerminated` 알림)를 발행하고 `crashed`는 RD-010이 발행한다. `sessionTerminated`는 터미널에 쓰지 않고 worker도 종료하지 않는다. `ready`의 `pyodideVersion`은 main이 `console.info`로만 남긴다. 로드 실패는 worker를 죽이지 않고 main도 terminate하지 않는다. `dispose()`는 `rpc.dispose()` → `worker.terminate()` → `readline.dispose()` 순서이고 두 번 불러도 안전하다.
@@ -157,28 +157,36 @@ core는 `private`이고 이 인터페이스는 공개 API로 확정하지 않았
 
 ```ts
 // main 쪽: '@cp949/runo-pyodide-core'
-export function startCoreSession(options: CoreSessionOptions): CoreSession
+export function startCoreSession(options: CoreSessionOptions): CoreSession;
 interface CoreSessionOptions {
-  createWorker: () => Worker            // 세션마다 호출
-  indexURL: string                      // 끝 '/'가 붙은 pyodide CDN 위치
-  interruptBuffer: Int32Array           // 핸들 소유, 세션을 넘어 산다
-  interruptSender: InterruptSender      // 핸들 소유
-  driver: MainDriver                    // 화면 상호작용 (아래)
-  output: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void   // Python stdout·stderr 원문
-  onStatus: (s: 'ready' | 'load-failed' | 'terminated' | 'crashed') => void
-  onCrash?: (message: string) => void
+  createWorker: () => Worker; // 세션마다 호출
+  indexURL: string; // 끝 '/'가 붙은 pyodide CDN 위치
+  interruptBuffer: Int32Array; // 핸들 소유, 세션을 넘어 산다
+  interruptSender: InterruptSender; // 핸들 소유
+  driver: MainDriver; // 화면 상호작용 (아래)
+  output: (chunk: { stream: "stdout" | "stderr"; text: string }) => void; // Python stdout·stderr 원문
+  onStatus: (s: "ready" | "load-failed" | "terminated" | "crashed") => void;
+  onCrash?: (message: string) => void;
 }
-interface CoreSession { pythonRunning(): boolean; endSession(): void; terminate(): void; readonly ended: boolean; call(name, ...args): Promise<T> }
+interface CoreSession {
+  pythonRunning(): boolean;
+  endSession(): void;
+  terminate(): void;
+  readonly ended: boolean;
+  call(name, ...args): Promise<T>;
+}
 // 그 밖에 프로토콜: postInitFrame·InitFrame, SIGNAL·ACK·SEQ·createInterruptBuffer·signalInterrupt, createInterruptSender, createRpc,
 // createStdinMailbox·createMailboxWriter, composeRpcHandlers, createOutputTail, CORE_MAIN_HANDLER_NAMES
 
 // 실행 핸들(RD-022, 14-runner.md 14.3): UI 비의존
-export function createRunner(options: RunnerOptions): RunnerHandle   // { run, stop, interrupt, reset, dispose, status }
-export class RunRejectedError extends Error { readonly reason: 'busy' | 'unavailable' | 'disposed' | 'crashed' }
+export function createRunner(options: RunnerOptions): RunnerHandle; // { run, stop, interrupt, reset, dispose, status }
+export class RunRejectedError extends Error {
+  readonly reason: "busy" | "unavailable" | "disposed" | "crashed";
+}
 // 타입 RunnerOptions·RunnerHandle·RunnerStatus·RunResult·RunOutcome·StopResult·RunRejectedReason·InputProvider
 
 // worker 쪽: '@cp949/runo-pyodide-core/worker'
-export function runWorker(options: { driver: WorkerDriver }): void
+export function runWorker(options: { driver: WorkerDriver }): void;
 // 실행 driver(RD-022): runDriver(WorkerDriver<RunDriverOptions>), 타입 RunDriverOptions·RunOutcome
 // 그 밖에: bootWorker, parseInitFrame, InitFrame, createRpc, composeRpcHandlers, createMailboxReader,
 // acknowledgeInterrupt·consumeInterrupt·discardPendingInterrupt·hasPendingInterrupt·readRequestSeq·signalInterrupt,
@@ -343,13 +351,15 @@ RD-001에서 클린 체크아웃(`dist` 없음)으로 재현한 결과다.
 
 ```ts
 // '@cp949/runo-pyodide-react'   (RD-024, private, 진입점 하나)
-export function PythonRunner(props: PythonRunnerProps): JSX.Element   // terminal createTerminalRunner
-export function PythonRepl(props: PythonReplProps): JSX.Element       // repl createRepl
-export function usePythonRunner(options: UsePythonRunnerOptions): UsePythonRunnerResult // core createRunner, xterm 없음
+export function PythonRunner(props: PythonRunnerProps): JSX.Element; // terminal createTerminalRunner
+export function PythonRepl(props: PythonReplProps): JSX.Element; // repl createRepl
+export function usePythonRunner(
+  options: UsePythonRunnerOptions,
+): UsePythonRunnerResult; // core createRunner, xterm 없음
 // PythonRunnerHandle = { run, stop, reset, clear, setCopyOnSelect, focus, readonly status }
 // PythonReplHandle   = { runSource, reset, setCopyOnSelect, focus, readonly busy, readonly crossOriginIsolated }
 // UsePythonRunnerResult = { status, run, stop, reset, interrupt, busy }
-export { RunRejectedError }                                            // core의 것을 다시 내보낸다(같은 클래스)
+export { RunRejectedError }; // core의 것을 다시 내보낸다(같은 클래스)
 // 타입 PythonRunnerProps·PythonReplProps·UsePythonRunnerOptions·InputProvider·OutputChunk·RunRejectedReason·RunResult·RunnerStatus·StopResult·ReplStatus·CopyResult
 ```
 

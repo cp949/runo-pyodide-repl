@@ -9,7 +9,11 @@
 // 종료용 공백 줄(괄호를 닫지 않고 블록을 끝내는 빈 Enter)은 벤더 `skipBlankHistory`가 걸러
 // `historyEntry`를 부르지 않는다 — 그 경우 진행형 항목은 직전 줄까지 기록된 상태 그대로 남는다
 // (항목 불변, 별도 처리 불필요).
-import { InputType, type Input, type Readline } from "@cp949/runo-xterm-readline";
+import {
+  InputType,
+  type Input,
+  type Readline,
+} from "@cp949/runo-xterm-readline";
 import type { ReplReadOptions } from "./read-options";
 
 export interface BlockHistory {

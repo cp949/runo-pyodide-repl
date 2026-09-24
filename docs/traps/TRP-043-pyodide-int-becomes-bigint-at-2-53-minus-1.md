@@ -14,5 +14,5 @@
 
 ## 탐지/회피
 
-- 결과 타입이 `number`여야 하면 Python 쪽에서 범위를 줄인 뒤 넘기고(`run-driver.py`의 `_exit_status`: int32 밖은 `& 0xFF`), TS에서 `typeof === "number"`로 검증한다(`run-driver.ts`의 `toOutcome`). 
+- 결과 타입이 `number`여야 하면 Python 쪽에서 범위를 줄인 뒤 넘기고(`run-driver.py`의 `_exit_status`: int32 밖은 `& 0xFF`), TS에서 `typeof === "number"`로 검증한다(`run-driver.ts`의 `toOutcome`).
 - 시험은 경계를 넣는다: `SystemExit(2**53 - 1)`·`2**53`·`-(2**53 - 1)`·`2**70 + 7`(`run-driver-classify.test.ts`).

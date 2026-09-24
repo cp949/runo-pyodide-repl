@@ -68,19 +68,22 @@ describe("parseInitFrame", () => {
     { label: "null", driver: null },
     { label: "undefined 값(키는 있음)", driver: undefined },
     { label: "문자열", driver: "opts" },
-  ])("driver 필드의 값은 검증하지 않고 그대로 통과시킨다: $label", ({ driver }) => {
-    const frame = { ...createFrame(), driver };
+  ])(
+    "driver 필드의 값은 검증하지 않고 그대로 통과시킨다: $label",
+    ({ driver }) => {
+      const frame = { ...createFrame(), driver };
 
-    expect(parseInitFrame(frame)).toBe(frame);
-  });
+      expect(parseInitFrame(frame)).toBe(frame);
+    },
+  );
 
   it("옛 모양(최상위 topLevelAwait, driver 필드 없음)은 driver 필드 오류로 거부한다", () => {
     const frame: Partial<InitFrame> = createFrame();
     delete frame.driver;
 
-    expect(() =>
-      parseInitFrame({ ...frame, topLevelAwait: false }),
-    ).toThrow(/driver/);
+    expect(() => parseInitFrame({ ...frame, topLevelAwait: false })).toThrow(
+      /driver/,
+    );
   });
 
   // 비공유 뷰는 postMessage의 구조적 복제에서 메모리가 복사돼 main과 worker가 서로 다른 메모리를 본다. 오류 없이 통신만

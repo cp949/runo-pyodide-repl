@@ -21,7 +21,7 @@ export class Tty {
     row: number,
     tabWidth: number,
     out: Output,
-    anchorRow = 0
+    anchorRow = 0,
   ) {
     this.tabWidth = tabWidth;
     this.col = col;
@@ -90,7 +90,7 @@ export class Tty {
     const pos = line.pos;
     const cursor = this.calculatePosition(
       line.buf.slice(0, line.pos),
-      promptSize
+      promptSize,
     );
     const end =
       pos === line.buf.length
@@ -192,7 +192,7 @@ export class Tty {
     line: LineBuffer,
     oldLayout: Layout,
     newLayout: Layout,
-    highlighter: Highlighter
+    highlighter: Highlighter,
   ) {
     // Hide the cursor for the duration of the refresh sequence. The
     // intermediate cursor-up / row-rewrite / cursor-down steps below
@@ -212,7 +212,7 @@ export class Tty {
     line: LineBuffer,
     oldLayout: Layout,
     newLayout: Layout,
-    highlighter: Highlighter
+    highlighter: Highlighter,
   ) {
     const oldScroll = oldLayout.scrollOffset ?? 0;
     const newScroll = newLayout.scrollOffset ?? 0;
@@ -238,7 +238,7 @@ export class Tty {
     if (desiredVisible > currentBelowAnchor && this.anchorRow > 0) {
       const scrollUp = Math.min(
         desiredVisible - currentBelowAnchor,
-        this.anchorRow
+        this.anchorRow,
       );
       const downBy = this.row - 1 - physicalRow;
       if (downBy > 0) this.write(`\x1b[${downBy}B`);
@@ -268,7 +268,7 @@ export class Tty {
     if (allRows.length <= viewport) effectiveScroll = 0;
     effectiveScroll = Math.max(
       0,
-      Math.min(effectiveScroll, allRows.length - viewport)
+      Math.min(effectiveScroll, allRows.length - viewport),
     );
     newLayout.scrollOffset = effectiveScroll;
     const start = effectiveScroll;
@@ -303,7 +303,7 @@ export class Tty {
   public eraseLine(layout: Layout) {
     const viewportRow = Math.max(
       layout.cursor.row - (layout.scrollOffset ?? 0),
-      0
+      0,
     );
     if (viewportRow > 0) this.write(`\x1b[${viewportRow}A`);
     this.write("\r\x1b[J");

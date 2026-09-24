@@ -2,15 +2,15 @@
 
 `res_import.json`·`res_import_extra.json`·`cases_import.json`·`gate_corpus.json`·`gate_corpus.meta.json`·`native_vs_pyodide.json`·`native_vs_pyodide.meta.json`·`SUMMARY-import.md`는 `/work/cp949/pyodide-samples/_works/_completed/20260921-01-rd-016a-import-completion/reference/measure-3.14/`에서 그대로 복사했다(RD-016 그릴링 확정 2, 재측정 없음). 실제 CPython 3.14.4 REPL(pty 24×80, `TERM=xterm`, 빈 임시 cwd)에서 측정한 모듈 완성 결과다.
 
-| 파일 | 내용 | 쓰는 곳 |
-| --- | --- | --- |
-| `res_import.json` | 케이스 A01~A37의 pty 화면 행·커서(Tab 단계별)와 후보 로그. 키는 입력 텍스트 | `worker/module-completion-parity.test.ts`(A01~A36. A37은 quirk 단위) |
-| `res_import_extra.json` | 케이스 X01~X04(스템·파싱 불일치 quirk) | 같은 시험 |
-| `cases_import.json` | 케이스 정의(입력 텍스트·Tab 횟수)와 `setup` 5줄 | 같은 시험(setup) |
-| `native_vs_pyodide.json` | 95줄의 네이티브(3.14.4)·pyodide(314.0.7, zip 보정 전) `ModuleCompleter` 결과 대조 | 편차 18·19 근거 |
-| `gate_corpus.json` | 게이트 코퍼스 53줄과 분류 | `terminal/import-gate.test.ts`·`worker/complete-source.test.ts`(리터럴로 옮겨 씀) |
-| `*.meta.json` | 측정 환경 요약(`cwd`·경로는 실행마다 다르다) | 참고 |
-| `SUMMARY-import.md` | 측정 요약 | 참고 |
+| 파일                     | 내용                                                                              | 쓰는 곳                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `res_import.json`        | 케이스 A01~A37의 pty 화면 행·커서(Tab 단계별)와 후보 로그. 키는 입력 텍스트       | `worker/module-completion-parity.test.ts`(A01~A36. A37은 quirk 단위)              |
+| `res_import_extra.json`  | 케이스 X01~X04(스템·파싱 불일치 quirk)                                            | 같은 시험                                                                         |
+| `cases_import.json`      | 케이스 정의(입력 텍스트·Tab 횟수)와 `setup` 5줄                                   | 같은 시험(setup)                                                                  |
+| `native_vs_pyodide.json` | 95줄의 네이티브(3.14.4)·pyodide(314.0.7, zip 보정 전) `ModuleCompleter` 결과 대조 | 편차 18·19 근거                                                                   |
+| `gate_corpus.json`       | 게이트 코퍼스 53줄과 분류                                                         | `terminal/import-gate.test.ts`·`worker/complete-source.test.ts`(리터럴로 옮겨 씀) |
+| `*.meta.json`            | 측정 환경 요약(`cwd`·경로는 실행마다 다르다)                                      | 참고                                                                              |
+| `SUMMARY-import.md`      | 측정 요약                                                                         | 참고                                                                              |
 
 ## 주의
 

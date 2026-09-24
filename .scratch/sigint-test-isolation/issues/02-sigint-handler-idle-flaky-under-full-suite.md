@@ -31,7 +31,7 @@ RD-013(자동 들여쓰기) 범위와 무관한 파일이라 그 RD에서는 다
 - (2026-09-23, RD-017 DELTA-02 리뷰) 위 "판단 근거"의 전제가 틀렸다는 것을 실측으로 확인했다: **단독
   실행이 오히려 더 자주 실패한다**(단독 5회 중 4회 실패 vs 전체 스위트 3회 중 1회 실패) — "전체 스위트
   병렬 실행에서만 나는 리소스 경합"이 아니다. 오류 문구는 `asyncio.exceptions.InvalidStateError: invalid
-  state`로, 타이밍 문턱보다 Pyodide asyncio 내부 경쟁 조건으로 보인다. RD-017 변경(커밋 `79ccdb0` 이전
+state`로, 타이밍 문턱보다 Pyodide asyncio 내부 경쟁 조건으로 보인다. RD-017 변경(커밋 `79ccdb0` 이전
   코드에서도 재현)과는 무관 — RD-017 범위 밖이라 이 라운드에서 고치지 않는다. 다음에 이 파일을 만질 때는
   "전체 스위트에서만" 가설을 버리고 단독 실행 반복(N≥5)으로 재현율부터 다시 잰다.
 
@@ -53,13 +53,13 @@ RD-013(자동 들여쓰기) 범위와 무관한 파일이라 그 RD에서는 다
   `asyncio.futures._set_result_unless_cancelled(fut, result)`가 `if fut.cancelled(): return`을 통과한 직후 pyodide가 SIGINT를
   폴링 → 핸들러 규칙 ③(사용자 프레임 없음 + 실행 중)이 그 자리에서 `interrupt_idle()`로 대기 중인 guard Task를 취소 →
   `Task.cancel`이 기다리던 sleep future를 즉시 취소 → 콜백으로 돌아와 `fut.set_result(result)`가 `InvalidStateError: invalid
-  state` → WebLoop가 `Exception in callback _set_result_unless_cancelled() …`를 stderr에 찍는다. 깨우기 자체는 성공해 기대
+state` → WebLoop가 `Exception in callback _set_result_unless_cancelled() …`를 stderr에 찍는다. 깨우기 자체는 성공해 기대
   트레이스백은 뒤에 그대로 온다. CPython 표준 라이브러리는 이벤트 루프 스레드 안에서만 이 검사-설정이 원자적이라고 가정한다.
   Python 신호 핸들러는 bytecode 경계에서 돌므로, 핸들러 안에서 asyncio 상태를 바꾼 우리 설계가 원인이다(Pyodide 버그 아님).
 - **B. `run_sync` 래퍼의 Task 생성 전 눌림이 never-awaited 경고를 남긴다.** 래퍼의 `asyncio.ensure_future(guard(awaitable))`가
   `guard` 코루틴을 만든 뒤 Task를 만들기 전에 SIGINT가 처리되면 규칙 ①이 그 자리에서 `KeyboardInterrupt`를 올리고, `guard`·
   awaitable 코루틴이 await되지 않은 채 버려진다 → 트레이스백 생성 중 GC가 `RuntimeWarning: coroutine
-  'install.<locals>.guard' was never awaited`·`coroutine 'sleep' was never awaited`를 트레이스백 앞에 찍는다. 같은 시험을 같은
+'install.<locals>.guard' was never awaited`·`coroutine 'sleep' was never awaited`를 트레이스백 앞에 찍는다. 같은 시험을 같은
   단언으로 깨는 두 번째 원인이다(자연 발생은 드묾: 계측 1/40, 위상 스윕 2/180).
 
 ### 자연 재현율은 SIGINT 폴링 위상이 정한다
@@ -93,7 +93,7 @@ RD-013(자동 들여쓰기) 범위와 무관한 파일이라 그 RD에서는 다
   - `감시 타이머가 깨운 대기의 취소 처리 중 소비된 SIGINT는 KeyboardInterrupt를 한 번 더 만들지 않는다`: `woken` 검사를 뺀
     변이에서 3/3 실패(`expected 2 to be 1`).
 - 양성 대조: 제품 코드 수정만 되돌리면 RED-A 5/5, RED-B 5/5 실패. B의 소유 검사를 빼면 기존 시험 `래퍼가 부른 라이브러리
-  프레임에서 올라온 KeyboardInterrupt도 우리 프레임 없이 보인다`가 실패한다(기존 시험이 그 분기를 지킨다).
+프레임에서 올라온 KeyboardInterrupt도 우리 프레임 없이 보인다`가 실패한다(기존 시험이 그 분기를 지킨다).
 - 반복: 시험 파일 단독 20/20 통과, 위상 k=34 N=20 20/20(수정 전 8/20 실패), 위상 스윕 k=0..59 ×3 180/180, 전체 스위트
   (`pnpm exec turbo run test --force --ui=stream`) 5/5 통과. `pnpm check-types`·`pnpm lint` 통과.
 - 브라우저(`apps/demo/e2e/`): `ctrl-c-check` 10/10, `prompt-cancel-check` 23/23, `input-cancel-check` 26/26, `tla-check` 16/16,

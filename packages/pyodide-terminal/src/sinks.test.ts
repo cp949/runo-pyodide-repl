@@ -207,18 +207,90 @@ describe("꼬리 추적", () => {
 
 describe("열린 읽기 위 출력의 완성 행·접두 분리(`splitAboveRead`)", () => {
   test.each([
-    { name: "개행으로 끝난 조각은 전부 완성 행이다", prefix: "", text: "tick\n", lines: "tick\n", next: "" },
-    { name: "개행 없는 조각은 전부 접두다", prefix: "", text: "tick", lines: "", next: "tick" },
-    { name: "마지막 개행까지가 완성 행이고 그 뒤가 접두다", prefix: "", text: "t1\nt2", lines: "t1\n", next: "t2" },
-    { name: "접두는 마지막 `\\r` 뒤만 남는다", prefix: "", text: "a\rb", lines: "", next: "b" },
-    { name: "앞 접두 뒤 `\\r` 진행률은 접두를 제자리에서 바꾼다", prefix: "tick", text: "\r50%", lines: "", next: "50%" },
-    { name: "완성 행 안의 `\\r`은 그대로 두고 마지막 행만 `\\r` 규칙을 따른다", prefix: "", text: "a\nb\rc", lines: "a\n", next: "c" },
-    { name: "줄 경계를 넘어 열린 SGR을 접두 앞에 이어 붙인다", prefix: "", text: "\x1b[31mred\nmore", lines: "\x1b[31mred\n", next: "\x1b[31mmore" },
-    { name: "앞 접두에 열린 SGR도 새 접두로 이어진다", prefix: "a\x1b[32m", text: "b\nc", lines: "a\x1b[32mb\n", next: "\x1b[32mc" },
-    { name: "앞 접두는 완성 행 앞에 이어 붙는다", prefix: "tick", text: " tock\n", lines: "tick tock\n", next: "" },
-    { name: "빈 조각은 앞 접두를 그대로 둔다", prefix: "tick", text: "", lines: "", next: "tick" },
-    { name: "둘 다 비면 둘 다 빈 문자열이다", prefix: "", text: "", lines: "", next: "" },
-    { name: "`\\r\\n` 줄끝도 완성 행에 든다", prefix: "", text: "l1\r\nl2", lines: "l1\r\n", next: "l2" },
+    {
+      name: "개행으로 끝난 조각은 전부 완성 행이다",
+      prefix: "",
+      text: "tick\n",
+      lines: "tick\n",
+      next: "",
+    },
+    {
+      name: "개행 없는 조각은 전부 접두다",
+      prefix: "",
+      text: "tick",
+      lines: "",
+      next: "tick",
+    },
+    {
+      name: "마지막 개행까지가 완성 행이고 그 뒤가 접두다",
+      prefix: "",
+      text: "t1\nt2",
+      lines: "t1\n",
+      next: "t2",
+    },
+    {
+      name: "접두는 마지막 `\\r` 뒤만 남는다",
+      prefix: "",
+      text: "a\rb",
+      lines: "",
+      next: "b",
+    },
+    {
+      name: "앞 접두 뒤 `\\r` 진행률은 접두를 제자리에서 바꾼다",
+      prefix: "tick",
+      text: "\r50%",
+      lines: "",
+      next: "50%",
+    },
+    {
+      name: "완성 행 안의 `\\r`은 그대로 두고 마지막 행만 `\\r` 규칙을 따른다",
+      prefix: "",
+      text: "a\nb\rc",
+      lines: "a\n",
+      next: "c",
+    },
+    {
+      name: "줄 경계를 넘어 열린 SGR을 접두 앞에 이어 붙인다",
+      prefix: "",
+      text: "\x1b[31mred\nmore",
+      lines: "\x1b[31mred\n",
+      next: "\x1b[31mmore",
+    },
+    {
+      name: "앞 접두에 열린 SGR도 새 접두로 이어진다",
+      prefix: "a\x1b[32m",
+      text: "b\nc",
+      lines: "a\x1b[32mb\n",
+      next: "\x1b[32mc",
+    },
+    {
+      name: "앞 접두는 완성 행 앞에 이어 붙는다",
+      prefix: "tick",
+      text: " tock\n",
+      lines: "tick tock\n",
+      next: "",
+    },
+    {
+      name: "빈 조각은 앞 접두를 그대로 둔다",
+      prefix: "tick",
+      text: "",
+      lines: "",
+      next: "tick",
+    },
+    {
+      name: "둘 다 비면 둘 다 빈 문자열이다",
+      prefix: "",
+      text: "",
+      lines: "",
+      next: "",
+    },
+    {
+      name: "`\\r\\n` 줄끝도 완성 행에 든다",
+      prefix: "",
+      text: "l1\r\nl2",
+      lines: "l1\r\n",
+      next: "l2",
+    },
   ])("$name", ({ prefix, text, lines, next }) => {
     expect(splitAboveRead(prefix, text)).toEqual({ lines, prefix: next });
   });
@@ -230,7 +302,10 @@ describe("열린 읽기 위 출력의 완성 행·접두 분리(`splitAboveRead`
  */
 function setupReading(options: { cols?: number; asyncWrite?: boolean } = {}) {
   const cols = options.cols ?? 40;
-  const fake = createFakeTerminal({ cols, asyncWrite: options.asyncWrite ?? false });
+  const fake = createFakeTerminal({
+    cols,
+    asyncWrite: options.asyncWrite ?? false,
+  });
   const vt = new VtScreen(cols, 24);
   attachVtScreen(fake, vt);
   const readline = new Readline({ persist: false });
@@ -294,7 +369,9 @@ describe("열린 읽기 중 출력은 입력줄 위에 쓰고 같은 읽기를 �
   });
 
   test("재그리기 콜백 전에 연속으로 온 조각은 순서대로 쌓이고 마지막 접두로 입력줄 하나만 그린다", () => {
-    const { fake, vt, sinks, printAboveRaw, openRead } = setupReading({ asyncWrite: true });
+    const { fake, vt, sinks, printAboveRaw, openRead } = setupReading({
+      asyncWrite: true,
+    });
     openRead();
 
     sinks.write("tick");
@@ -316,7 +393,10 @@ describe("열린 읽기 중 출력은 입력줄 위에 쓰고 같은 읽기를 �
 
     sinks.writeErrorRaw("e1\ne2");
 
-    expect(printAboveRaw).toHaveBeenCalledExactlyOnceWith(`${RED}e1\n`, `${RED}e2${RESET}`);
+    expect(printAboveRaw).toHaveBeenCalledExactlyOnceWith(
+      `${RED}e1\n`,
+      `${RED}e2${RESET}`,
+    );
     expect(vt.screen()).toBe("e1\ne2> abc");
   });
 
@@ -337,7 +417,10 @@ describe("열린 읽기 중 출력은 입력줄 위에 쓰고 같은 읽기를 �
 
     sinks.writeError("E");
 
-    expect(printAboveRaw).toHaveBeenCalledExactlyOnceWith(`${RED}E${RESET}\n`, "");
+    expect(printAboveRaw).toHaveBeenCalledExactlyOnceWith(
+      `${RED}E${RESET}\n`,
+      "",
+    );
     expect(vt.screen()).toBe("E\n> abc");
   });
 
@@ -383,18 +466,92 @@ describe("열린 읽기 중 출력은 입력줄 위에 쓰고 같은 읽기를 �
  */
 describe("열린 읽기 중 `\\r`로 끝나는 조각(진행률)", () => {
   test.each([
-    { name: "`\\r`로 끝난 조각은 그 앞 구간을 접두로 보관하고 이어 쓸 원문을 준다", prefix: "", text: "100%\r", lines: "", next: "100%", resume: "100%\r" },
-    { name: "여러 `\\r` 구간 뒤 `\\r`로 끝나면 마지막으로 보이는 구간이 접두다", prefix: "", text: "10%\r20%\r", lines: "", next: "20%", resume: "20%\r" },
-    { name: "보관한 원문 뒤 `\\n`은 그 행을 완성 행으로 쓴다", prefix: "100%\r", text: "\n", lines: "100%\r\n", next: "", resume: undefined },
-    { name: "보관한 원문 뒤 조각은 행 머리부터 새 접두가 된다", prefix: "10%\r", text: "20%\r", lines: "", next: "20%", resume: "20%\r" },
-    { name: "`\\r` 뒤 SGR만 남아도 그 앞 구간을 색째 접두로 보관한다", prefix: "", text: "\x1b[31m100%\r\x1b[0m", lines: "", next: "\x1b[31m100%", resume: "\x1b[31m100%\r\x1b[0m" },
-    { name: "완성 행 뒤 `\\r`로 끝난 마지막 행만 보관한다", prefix: "", text: "done\n50%\r", lines: "done\n", next: "50%", resume: "50%\r" },
-    { name: "줄 경계를 넘어 열린 SGR은 보관한 접두 앞에도 이어 붙인다", prefix: "", text: "\x1b[31mred\n50%\r", lines: "\x1b[31mred\n", next: "\x1b[31m50%", resume: "\x1b[31m50%\r" },
-    { name: "`\\r` 뒤에 빈 구간이 이어져도 마지막으로 보이는 구간까지 거슬러 보관한다", prefix: "50%\r", text: "\r", lines: "", next: "50%", resume: "50%\r\r" },
-    { name: "보이는 구간이 없으면 접두는 비고 원문도 없다", prefix: "", text: "\r", lines: "", next: "", resume: undefined },
-    { name: "`\\r` 뒤 SGR이 아닌 제어 시퀀스는 글자로 보고 꼬리 규칙 그대로다", prefix: "", text: "100%\r\x1b[K", lines: "", next: "\x1b[K", resume: undefined },
+    {
+      name: "`\\r`로 끝난 조각은 그 앞 구간을 접두로 보관하고 이어 쓸 원문을 준다",
+      prefix: "",
+      text: "100%\r",
+      lines: "",
+      next: "100%",
+      resume: "100%\r",
+    },
+    {
+      name: "여러 `\\r` 구간 뒤 `\\r`로 끝나면 마지막으로 보이는 구간이 접두다",
+      prefix: "",
+      text: "10%\r20%\r",
+      lines: "",
+      next: "20%",
+      resume: "20%\r",
+    },
+    {
+      name: "보관한 원문 뒤 `\\n`은 그 행을 완성 행으로 쓴다",
+      prefix: "100%\r",
+      text: "\n",
+      lines: "100%\r\n",
+      next: "",
+      resume: undefined,
+    },
+    {
+      name: "보관한 원문 뒤 조각은 행 머리부터 새 접두가 된다",
+      prefix: "10%\r",
+      text: "20%\r",
+      lines: "",
+      next: "20%",
+      resume: "20%\r",
+    },
+    {
+      name: "`\\r` 뒤 SGR만 남아도 그 앞 구간을 색째 접두로 보관한다",
+      prefix: "",
+      text: "\x1b[31m100%\r\x1b[0m",
+      lines: "",
+      next: "\x1b[31m100%",
+      resume: "\x1b[31m100%\r\x1b[0m",
+    },
+    {
+      name: "완성 행 뒤 `\\r`로 끝난 마지막 행만 보관한다",
+      prefix: "",
+      text: "done\n50%\r",
+      lines: "done\n",
+      next: "50%",
+      resume: "50%\r",
+    },
+    {
+      name: "줄 경계를 넘어 열린 SGR은 보관한 접두 앞에도 이어 붙인다",
+      prefix: "",
+      text: "\x1b[31mred\n50%\r",
+      lines: "\x1b[31mred\n",
+      next: "\x1b[31m50%",
+      resume: "\x1b[31m50%\r",
+    },
+    {
+      name: "`\\r` 뒤에 빈 구간이 이어져도 마지막으로 보이는 구간까지 거슬러 보관한다",
+      prefix: "50%\r",
+      text: "\r",
+      lines: "",
+      next: "50%",
+      resume: "50%\r\r",
+    },
+    {
+      name: "보이는 구간이 없으면 접두는 비고 원문도 없다",
+      prefix: "",
+      text: "\r",
+      lines: "",
+      next: "",
+      resume: undefined,
+    },
+    {
+      name: "`\\r` 뒤 SGR이 아닌 제어 시퀀스는 글자로 보고 꼬리 규칙 그대로다",
+      prefix: "",
+      text: "100%\r\x1b[K",
+      lines: "",
+      next: "\x1b[K",
+      resume: undefined,
+    },
   ])("$name", ({ prefix, text, lines, next, resume }) => {
-    expect(splitAboveRead(prefix, text)).toEqual({ lines, prefix: next, resume });
+    expect(splitAboveRead(prefix, text)).toEqual({
+      lines,
+      prefix: next,
+      resume,
+    });
   });
 
   test("기준: 열린 읽기가 없으면 `50%\\r`의 50%가 화면에 보인다", () => {
@@ -480,28 +637,31 @@ describe("열린 읽기 중 `\\r`로 끝나는 조각(진행률)", () => {
     { name: "`\\r`만", color: "", chunk: "\r", lines: "50%\r\n" },
     { name: "SGR 끄기만", color: "", chunk: RESET, lines: `50%\r${RESET}\n` },
     { name: "색 켜기", color: RED, chunk: "\x1b[32m", lines: undefined },
-  ])("`50%\\r` 뒤 보이지 않는 조각이 이어져도 보관 원문이 자라지 않는다($name)", ({ color, chunk, lines }) => {
-    /** `50%\r` 뒤 `chunk`를 n번, 이어 `\n`을 쓴 뒤 마지막 완성 행과 화면. */
-    const run = (n: number) => {
-      const { vt, printAboveRaw, sinks, openRead } = setupReading();
-      openRead();
-      sinks.write(`${color}50%\r`);
-      for (let i = 0; i < n; i += 1) sinks.write(chunk);
-      sinks.write("\n");
-      const [last, prefix] = printAboveRaw.mock.calls.at(-1) ?? [];
-      return { last, prefix, screen: vt.screen() };
-    };
+  ])(
+    "`50%\\r` 뒤 보이지 않는 조각이 이어져도 보관 원문이 자라지 않는다($name)",
+    ({ color, chunk, lines }) => {
+      /** `50%\r` 뒤 `chunk`를 n번, 이어 `\n`을 쓴 뒤 마지막 완성 행과 화면. */
+      const run = (n: number) => {
+        const { vt, printAboveRaw, sinks, openRead } = setupReading();
+        openRead();
+        sinks.write(`${color}50%\r`);
+        for (let i = 0; i < n; i += 1) sinks.write(chunk);
+        sinks.write("\n");
+        const [last, prefix] = printAboveRaw.mock.calls.at(-1) ?? [];
+        return { last, prefix, screen: vt.screen() };
+      };
 
-    const many = run(100);
-    const more = run(200);
+      const many = run(100);
+      const more = run(200);
 
-    expect(more).toEqual(many);
-    if (lines !== undefined) {
-      expect(many.last).toBe(lines);
-      expect(many.prefix).toBe("");
-    }
-    expect(many.screen).toBe("50%\n> abc");
-  });
+      expect(more).toEqual(many);
+      if (lines !== undefined) {
+        expect(many.last).toBe(lines);
+        expect(many.prefix).toBe("");
+      }
+      expect(many.screen).toBe("50%\n> abc");
+    },
+  );
 });
 
 describe("열린 읽기 중 출력과 꼬리 추적(RD-022b)", () => {
@@ -545,7 +705,9 @@ describe("열린 읽기 중 출력과 꼬리 추적(RD-022b)", () => {
   });
 
   test("`read()` 뒤 그리기 전(write 콜백 전)의 출력은 기존 경로로 쓰고 꼬리에 먹인다", () => {
-    const { readline, sinks, printAboveRaw } = setupReading({ asyncWrite: true });
+    const { readline, sinks, printAboveRaw } = setupReading({
+      asyncWrite: true,
+    });
     void readline.read("> ");
 
     sinks.write("t");

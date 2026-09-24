@@ -10,23 +10,23 @@
 
 ## 13.1 버전 원천과 갱신 명령
 
-| 항목 | 위치 |
-| --- | --- |
-| 원천 | `pnpm-workspace.yaml` `catalog.pyodide`(정확한 버전, 범위 없음) |
-| 소비 | core·repl `package.json` `devDependencies.pyodide: "catalog:"` |
-| 코드 상수 | core `src/pyodide-version.ts`의 `PYODIDE_VERSION`(= `pyodide/package.json`의 `version`), `DEFAULT_PYODIDE_INDEX_URL`(`https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`). repl `src/index.ts`는 `DEFAULT_PYODIDE_INDEX_URL`을 재export한다(공개 이름·값 불변) |
-| `dist` | core `tsdown.config.ts`가 `pyodide/package.json`만 번들에 넣는다(`deps.neverBundle` 정규식 예외 + `deps.alwaysBundle`). 결과는 `version` 문자열 하나만 인라인된다. 런타임 `pyodide` import는 `dist`에 없다(`scripts/check-dist.mjs`) |
-| 시험 기대값 | core 상수를 import한다. 버전 리터럴은 코드·시험에 두지 않는다(13.8) |
-| tarball | pack·publish 때 pnpm이 `catalog:`를 실제 버전으로 치환한다(`pnpm smoke:pack`이 tarball에 `catalog:`가 남지 않았음을 단언한다) |
+| 항목        | 위치                                                                                                                                                                                                                                                                    |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 원천        | `pnpm-workspace.yaml` `catalog.pyodide`(정확한 버전, 범위 없음)                                                                                                                                                                                                         |
+| 소비        | core·repl `package.json` `devDependencies.pyodide: "catalog:"`                                                                                                                                                                                                          |
+| 코드 상수   | core `src/pyodide-version.ts`의 `PYODIDE_VERSION`(= `pyodide/package.json`의 `version`), `DEFAULT_PYODIDE_INDEX_URL`(`https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`). repl `src/index.ts`는 `DEFAULT_PYODIDE_INDEX_URL`을 재export한다(공개 이름·값 불변) |
+| `dist`      | core `tsdown.config.ts`가 `pyodide/package.json`만 번들에 넣는다(`deps.neverBundle` 정규식 예외 + `deps.alwaysBundle`). 결과는 `version` 문자열 하나만 인라인된다. 런타임 `pyodide` import는 `dist`에 없다(`scripts/check-dist.mjs`)                                    |
+| 시험 기대값 | core 상수를 import한다. 버전 리터럴은 코드·시험에 두지 않는다(13.8)                                                                                                                                                                                                     |
+| tarball     | pack·publish 때 pnpm이 `catalog:`를 실제 버전으로 치환한다(`pnpm smoke:pack`이 tarball에 `catalog:`가 남지 않았음을 단언한다)                                                                                                                                           |
 
 갱신 명령(2026-09-24 pnpm 11.25.0, 매니페스트·lockfile만 복사한 임시 작업공간에서 `--lockfile-only`로 확인):
 
-| 명령 | 결과 |
-| --- | --- |
+| 명령                                                                  | 결과                                                                                                                                                                                                                           |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **`pnpm-workspace.yaml`의 `catalog.pyodide`를 고치고 `pnpm install`** | 지원하는 방법. 특정 버전으로 올리거나 내린다. `pnpm-lock.yaml`의 `catalogs` 절과 `pyodide@<버전>` 항목이 바뀐다. `pnpm install --frozen-lockfile`은 catalog와 lockfile이 다르면 `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`로 실패한다 |
-| `pnpm up -r pyodide --latest` | npm `latest` 태그 버전(2026-09-24 기준 `314.0.7`)으로 catalog 값과 lockfile을 함께 갱신한다(catalog `314.0.6`에서 `314.0.7`로 올라가는 것을 확인). 갱신 뒤 catalog 값의 minor가 바뀌었는지 확인한다 |
-| `pnpm up -r pyodide` | 변경 없음(catalog 정확한 버전을 그대로 둔다) |
-| `pnpm up -r pyodide@<버전>` | **쓰지 않는다.** core·repl `package.json`의 `"catalog:"`를 리터럴 버전으로 덮어써 catalog 원천이 끊긴다 |
+| `pnpm up -r pyodide --latest`                                         | npm `latest` 태그 버전(2026-09-24 기준 `314.0.7`)으로 catalog 값과 lockfile을 함께 갱신한다(catalog `314.0.6`에서 `314.0.7`로 올라가는 것을 확인). 갱신 뒤 catalog 값의 minor가 바뀌었는지 확인한다                            |
+| `pnpm up -r pyodide`                                                  | 변경 없음(catalog 정확한 버전을 그대로 둔다)                                                                                                                                                                                   |
+| `pnpm up -r pyodide@<버전>`                                           | **쓰지 않는다.** core·repl `package.json`의 `"catalog:"`를 리터럴 버전으로 덮어써 catalog 원천이 끊긴다                                                                                                                        |
 
 catalog 값을 바꾼 뒤에는 `pnpm install`이 끝나야 `pyodide/package.json`이 새 버전이 되고 `PYODIDE_VERSION`·`DEFAULT_PYODIDE_INDEX_URL`이 따라온다. `pnpm build`가 `dist`에 새 버전을 인라인한다.
 
@@ -81,20 +81,20 @@ console.warn("[session] pyodide 호환 경고", { expected, actual, degraded, de
 
 ### 시작 거부
 
-| 지점 | 판정 | 동작 |
-| --- | --- | --- |
+| 지점                                                  | 판정                                                                       | 동작                                                                                                       |
+| ----------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `pyodide.setInterruptBuffer`·`pyodide.checkInterrupt` | 로드 직후 두 이름이 함수인가(`worker/compat.ts` `findMissingInterruptApi`) | 없으면 콘솔을 만들기 전에 `loadFailed`(`degraded`가 아니다). Ctrl+C가 성립하지 않아 REPL을 시작하지 않는다 |
 
 ### 저하(`degraded` 식별자 6개)
 
-| 식별자 | 지점 | 탐지 방법 | 꺼지는 기능 | 코드 위치 |
-| --- | --- | --- | --- | --- |
-| `compiler-flags` | `pyconsole._compile.compiler.flags` | `hasCompilerFlags`: 경로가 number인가(접근이 던져도 없는 것으로 본다). 판정은 `setTopLevelAwait` 앞에서 한다 | TLA 스위치(`setTopLevelAwait` 건너뜀, pyodide 기본이 TLA 켬이라 `topLevelAwait: false`는 무시됨), EOF 문법 오류 문구 정규화(원문 표시). 붙여넣기 분할용 `compilerFlags()`는 상수 `TOP_LEVEL_AWAIT_FLAG`(0x2000)로 대체해 분할은 유지 | repl `worker/top-level-await.ts`(`hasCompilerFlags`), `worker/console.ts`(`probe`, `normalizeSyntaxError`, `compilerFlags`) |
-| `incomplete-input-message` | pyodide 콘솔이 EOF에서 끊긴 `1 +`에 내는 문구 `_IncompleteInputError: incomplete input` | 독립 `PyodideConsole({})`에 `1 +`를 push해 `formatted_error`의 마지막 줄이 `INCOMPLETE_INPUT_MARKER`인가(문구를 확인할 수 없으면 기대와 다른 것으로 본다). 실제 콘솔 상태를 바꾸지 않고, `formatsyntaxerror`가 설정하는 `sys.last_*`는 호출 전 값(없었으면 없음)으로 되돌린다. `compiler-flags`와 독립 | 없음(정규화 대상 문구가 바뀌면 정규화가 켜지지 않아 원문이 나온다) | repl `worker/console-helpers.py`(`incomplete_input_message`), `worker/console.ts`(`probe`) |
-| `webloop-handlers` | WebLoop `_keyboard_interrupt_handler`·`_system_exit_handler` | `hasattr`. 하나라도 없으면 둘 다 건너뜀. 상세 이름은 없는 속성 이름 | `KeyboardInterrupt`·`SystemExit` 재보고 억제(중단·`exit()`에서 브라우저 `pageerror`가 다시 난다) | core `worker/webloop-reraise.py`·`webloop-reraise.ts` |
-| `run-sync` | `pyodide.webloop.run_sync`·`pyodide.ffi.run_sync` 호출 가능, `console.runcode` 코루틴 함수 | `find_problems`. 상세 이름 3개: `pyodide.webloop.run_sync`·`pyodide.ffi.run_sync`·`console.runcode` | 정지한 실행(top-level await·`run_sync` 대기) 깨우기. 바쁜 루프 중단과 `time.sleep` 조각은 유지 | core `worker/sigint-handler.py`(`find_problems`, `install`), `sigint-handler.ts` |
-| `sleep-slice` | `time.sleep.__wrapped__`가 원본 C 함수, `pyodide_js.checkInterrupt` 호출 가능 | `find_problems`. 상세 이름: `time.sleep.__wrapped__`·`pyodide_js.checkInterrupt` | `time.sleep` 20ms 조각 교체(`time.sleep`은 pyodide 기본으로 남고 SIGINT 핸들러는 설치된다) | core `worker/sleep-slice.py`·`sleep-slice.ts` |
-| `webloop-filename` | `pyodide.webloop.__file__`이 `pyodide/webloop.py`로 끝남 | `install` 안에서 `WEBLOOP_FILE_SUFFIX`와 비교. 상세는 실제 경로(없으면 `None`) | 끌 기능은 없다. 트레이스백의 `webloop.py` 프레임 떼기 규칙(`is_webloop`)이 무효가 되어 내부 프레임이 보일 수 있다 | core `worker/sigint-handler.py`(`install`) |
+| 식별자                     | 지점                                                                                       | 탐지 방법                                                                                                                                                                                                                                                                                              | 꺼지는 기능                                                                                                                                                                                                                          | 코드 위치                                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `compiler-flags`           | `pyconsole._compile.compiler.flags`                                                        | `hasCompilerFlags`: 경로가 number인가(접근이 던져도 없는 것으로 본다). 판정은 `setTopLevelAwait` 앞에서 한다                                                                                                                                                                                           | TLA 스위치(`setTopLevelAwait` 건너뜀, pyodide 기본이 TLA 켬이라 `topLevelAwait: false`는 무시됨), EOF 문법 오류 문구 정규화(원문 표시). 붙여넣기 분할용 `compilerFlags()`는 상수 `TOP_LEVEL_AWAIT_FLAG`(0x2000)로 대체해 분할은 유지 | repl `worker/top-level-await.ts`(`hasCompilerFlags`), `worker/console.ts`(`probe`, `normalizeSyntaxError`, `compilerFlags`) |
+| `incomplete-input-message` | pyodide 콘솔이 EOF에서 끊긴 `1 +`에 내는 문구 `_IncompleteInputError: incomplete input`    | 독립 `PyodideConsole({})`에 `1 +`를 push해 `formatted_error`의 마지막 줄이 `INCOMPLETE_INPUT_MARKER`인가(문구를 확인할 수 없으면 기대와 다른 것으로 본다). 실제 콘솔 상태를 바꾸지 않고, `formatsyntaxerror`가 설정하는 `sys.last_*`는 호출 전 값(없었으면 없음)으로 되돌린다. `compiler-flags`와 독립 | 없음(정규화 대상 문구가 바뀌면 정규화가 켜지지 않아 원문이 나온다)                                                                                                                                                                   | repl `worker/console-helpers.py`(`incomplete_input_message`), `worker/console.ts`(`probe`)                                  |
+| `webloop-handlers`         | WebLoop `_keyboard_interrupt_handler`·`_system_exit_handler`                               | `hasattr`. 하나라도 없으면 둘 다 건너뜀. 상세 이름은 없는 속성 이름                                                                                                                                                                                                                                    | `KeyboardInterrupt`·`SystemExit` 재보고 억제(중단·`exit()`에서 브라우저 `pageerror`가 다시 난다)                                                                                                                                     | core `worker/webloop-reraise.py`·`webloop-reraise.ts`                                                                       |
+| `run-sync`                 | `pyodide.webloop.run_sync`·`pyodide.ffi.run_sync` 호출 가능, `console.runcode` 코루틴 함수 | `find_problems`. 상세 이름 3개: `pyodide.webloop.run_sync`·`pyodide.ffi.run_sync`·`console.runcode`                                                                                                                                                                                                    | 정지한 실행(top-level await·`run_sync` 대기) 깨우기. 바쁜 루프 중단과 `time.sleep` 조각은 유지                                                                                                                                       | core `worker/sigint-handler.py`(`find_problems`, `install`), `sigint-handler.ts`                                            |
+| `sleep-slice`              | `time.sleep.__wrapped__`가 원본 C 함수, `pyodide_js.checkInterrupt` 호출 가능              | `find_problems`. 상세 이름: `time.sleep.__wrapped__`·`pyodide_js.checkInterrupt`                                                                                                                                                                                                                       | `time.sleep` 20ms 조각 교체(`time.sleep`은 pyodide 기본으로 남고 SIGINT 핸들러는 설치된다)                                                                                                                                           | core `worker/sleep-slice.py`·`sleep-slice.ts`                                                                               |
+| `webloop-filename`         | `pyodide.webloop.__file__`이 `pyodide/webloop.py`로 끝남                                   | `install` 안에서 `WEBLOOP_FILE_SUFFIX`와 비교. 상세는 실제 경로(없으면 `None`)                                                                                                                                                                                                                         | 끌 기능은 없다. 트레이스백의 `webloop.py` 프레임 떼기 규칙(`is_webloop`)이 무효가 되어 내부 프레임이 보일 수 있다                                                                                                                    | core `worker/sigint-handler.py`(`install`)                                                                                  |
 
 - `degraded` 순서는 driver `probe`가 돌려준 것(`compiler-flags`·`incomplete-input-message`) 뒤에 core 지점이 처음 보고한 순서이고 중복이 없다. `details`는 식별자별 상세 이름의 `Record<string, string[]>`이며 상세가 하나도 없으면 페이로드에 키 자체가 없다.
 - 식별자 6개는 고정이다. 새 지점을 더하면 이 표·`worker/compat.ts`의 `CoreDegradedId`(core 4개)·driver `probe` 반환(REPL 2개)·시험을 함께 고친다.
@@ -118,6 +118,7 @@ console.warn("[session] pyodide 호환 경고", { expected, actual, degraded, de
   ```
 
   출력이 0줄이어야 한다. 경로 밖이라 대상이 아닌 것: `apps/demo/e2e/results/*.json`, `apps/demo/e2e/pty/**/*.meta.json`, `docs/`, `ROADMAP.md`. `import-gate-corpus.ts`는 3.14.4 pty 실측 데이터라 버전 문자열을 포함하는 허용 파일이다. 새 버전으로 올리면 위 명령의 `314\.0\.7`을 이전 버전으로 바꿔 실행해 0줄을 확인한다.
+
 - `pnpm check-dist`: core·repl `dist/*.mjs`에 `pyodide` 런타임 import(`from "pyodide`·`import("pyodide`)가 없다. tsdown을 올리면 이 검사가 인라인 설정 회귀를 먼저 알린다.
 - `pnpm smoke:pack`: pack된 3개 `package.json`에 `catalog:`가 남지 않았고, core에 optional peer `pyodide`가 있고, 소비자 설치 뒤 `PYODIDE_VERSION`이 catalog 값과 같다.
 

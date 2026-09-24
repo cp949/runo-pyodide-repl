@@ -8,7 +8,14 @@
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "vitest";
 import {
   createCoreConsole,
   installStdioWriters,
@@ -45,7 +52,11 @@ beforeEach(() => {
 
 /** 콘솔을 만든다. `filename`을 생략하면 pyodide 기본 `<console>`이다(REPL 콘솔과 같다). */
 function makeConsole(filename?: string): PyodideConsoleProxy {
-  const pyconsole = createCoreConsole(pyodide, sinks, filename === undefined ? {} : { filename });
+  const pyconsole = createCoreConsole(
+    pyodide,
+    sinks,
+    filename === undefined ? {} : { filename },
+  );
   consoles.push(pyconsole);
   return pyconsole;
 }
@@ -54,11 +65,16 @@ function makeConsole(filename?: string): PyodideConsoleProxy {
 async function exec(
   pyconsole: PyodideConsoleProxy,
   source: string,
-  { topLevelAwait = false, filename }: { topLevelAwait?: boolean; filename?: string } = {},
+  {
+    topLevelAwait = false,
+    filename,
+  }: { topLevelAwait?: boolean; filename?: string } = {},
 ) {
   const execInConsole = loadExecInConsole(pyodide);
   try {
-    return toRunOutcome(await execInConsole(pyconsole, source, topLevelAwait, filename));
+    return toRunOutcome(
+      await execInConsole(pyconsole, source, topLevelAwait, filename),
+    );
   } finally {
     (execInConsole as PyProxy).destroy();
   }
@@ -94,7 +110,9 @@ describe("exec_in_console: runner 전용 준비를 하지 않는다", () => {
 
   test("sys.stdin을 바꾸지 않는다", async () => {
     const pyconsole = makeConsole();
-    pyodide.runPython("import io, sys\n_orig_stdin = sys.stdin\nsys.stdin = _sentinel = io.StringIO('abc')");
+    pyodide.runPython(
+      "import io, sys\n_orig_stdin = sys.stdin\nsys.stdin = _sentinel = io.StringIO('abc')",
+    );
     const before = pyodide.runPython("id(sys.stdin)") as number;
 
     await exec(pyconsole, "pass");
@@ -112,7 +130,9 @@ describe("exec_in_console: 파일명은 콘솔의 filename이다", () => {
 
     expect(outcome.kind).toBe("error");
     expect(outcome).toMatchObject({ errorType: "ZeroDivisionError" });
-    expect((outcome as { traceback: string }).traceback).toContain('File "<console>", line 2, in <module>');
+    expect((outcome as { traceback: string }).traceback).toContain(
+      'File "<console>", line 2, in <module>',
+    );
     expect(output.stderr).toBe((outcome as { traceback: string }).traceback);
   }, 60_000);
 
@@ -121,7 +141,9 @@ describe("exec_in_console: 파일명은 콘솔의 filename이다", () => {
 
     const outcome = await exec(pyconsole, "1 / 0");
 
-    expect((outcome as { traceback: string }).traceback).toContain('File "app.py", line 1, in <module>');
+    expect((outcome as { traceback: string }).traceback).toContain(
+      'File "app.py", line 1, in <module>',
+    );
   }, 60_000);
 
   test("문법 오류도 <console> 파일명을 따르고 errorType은 SyntaxError다", async () => {
@@ -130,15 +152,21 @@ describe("exec_in_console: 파일명은 콘솔의 filename이다", () => {
     const outcome = await exec(pyconsole, "x = = 1");
 
     expect(outcome).toMatchObject({ kind: "error", errorType: "SyntaxError" });
-    expect((outcome as { traceback: string }).traceback).toContain('File "<console>", line 1');
+    expect((outcome as { traceback: string }).traceback).toContain(
+      'File "<console>", line 1',
+    );
   }, 60_000);
 
   test("filename 인자를 주면 컴파일 파일명이 그 값이다(runner의 run_code 호환, 문법 오류 위치로 확인)", async () => {
     const pyconsole = makeConsole();
 
-    const outcome = await exec(pyconsole, "x = = 1", { filename: "explicit.py" });
+    const outcome = await exec(pyconsole, "x = = 1", {
+      filename: "explicit.py",
+    });
 
-    expect((outcome as { traceback: string }).traceback).toContain('File "explicit.py", line 1');
+    expect((outcome as { traceback: string }).traceback).toContain(
+      'File "explicit.py", line 1',
+    );
   }, 60_000);
 });
 

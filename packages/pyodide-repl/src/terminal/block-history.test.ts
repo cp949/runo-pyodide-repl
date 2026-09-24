@@ -320,7 +320,9 @@ describe.each([
     fake.type("print(9)\r");
     await third.line;
 
-    expect(await recall(1)).toBe("for i in range(2):\n    print(i)\n    print(9)");
+    expect(await recall(1)).toBe(
+      "for i in range(2):\n    print(i)\n    print(9)",
+    );
     expect(await recall(2)).toBe("q = 0");
   });
 

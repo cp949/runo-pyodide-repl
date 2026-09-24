@@ -39,11 +39,11 @@ function createFakeWorker(log: string[] = []) {
   const errorListeners = new Set<(event: { message?: string }) => void>();
   // 리스너를 뗀 뒤에도 이미 큐에 있던 이벤트가 늦게 도착하는 경우를 흉내 내려고 등록된 적 있는 리스너를 모두 기억한다.
   const everAdded: ((event: { message?: string }) => void)[] = [];
-  const postMessage = vi.fn<(message: unknown, transfer: Transferable[]) => void>(
-    (message) => {
-      ports.push((message as InitFrame).rpcPort);
-    },
-  );
+  const postMessage = vi.fn<
+    (message: unknown, transfer: Transferable[]) => void
+  >((message) => {
+    ports.push((message as InitFrame).rpcPort);
+  });
   const terminate = vi.fn(() => {
     log.push("worker.terminate");
   });
@@ -419,10 +419,15 @@ const CLEAN_READY = {
 
 describe("startCoreSession: pyodide 호환 경고", () => {
   /** ready 알림을 보내고 상태 알림이 올 때까지 기다린다. `console.warn` 호출은 스파이가 기록한다. */
-  async function bootWith(payload: unknown, driver = createFakeDriver().driver) {
+  async function bootWith(
+    payload: unknown,
+    driver = createFakeDriver().driver,
+  ) {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { workerRpc, onStatus, log } = start({ driver });
-    onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
+    onStatus.mockImplementation((status: string) =>
+      log.push(`status:${status}`),
+    );
     workerRpc.notify("ready", payload);
     await waitFor(() => onStatus.mock.calls.length === 1);
     return { warn, onStatus, log };
@@ -490,7 +495,9 @@ describe("startCoreSession: pyodide 호환 경고", () => {
       log.push("console.warn");
     });
     const { workerRpc, onStatus } = start({ driver, log });
-    onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
+    onStatus.mockImplementation((status: string) =>
+      log.push(`status:${status}`),
+    );
 
     workerRpc.notify("ready", {
       pyodideVersion: PYODIDE_VERSION,
@@ -513,7 +520,9 @@ describe("startCoreSession: 상태 알림", () => {
       },
     });
     const { workerRpc, onStatus } = start({ driver, log });
-    onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
+    onStatus.mockImplementation((status: string) =>
+      log.push(`status:${status}`),
+    );
 
     workerRpc.notify("ready", CLEAN_READY);
     await waitFor(() => onStatus.mock.calls.length === 1);
@@ -547,7 +556,9 @@ describe("startCoreSession: 상태 알림", () => {
       },
     });
     const { workerRpc, onStatus, session } = start({ driver, log });
-    onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
+    onStatus.mockImplementation((status: string) =>
+      log.push(`status:${status}`),
+    );
 
     workerRpc.notify("loadFailed", "boom");
     await waitFor(() => onStatus.mock.calls.length === 1);

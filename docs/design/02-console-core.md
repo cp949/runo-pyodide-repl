@@ -5,6 +5,7 @@
 worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)은 이전 구현에 없는 신규 절이다. main과의 통신은 `01-protocols.md`의 RPC(`readLine` 요청, 출력 알림)와 무관하게 이 규칙만으로 결정된다.
 
 ## 5.1 PyodideConsole 사용법
+
 - 콘솔은 `pyodide.console.PyodideConsole`. `stdin_callback`은 넘기지 않고, `stdout_callback`/
   `stderr_callback`만 sink에 연결한다(`write`/`writeErrorRaw`).
 - `push(line) -> ConsoleFuture`. `syntax_check`는 `'incomplete' | 'syntax-error' | 'complete'`,
@@ -21,7 +22,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
   여러 줄 분할 재생에서 에코하지 않는 중간 문장에 쓴다(5.2 `runChunk`). 기본값 `True`라 기존 한 줄 경로는
   그대로다.
 - **`runLine(source, options?: { echo?: boolean })`**(repl `worker/console.ts`의 `createConsole(pyodide, sinks,
-  { topLevelAwait })`가 돌려주는 `ReplConsole`, RD-004, `echo` 옵션은 RD-011 추가): `push`와 `await_fut`를 묶은
+{ topLevelAwait })`가 돌려주는 `ReplConsole`, RD-004, `echo` 옵션은 RD-011 추가): `push`와 `await_fut`를 묶은
   한 줄 실행이다. `echo`(기본 `true`)는 그대로 `await_fut(fut, echo)`에 전달된다. 결과 `RunLineResult`는
   `{ kind: 'incomplete' }`, `{ kind: 'syntax-error', formattedError }`, `{ kind: 'complete', echo, exited }`,
   `{ kind: 'error', formattedError }` 넷이다. `echo`는 값의 `repr()` 전체이고 값이 `None`이거나 `exited`이거나
@@ -33,7 +34,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
   → `PyodideConsole(pyodide.globals)` + 콜백 → TLA 비트 → 헬퍼 namespace다. 이 중 Writer 등록(`installStdioWriters`)과 `PyodideConsole` 생성 + 콜백(`createCoreConsole(pyodide, sinks, { filename? })`, 기본 `<console>`)은 core `worker/core-console.ts`가 내고, `sys.ps1/ps2`·TLA 비트·헬퍼 namespace는 REPL `createConsole`이 위 순서로 그 사이·뒤에 끼운다(core가 뼈대를 만든 뒤 REPL이 확장하는 구조가 아니다: `sys.ps1/ps2`가 콘솔 생성 앞이라는 순서를 지키려고 core는 두 함수를 따로 낸다). 부팅 시퀀스에서 이 함수를 부르는 것은 core `bootWorker`가 부르는 `WorkerDriverSession.createConsole`이다(`00-architecture.md` 3.1). 취소·안전망·값 에코 표시(5.2)는
   이 위에 `createSubmissionRunner`가 얹고, 여러 줄 분할은 RD-011이 더했다.
 - **`compilerFlags(): number`**(`ReplConsole`, RD-011): `pyconsole._compile.compiler.flags &
-  ~INCOMPLETE_INPUT_FLAGS`(문법 오류 정규화가 쓰는 것과 같은 `0x4200` 마스크). `createSubmissionRunner`가 여러
+~INCOMPLETE_INPUT_FLAGS`(문법 오류 정규화가 쓰는 것과 같은 `0x4200` 마스크). `createSubmissionRunner`가 여러
   줄 분할(5.2) 직전에 불러 `split_paste`에 넘긴다 — TLA 스위치(5.4)가 켜져 있으면 이 값도 그 비트를 포함한다.
 - **`pending()`/`clearPending()`**: `pending()`은 블록 입력 중이면 콘솔 `buffer`의 줄들을 `\n`으로 이은 텍스트, 아니면
   `undefined`다. `clearPending()`은 `buffer.clear()`로 미완성 블록을 버리며 블록이 없어도 안전하다. `buffer`는 접근할
@@ -53,10 +54,11 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
   같고, 본문 없는 중첩 블록은 `IndentationError: expected an indented block after 'if' statement on line 2`다.
 - **문법 오류 future 회수**: `syntax-error` future는 await하지 않으므로 `runLine`이 Python 헬퍼 `retrieve_exception(fut)`
   (`fut.exception()`)로 예외를 회수한다. 회수하지 않으면 사이클 GC 때 asyncio가 `ConsoleFuture exception was never
-  retrieved`와 트레이스백(브라우저에서 24행을 넘었다)을 `sys.stderr`로 내 터미널에 끼어든다(브라우저 콘솔 로그가
+retrieved`와 트레이스백(브라우저에서 24행을 넘었다)을 `sys.stderr`로 내 터미널에 끼어든다(브라우저 콘솔 로그가
   아니라 터미널 stderr로 온다). JS에서 `fut.exception()`을 부르면 예외 proxy를 `destroy()`해야 해서 Python에 둔다.
 
 ## 5.2 `createSubmissionRunner(pyodide, repl, io, deps: { splitPaste })` — `run(line: string | null)`
+
 - 반환은 `{ prompt, exit, pending? }`. `PS1 = '>>> '`, `PS2 = '... '`. `pending`은 블록 입력 중일 때만
   있고 `repl.pending()` 그대로(콘솔 buffer의 줄들을 `\n`으로 이은 텍스트)다(main의 자동 들여쓰기·Tab 완성이 쓴다).
   `repl`은 `ReplConsole`의 `runLine`·`pending`·`clearPending`·`compilerFlags`만 쓴다. 러너는 콘솔 buffer proxy를
@@ -76,7 +78,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
   이면 `exit: true`다. 다음 프롬프트는 `incomplete` 외에는 `>>> `다. `runOne`은 이 한 줄 규칙을 뽑은 공유
   함수이고 줄 흘림·분할 재생과 같이 쓴다.
 - **줄 단위 흘림**(`repl.pending() !== undefined`, `replayLines`, RD-011): `line.replace(/\r\n?/g, "\n")
-  .split("\n")`을 차례로 `runOne(l, { echo: true })`한다. 각 push가 블록을 완성하면 **타이핑과 동일하게** 그때
+.split("\n")`을 차례로 `runOne(l, { echo: true })`한다. 각 push가 블록을 완성하면 **타이핑과 동일하게** 그때
   실행·값 에코·오류 표시가 나온다. `syntax-error`·`error`에서 그 결과를 표시한 뒤 남은 줄을 버리고 끝내며,
   `exited`도 남은 줄을 버리고 `{ exit: true }`다. 마지막 결과가 `incomplete`면 `{ prompt: '... ', pending }`.
   블록 입력 중(`... `)에 붙여넣은 여러 줄은 **분할하지 않고** 이 경로로 한 줄씩 흘려 넣는다(이미 열린 블록과
@@ -98,7 +100,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
   정규화하고, **비어 있지 않은 모든 줄이 공통 들여쓰기를 가질 때만** dedent한다(`textwrap.dedent`는 공백
   줄을 항상 바꿔 쓰지 않는다). 파싱은 `ast.parse(source, "<console>")`이되, `flags`에 TLA 비트(`0x2000`)가
   있으면 `ast.parse`가 임의 플래그를 받지 않으므로 `compile(source, "<console>", "exec",
-  flags | ast.PyCF_ONLY_AST, True)`로 AST를 얻는다(top-level `await`를 통과시키려면 이 경로가 필요하다).
+flags | ast.PyCF_ONLY_AST, True)`로 AST를 얻는다(top-level `await`를 통과시키려면 이 경로가 필요하다).
   얻은 AST를 **2차 검사**로 `compile(tree, "<console>", "exec", flags, True)`에 다시 넣는다 — `ast.parse`
   단계는 통과하지만 컴파일 단계에서만 걸리는 오류(함수 밖 `return`, TLA 꺼진 채의 top-level `await`)를 잡기
   위해서다. 어느 단계든 `SyntaxError`·`ValueError`·`OverflowError`가 나면
@@ -121,10 +123,12 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
   끊기면 출력만 낸다. `KeyboardInterrupt`가 아닌 오류는 그대로 던진다.
 
 ## 5.3 multiline 판정
+
 - 여러 줄 블록 판정은 하드코딩된 키워드가 아니라 `ConsoleFuture.syntax_check === 'incomplete'`다
   (괄호 미닫힘 포함). 공백뿐인 줄에서 Enter를 누르면 블록이 끝난다(본문이 없으면 `incomplete`가 유지된다).
 
 ## 5.4 top-level await
+
 - **기본 OFF**. 콘솔은 부모 `Console.__init__`이 `PyCF_ALLOW_TOP_LEVEL_AWAIT`를 항상 켜므로 기본이 ON이고
   생성자로 끌 수 없다(TRP-007). 생성 직후 `pyconsole._compile.compiler.flags == 0x6200`
   (0x2000 TLA | 0x4000 ALLOW_INCOMPLETE_INPUT | 0x200 DONT_IMPLY_DEDENT).
@@ -151,6 +155,7 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
   `reset({ topLevelAwait })`를 부른다(양방향, "스위치 변경 = 세션 리셋"). 터미널·배너에는 표시하지 않는다.
 
 ## 5.5 `exit()`/`quit()` 감지
+
 - `await_fut`가 `SystemExit`을 잡아 구분값으로 돌려주고 `run()`이 `{ exit: true }`로 전한다.
 - worker 루프는 `result.exit`이면 `sessionTerminated` 알림으로 세션 종료를 main에 알리고(`onTerminated`) 루프를
   `break`한다. 이후 `readLine`을 더 요청하지 않아 실제 인터프리터 종료와 동등해진다. 터미널에는 아무것도 쓰지 않고
@@ -178,22 +183,22 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 
 결과 유니온 `RunResult`는 core `createRunner`와 같다(`ok` / `error{ errorType, traceback }` / `interrupted{ traceback }` / `exit{ code }` / `restarted`). `RunRejectedError`·`RunResult`·`RunRejectedReason`은 core의 같은 클래스·타입을 repl `.`에서 다시 내보낸다(`instanceof` 성립). 판정은 위에서부터 첫 일치 행이다.
 
-| `runSource()` 호출 시점·사건 | 결과 |
-| --- | --- |
-| `code`가 문자열이 아님 | `TypeError`로 reject |
-| `dispose()` 뒤 | `RunRejectedError("disposed")` |
-| 상태 `not-isolated`·`load-failed`·`crashed`·`terminated` | `RunRejectedError("unavailable")`. `terminated`는 REPL 명령 `exit()`로 세션이 끝난 상태다 |
-| 다른 `runSource`가 슬롯을 차지함(대기·실행·정착 어느 단계든) | `RunRejectedError("busy")` |
-| 블록 입력 중(최근 `readLine` 요청의 `pending !== undefined`, `... `) | `RunRejectedError("busy")` |
-| Python 실행 중(명령 실행), `readLine` 요청이 도착했지만 프롬프트가 아직 그려지기 전(write 콜백 전, 수 ms), `input()` 대기 중(프롬프트가 열린 채 worker의 배경 콜백이 `input()`을 불러 stdin 읽기가 대기함), Tab `complete` 왕복 중 | `RunRejectedError("busy")` |
-| 첫 `readLine` 요청 전: `loading`(최초·리셋 직후), `ready` 알림 뒤 배너를 쓰는 구간 | 대기(슬롯 점유). 첫 요청이 오면 읽기를 열지 않고 `{ source }`로 응답해 실행한다. 화면에 그린 것이 없어 꼬리가 남아 있으면 `\r\n`만 쓰고 출력을 시작하며 실행 뒤 `>>> `가 한 번 나온다 |
-| 프롬프트가 그려져 열려 있음(`>>> `, 블록 아님) | 받아들인다: 읽기를 가져가고 실행한다(5.6.3) |
-| 대기 중 `reset()` | 취소하지 않고 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았으므로 `restarted`가 아니다). 그 리셋의 worker 생성이 실패하면 `RunRejectedError("crashed")`(`08-session.md` 8.1) |
-| 대기 중 `load-failed` | `RunRejectedError("unavailable")` |
-| 실행 중(`{ source }`를 보낸 뒤 결말 도착 전) `reset()` | `{ kind: "restarted" }`로 resolve. 새 세션에서 다시 실행하지 않는다 |
-| 실행 중·대기 중 worker 크래시 | `RunRejectedError("crashed")` |
-| 실행 중·대기 중 `dispose()` | `RunRejectedError("disposed")` |
-| 결말이 도착한 뒤 복원한 줄이 그려지기 전(정착 전)의 `reset()`·`dispose()`·크래시 | 그 결말로 resolve한다. 코드는 이미 끝까지 실행됐으므로 `restarted`·거부로 바꾸지 않는다 |
+| `runSource()` 호출 시점·사건                                                                                                                                                                                                       | 결과                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`가 문자열이 아님                                                                                                                                                                                                             | `TypeError`로 reject                                                                                                                                                                  |
+| `dispose()` 뒤                                                                                                                                                                                                                     | `RunRejectedError("disposed")`                                                                                                                                                        |
+| 상태 `not-isolated`·`load-failed`·`crashed`·`terminated`                                                                                                                                                                           | `RunRejectedError("unavailable")`. `terminated`는 REPL 명령 `exit()`로 세션이 끝난 상태다                                                                                             |
+| 다른 `runSource`가 슬롯을 차지함(대기·실행·정착 어느 단계든)                                                                                                                                                                       | `RunRejectedError("busy")`                                                                                                                                                            |
+| 블록 입력 중(최근 `readLine` 요청의 `pending !== undefined`, `... `)                                                                                                                                                               | `RunRejectedError("busy")`                                                                                                                                                            |
+| Python 실행 중(명령 실행), `readLine` 요청이 도착했지만 프롬프트가 아직 그려지기 전(write 콜백 전, 수 ms), `input()` 대기 중(프롬프트가 열린 채 worker의 배경 콜백이 `input()`을 불러 stdin 읽기가 대기함), Tab `complete` 왕복 중 | `RunRejectedError("busy")`                                                                                                                                                            |
+| 첫 `readLine` 요청 전: `loading`(최초·리셋 직후), `ready` 알림 뒤 배너를 쓰는 구간                                                                                                                                                 | 대기(슬롯 점유). 첫 요청이 오면 읽기를 열지 않고 `{ source }`로 응답해 실행한다. 화면에 그린 것이 없어 꼬리가 남아 있으면 `\r\n`만 쓰고 출력을 시작하며 실행 뒤 `>>> `가 한 번 나온다 |
+| 프롬프트가 그려져 열려 있음(`>>> `, 블록 아님)                                                                                                                                                                                     | 받아들인다: 읽기를 가져가고 실행한다(5.6.3)                                                                                                                                           |
+| 대기 중 `reset()`                                                                                                                                                                                                                  | 취소하지 않고 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았으므로 `restarted`가 아니다). 그 리셋의 worker 생성이 실패하면 `RunRejectedError("crashed")`(`08-session.md` 8.1)  |
+| 대기 중 `load-failed`                                                                                                                                                                                                              | `RunRejectedError("unavailable")`                                                                                                                                                     |
+| 실행 중(`{ source }`를 보낸 뒤 결말 도착 전) `reset()`                                                                                                                                                                             | `{ kind: "restarted" }`로 resolve. 새 세션에서 다시 실행하지 않는다                                                                                                                   |
+| 실행 중·대기 중 worker 크래시                                                                                                                                                                                                      | `RunRejectedError("crashed")`                                                                                                                                                         |
+| 실행 중·대기 중 `dispose()`                                                                                                                                                                                                        | `RunRejectedError("disposed")`                                                                                                                                                        |
+| 결말이 도착한 뒤 복원한 줄이 그려지기 전(정착 전)의 `reset()`·`dispose()`·크래시                                                                                                                                                   | 그 결말로 resolve한다. 코드는 이미 끝까지 실행됐으므로 `restarted`·거부로 바꾸지 않는다                                                                                               |
 
 - `busy` 게터: 지금 `runSource()`를 부르면 `RunRejectedError("busy")`가 되는가(runner의 `busy`와 같은 뜻). 판정은 `runSource()`와 같은 함수(`judge()`)라 둘이 어긋나지 않는다(`docs/traps/TRP-047`). 대기로 받아들여질 시점(`loading`)·`unavailable`·`disposed`는 `false`다. `status` 게터는 없다(상태는 `onStatus`).
 - 슬롯은 핸들이 하나 소유하고 세션(worker)을 넘어 산다. 대기 중인 코드가 `reset()`을 넘겨 새 worker의 첫 `>>> `에서 실행되기 때문이다. 슬롯을 비우는 사건(크래시·`load-failed`·`exit()`로 `terminated`·`reset()`·`dispose()`)은 소비자 콜백을 부르기 전에 슬롯을 비우고 결과는 콜백 뒤에 낸다(`docs/traps/TRP-051`).
@@ -239,4 +244,3 @@ worker 안에서 도는 REPL 코어의 규칙이다. 5.6(`runSource`, RD-022a)�
 이전 구현 설계 문서 `07-multiline-submit.md`, `08-top-level-await.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/{submission-runner,multiline,top-level-await}.ts`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/multiline.py`
-

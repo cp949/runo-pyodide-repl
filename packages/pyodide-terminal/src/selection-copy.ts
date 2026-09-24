@@ -27,7 +27,8 @@ export interface SelectionTerminal {
   readonly element?: HTMLElement;
 }
 
-export type CopyResult = { ok: true; chars: number } | { ok: false; error: unknown };
+export type CopyResult =
+  { ok: true; chars: number } | { ok: false; error: unknown };
 
 export interface SelectionCopyOptions {
   /** 참이면 드래그로 선택을 만든 뒤(`mouseup`) 자동 복사한다. Ctrl+C 복사는 이 값과 무관하게 항상 동작한다. */
@@ -51,7 +52,10 @@ const defaultWriteText = (text: string): Promise<void> =>
  * `keydown`이고 Ctrl(Alt·Meta 없이)+C이며 선택이 있으면 `copy`, 그 외는 `pass`. Shift 유무는 보지 않는다
  * (Ctrl+Shift+C도 복사). Mac Cmd+C(`metaKey`)는 제외 — 네이티브 복사가 이미 처리한다.
  */
-export function decideKey(key: KeyLike, hasSelection: boolean): "copy" | "pass" {
+export function decideKey(
+  key: KeyLike,
+  hasSelection: boolean,
+): "copy" | "pass" {
   if (
     key.type === "keydown" &&
     key.ctrlKey &&

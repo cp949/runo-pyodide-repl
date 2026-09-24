@@ -8,7 +8,10 @@ function rawTextPlugin() {
     async load(id: string) {
       if (!id.endsWith("?raw")) return null;
       const text = await readFile(id.slice(0, -"?raw".length), "utf8");
-      return { code: `export default ${JSON.stringify(text)};`, moduleType: "js" as const };
+      return {
+        code: `export default ${JSON.stringify(text)};`,
+        moduleType: "js" as const,
+      };
     },
   };
 }

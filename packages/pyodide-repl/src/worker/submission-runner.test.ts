@@ -66,9 +66,8 @@ function setup() {
     clearPending: () => (hooks.clearPending ?? repl.clearPending)(),
     compilerFlags: () => repl.compilerFlags(),
   };
-  const splitPasteSpy = vi.fn(
-    (source: string, flags: number) =>
-      (hooks.splitPaste ?? splitPaste)(source, flags),
+  const splitPasteSpy = vi.fn((source: string, flags: number) =>
+    (hooks.splitPaste ?? splitPaste)(source, flags),
   );
   const { run } = createSubmissionRunner(pyodide, seen, io, {
     splitPaste: splitPasteSpy,

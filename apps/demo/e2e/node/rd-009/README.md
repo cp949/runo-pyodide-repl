@@ -54,10 +54,10 @@ node --import $H1 --import $H2 apps/demo/e2e/node/rd-009/sleep-stats.mjs \
 
 ## 판정선
 
-| 스크립트 | 통과 조건 |
-| --- | --- |
+| 스크립트                | 통과 조건                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- |
 | `sleep-stats.mjs`(실측) | 프로그램별 `interruptedCount === n && exactMatchCount === n && extraStderrCount === 0 && over200 === 0` |
-| `sleep-stats.mjs --dry` | 프로그램별 `interruptedCount === 0`("중단 없음") |
+| `sleep-stats.mjs --dry` | 프로그램별 `interruptedCount === 0`("중단 없음")                                                        |
 
 `exactMatch`는 `screen.stderr`가 `Traceback (most recent call last):\n  File "<console>", line N, in
 <module>\nKeyboardInterrupt\n` 형태(사용자 프레임 하나, `<sleep-slice>`·`<sigint-handler>` 없음)와 일치하는지다.

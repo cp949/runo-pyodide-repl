@@ -45,9 +45,9 @@ describe("bootWorker: driver 옵션 검증", () => {
   test("프레임의 driver 필드를 parseOptions에 넘기고 반환값으로 세션을 만든다", async () => {
     const parsed = { parsed: true };
     const parseOptions = vi.fn<(raw: unknown) => typeof parsed>(() => parsed);
-    const createSession = vi.fn<(options: typeof parsed) => WorkerDriverSession>(
-      () => session,
-    );
+    const createSession = vi.fn<
+      (options: typeof parsed) => WorkerDriverSession
+    >(() => session);
     const driver: WorkerDriver<typeof parsed> = { parseOptions, createSession };
     const raw = { topLevelAwait: true };
     // 로드 실패로 시퀀스를 바로 끝낸다(loadFailed 알림 뒤 반환).
@@ -77,7 +77,10 @@ describe("bootWorker: driver 옵션 검증", () => {
     });
 
     await expect(
-      bootWorker(createFrame({ topLevelAwait: "yes" }), { driver, loadPyodide }),
+      bootWorker(createFrame({ topLevelAwait: "yes" }), {
+        driver,
+        loadPyodide,
+      }),
     ).rejects.toThrow(/topLevelAwait/);
 
     expect(createSession).not.toHaveBeenCalled();

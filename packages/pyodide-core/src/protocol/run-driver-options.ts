@@ -26,8 +26,13 @@ export function parseRunDriverOptions(raw: unknown): RunDriverOptions {
     filename?: unknown;
     topLevelAwait?: unknown;
   };
-  if (filename !== undefined && (typeof filename !== "string" || filename === "")) {
-    throw new Error("실행 driver 옵션 오류 — filename: 비어 있지 않은 문자열 필요");
+  if (
+    filename !== undefined &&
+    (typeof filename !== "string" || filename === "")
+  ) {
+    throw new Error(
+      "실행 driver 옵션 오류 — filename: 비어 있지 않은 문자열 필요",
+    );
   }
   if (topLevelAwait !== undefined && typeof topLevelAwait !== "boolean") {
     throw new Error("실행 driver 옵션 오류 — topLevelAwait: boolean 필요");

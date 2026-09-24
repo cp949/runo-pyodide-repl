@@ -205,7 +205,11 @@ async function runAndWait(
 describe("createRunner: 생성과 옵션 검증", () => {
   test.each([
     ["filename이 빈 문자열", { filename: "" }, /filename/],
-    ["filename이 문자열이 아님", { filename: 1 as unknown as string }, /filename/],
+    [
+      "filename이 문자열이 아님",
+      { filename: 1 as unknown as string },
+      /filename/,
+    ],
     [
       "topLevelAwait가 boolean이 아님",
       { topLevelAwait: "yes" as unknown as boolean },
@@ -295,19 +299,25 @@ describe("createRunner: 상태 전이", () => {
 
   test.each<[string, RunOutcome]>([
     ["ok", { kind: "ok" }],
-    ["error", { kind: "error", errorType: "ZeroDivisionError", traceback: "tb" }],
+    [
+      "error",
+      { kind: "error", errorType: "ZeroDivisionError", traceback: "tb" },
+    ],
     ["interrupted", { kind: "interrupted", traceback: "tb" }],
     ["exit", { kind: "exit", code: 3 }],
-  ])("worker가 돌려준 결말 %s을(를) 그대로 resolve한다", async (_name, outcome) => {
-    const started = await startReady();
-    const result = started.runner.run("code");
-    await until(() => started.workers[0]!.pending.length > 0);
+  ])(
+    "worker가 돌려준 결말 %s을(를) 그대로 resolve한다",
+    async (_name, outcome) => {
+      const started = await startReady();
+      const result = started.runner.run("code");
+      await until(() => started.workers[0]!.pending.length > 0);
 
-    started.workers[0]!.pending[0]!.resolve(outcome);
+      started.workers[0]!.pending[0]!.resolve(outcome);
 
-    await expect(result).resolves.toStrictEqual(outcome);
-    expect(started.runner.status).toBe("ready");
-  });
+      await expect(result).resolves.toStrictEqual(outcome);
+      expect(started.runner.status).toBe("ready");
+    },
+  );
 
   test("runCode에는 넘긴 코드가 그대로 간다", async () => {
     const started = await startReady();
@@ -583,7 +593,9 @@ describe("createRunner: stop", () => {
     started.workers[1]!.pending[0]!.resolve({ kind: "ok" });
 
     await expect(next).resolves.toStrictEqual({ kind: "ok" });
-    expect(started.workers[0]!.pending.map((run) => run.code)).toEqual(["loop"]);
+    expect(started.workers[0]!.pending.map((run) => run.code)).toEqual([
+      "loop",
+    ]);
     expect(started.statuses).toEqual([
       "loading",
       "ready",
@@ -902,7 +914,9 @@ describe("createRunner: 생애 사건(reset·dispose·크래시)", () => {
   test("crashed 알림도 같다: run은 crashed로 거부되고 상태 crashed 뒤 onCrash를 부른다", async () => {
     const started = await startReady();
     const { result } = await runAndWait(started);
-    const rejected = expect(result).rejects.toMatchObject({ reason: "crashed" });
+    const rejected = expect(result).rejects.toMatchObject({
+      reason: "crashed",
+    });
 
     started.workers[0]!.crashedNotice("예외로 끝남");
 
@@ -1051,7 +1065,10 @@ describe("createRunner: 출력과 InputProvider", () => {
     started.workers[0]!.readInput();
     await until(() => provider.mock.calls.length === 2);
 
-    expect(provider.mock.calls.map((call) => call[0])).toEqual(["첫: ", "둘: "]);
+    expect(provider.mock.calls.map((call) => call[0])).toEqual([
+      "첫: ",
+      "둘: ",
+    ]);
   });
 
   test("reset은 열린 읽기의 signal을 abort하고 옛 메일박스에는 아무것도 쓰지 않는다", async () => {
@@ -1094,7 +1111,8 @@ describe("createRunner: 출력과 InputProvider", () => {
 
   test("공급자가 문자열도 null도 아닌 값을 돌려주면 읽기 취소로 본다", async () => {
     const started = await startReady({
-      inputProvider: (() => Promise.resolve(undefined)) as unknown as InputProvider,
+      inputProvider: (() =>
+        Promise.resolve(undefined)) as unknown as InputProvider,
     });
     await runAndWait(started);
 

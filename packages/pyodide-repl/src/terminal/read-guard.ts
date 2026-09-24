@@ -24,7 +24,7 @@ export interface ReadGuardDeps<L, I> {
   readLine(
     prompt: string,
     pending: string | undefined,
-    cancelable: boolean
+    cancelable: boolean,
   ): Promise<L>;
   /** stdin 읽기(`stdin-reader`). 활성 REPL 읽기가 끝난 뒤 부른다. */
   readInput(cancelable: boolean): Promise<I>;
@@ -39,7 +39,7 @@ export interface ReadGuard<L, I> {
   readLine(
     prompt: string,
     pending: string | undefined,
-    cancelable: boolean
+    cancelable: boolean,
   ): Promise<L>;
   readInput(cancelable: boolean): Promise<I>;
 }

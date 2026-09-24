@@ -298,7 +298,12 @@ describe("가설 2: time.sleep 중 Ctrl+C", () => {
 
     const { outcome, afterPressMs } = await runPressed(
       runner,
-      py("import probe, time", "probe.started()", "probe.mark()", "time.sleep(10)"),
+      py(
+        "import probe, time",
+        "probe.started()",
+        "probe.mark()",
+        "time.sleep(10)",
+      ),
       300,
     );
 
@@ -347,7 +352,9 @@ describe("가설 3: 정지한 실행 깨우기(exec 모드에도 active 추적�
 
     expect(outcome.kind).toBe("interrupted");
     expect(frameFiles(outcome.traceback)).toEqual(["main.py"]);
-    expect(outcome.traceback).toContain(`    asyncio.run(asyncio.sleep(${IDLE_WAIT_S}))\n`);
+    expect(outcome.traceback).toContain(
+      `    asyncio.run(asyncio.sleep(${IDLE_WAIT_S}))\n`,
+    );
   }, 20_000);
 
   test("중단한 뒤 다음 실행은 잔류 SIGINT 없이 정상 실행된다", async () => {
@@ -430,7 +437,9 @@ describe("가설 5: run마다 새 globals", () => {
     expect(await runner.run(py("import colorsys", "x = 1"))).toEqual({
       kind: "ok",
     });
-    const second = await runner.run(py("import sys", "print('colorsys' in sys.modules)", "x"));
+    const second = await runner.run(
+      py("import sys", "print('colorsys' in sys.modules)", "x"),
+    );
 
     expect(second.kind).toBe("error");
     expect(second.errorType).toBe("NameError");
@@ -455,14 +464,18 @@ describe("가설 6: SystemExit", () => {
     ["sys.exit(3)", 3, ""],
     ['sys.exit("x")', 1, "x\n"],
     ["exit()", 0, ""],
-  ])("%s는 exit 코드 %i이고 stderr는 %j다", async (body, code, stderr) => {
-    const runner = await startRunner();
+  ])(
+    "%s는 exit 코드 %i이고 stderr는 %j다",
+    async (body, code, stderr) => {
+      const runner = await startRunner();
 
-    const outcome = await runner.run(py("import sys", body));
+      const outcome = await runner.run(py("import sys", body));
 
-    expect(outcome).toEqual({ kind: "exit", code });
-    expect(runner.output.stderr).toBe(stderr);
-  }, 60_000);
+      expect(outcome).toEqual({ kind: "exit", code });
+      expect(runner.output.stderr).toBe(stderr);
+    },
+    60_000,
+  );
 
   test("최상위 await 뒤의 sys.exit(3)도 exit 코드 3이다", async () => {
     const runner = await startRunner({ topLevelAwait: true });
@@ -532,7 +545,9 @@ describe("가설 7: 컴파일 플래그", () => {
     // IndentationError는 SyntaxError의 하위 클래스다: errorType은 통일하고 구체 이름은 트레이스백에 남는다(DELTA-02 결정).
     expect(outcome.errorType).toBe("SyntaxError");
     expect(outcome.traceback).toContain("IndentationError");
-    expect(outcome.traceback).toContain("expected an indented block after 'if'");
+    expect(outcome.traceback).toContain(
+      "expected an indented block after 'if'",
+    );
   }, 60_000);
 
   test("컴파일 단계 오류(모듈 최상위 return)도 문법 오류로 끝난다", async () => {
@@ -610,21 +625,21 @@ describe("DELTA-02: 문법 오류 errorType 통일", () => {
   test.each([
     ["일반 문법 오류 `x = = 1`", "x = = 1", "SyntaxError: invalid syntax"],
     ["들여쓰기 오류 `if x:`", "if x:", "IndentationError"],
-    [
-      "탭·공백 혼용",
-      "if 1:\n\tx = 1\n        y = 2\n",
-      "TabError",
-    ],
-  ])("컴파일 단계: %s는 errorType SyntaxError이고 트레이스백에 구체 이름이 있다", async (_name, source, expected) => {
-    const runner = await startRunner();
+    ["탭·공백 혼용", "if 1:\n\tx = 1\n        y = 2\n", "TabError"],
+  ])(
+    "컴파일 단계: %s는 errorType SyntaxError이고 트레이스백에 구체 이름이 있다",
+    async (_name, source, expected) => {
+      const runner = await startRunner();
 
-    const outcome = await runner.run(source);
+      const outcome = await runner.run(source);
 
-    expect(outcome.kind).toBe("error");
-    expect(outcome.errorType).toBe("SyntaxError");
-    expect(outcome.traceback).toContain(expected);
-    expect(runner.output.stderr).toBe(outcome.traceback);
-  }, 60_000);
+      expect(outcome.kind).toBe("error");
+      expect(outcome.errorType).toBe("SyntaxError");
+      expect(outcome.traceback).toContain(expected);
+      expect(runner.output.stderr).toBe(outcome.traceback);
+    },
+    60_000,
+  );
 
   test("실행 중 exec()가 올린 IndentationError도 errorType SyntaxError다", async () => {
     const runner = await startRunner();
@@ -642,7 +657,9 @@ describe("DELTA-02: 결말 분류(사용자 코드가 직접 만든 종료·중�
   test("사용자 코드가 올린 KeyboardInterrupt는 출처와 무관하게 interrupted다", async () => {
     const runner = await startRunner();
 
-    const outcome = await runner.run(py("def f():", "    raise KeyboardInterrupt", "f()"));
+    const outcome = await runner.run(
+      py("def f():", "    raise KeyboardInterrupt", "f()"),
+    );
 
     expect(outcome.kind).toBe("interrupted");
     expect(frameFiles(outcome.traceback)).toEqual(["main.py", "main.py"]);
@@ -654,9 +671,17 @@ describe("DELTA-02: 결말 분류(사용자 코드가 직접 만든 종료·중�
     const runner = await startRunner();
 
     const caught = await runner.run(
-      py("import sys", "try:", "    sys.exit(3)", "except SystemExit as e:", "    print('code', e.code)"),
+      py(
+        "import sys",
+        "try:",
+        "    sys.exit(3)",
+        "except SystemExit as e:",
+        "    print('code', e.code)",
+      ),
     );
-    const raised = await runner.run(py("def f():", "    raise SystemExit(2)", "f()"));
+    const raised = await runner.run(
+      py("def f():", "    raise SystemExit(2)", "f()"),
+    );
 
     expect(caught).toStrictEqual({ kind: "ok" });
     expect(runner.output.stdout).toBe("code 3\n");
@@ -666,7 +691,9 @@ describe("DELTA-02: 결말 분류(사용자 코드가 직접 만든 종료·중�
   test("종료 코드가 int32 밖이면 RPC를 지나도 number로 하위 8비트가 된다", async () => {
     const runner = await startRunner();
 
-    const outcome = await runner.run(py("import sys", `sys.exit(${2 ** 31 + 5})`));
+    const outcome = await runner.run(
+      py("import sys", `sys.exit(${2 ** 31 + 5})`),
+    );
     const huge = await runner.run(py("import sys", "sys.exit(2**70 + 7)"));
 
     expect(outcome).toStrictEqual({ kind: "exit", code: 5 });
@@ -678,7 +705,9 @@ describe("DELTA-02: run 사이 sys.stdin", () => {
   test("이전 run이 sys.stdin.read(3)으로 남긴 버퍼가 다음 run의 input()에 새지 않는다", async () => {
     const runner = await startRunner();
     await runner.deliverLine("abcdef");
-    expect(await runner.run(py("import sys", "print(sys.stdin.read(3))"))).toStrictEqual({
+    expect(
+      await runner.run(py("import sys", "print(sys.stdin.read(3))")),
+    ).toStrictEqual({
       kind: "ok",
     });
     await runner.deliverLine("new");
@@ -692,11 +721,17 @@ describe("DELTA-02: run 사이 sys.stdin", () => {
 
   test("사용자 코드가 바꿔 놓은 sys.stdin도 다음 run에서 원래 stdin 모양으로 돌아온다", async () => {
     const runner = await startRunner();
-    await runner.run(py("import io, sys", "sys.stdin = io.StringIO('fake\\n')"));
+    await runner.run(
+      py("import io, sys", "sys.stdin = io.StringIO('fake\\n')"),
+    );
     await runner.deliverLine("real");
 
     const outcome = await runner.run(
-      py("import sys", "print(sys.stdin.name, sys.stdin.encoding, sys.stdin.line_buffering)", "print(input())"),
+      py(
+        "import sys",
+        "print(sys.stdin.name, sys.stdin.encoding, sys.stdin.line_buffering)",
+        "print(input())",
+      ),
     );
 
     expect(outcome).toStrictEqual({ kind: "ok" });
@@ -736,7 +771,12 @@ describe("DELTA-02: atPrompt 전이와 재진입 거부(실제 부팅)", () => {
   test("실행 중 두 번째 runCode는 거부되고 첫 실행은 영향 없이 끝난다", async () => {
     const runner = await startRunner({ topLevelAwait: true });
     const first = runner.runAsync(
-      py("import probe", "probe.entered()", "await probe.gate()", "print('first done')"),
+      py(
+        "import probe",
+        "probe.entered()",
+        "await probe.gate()",
+        "print('first done')",
+      ),
     );
     await runner.entered();
 

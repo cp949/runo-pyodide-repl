@@ -1,5 +1,9 @@
 import { PythonRepl, RunRejectedError } from "@cp949/runo-pyodide-react";
-import type { CopyResult, PythonReplHandle, ReplStatus } from "@cp949/runo-pyodide-react";
+import type {
+  CopyResult,
+  PythonReplHandle,
+  ReplStatus,
+} from "@cp949/runo-pyodide-react";
 import "@xterm/xterm/css/xterm.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createWorker } from "./create-worker";
@@ -21,7 +25,8 @@ function readCopyOnSelect(): boolean {
 
 /** `runSource()`가 끝났을 때 결과 칸에 보여 줄 문자열. 결과 유니온은 JSON, 거부는 `{"rejected":"<reason>"}`. */
 function describeError(error: unknown): string {
-  if (error instanceof RunRejectedError) return JSON.stringify({ rejected: error.reason });
+  if (error instanceof RunRejectedError)
+    return JSON.stringify({ rejected: error.reason });
   return JSON.stringify({ error: String(error) });
 }
 
@@ -56,7 +61,9 @@ export function ReplView({ fit }: { fit: boolean }) {
   // `setToast`·`toastTimerRef`만 참조하는 안정된 콜백(useCallback 빈 deps). `PythonRepl`의 `onCopy`는 latest-ref로 읽혀
   // 콜백 식별자가 바뀌어도 재마운트하지 않으므로 안정성은 필수가 아니다.
   const showToast = useCallback((result: CopyResult) => {
-    setToast(result.ok ? `copied ${result.chars} chars to clipboard` : "copy failed");
+    setToast(
+      result.ok ? `copied ${result.chars} chars to clipboard` : "copy failed",
+    );
     if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => {
       toastTimerRef.current = null;
@@ -153,7 +160,8 @@ export function ReplView({ fit }: { fit: boolean }) {
         </button>
       </div>
       <p>
-        source-result: <output data-testid="source-result">{sourceResult}</output>
+        source-result:{" "}
+        <output data-testid="source-result">{sourceResult}</output>
       </p>
       {status === "terminated" && (
         <div role="alert" data-testid="terminated">

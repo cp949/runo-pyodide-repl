@@ -81,6 +81,7 @@ Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 별개 기능이�
 손대지 않는다(`10-parity-deviations.md`).
 
 ## 8.2 StrictMode 이중 마운트
+
 - dev의 StrictMode는 mount→cleanup→mount를 한 번 더 돌린다. `Readline.dispose()`는 리스너만 정리하고
   `this.term` 참조를 남겨, 버려지는 첫 인스턴스의 지연된 `term.write("", cb)` 콜백이 이미 dispose된 xterm에
   접근해 `DisposableStore` 경고를 낸다(TRP-001, throw는 아님).
@@ -90,6 +91,7 @@ Ctrl+L(화면 지우기)과 리셋(Python 상태 초기화)은 별개 기능이�
 - 새 구현: 벤더 `Readline.dispose()`가 `term`을 비우고 대기 읽기를 reject하므로(`06-editing.md` 6.1) 마운트 직후 읽기를 시작하는 루프도 안전하다. RD-003 데모(`ReplView`)가 이 순서로 동작하고 dev StrictMode에서 콘솔 경고 0과 `.xterm` 1개를 확인했다. `dispose()` 뒤 읽기 promise는 `Error`로 reject되므로 읽기 루프는 dispose로 끝난 reject를 정상 종료로 처리한다.
 
 ## 8.3 종료 후 상태
+
 - `exit()`/`quit()`/`raise SystemExit()` → worker 루프가 `break`하고 `onSessionTerminated`로 main에 알린다
   → `sessionTerminated = true`. main은 Alert로 "Python session terminated. 세션 리셋 버튼으로 새 세션을
   시작하세요."를 띄운다. 더 이상 읽기를 요청하지 않으므로 입력에 응답하지 않는다. 복구 경로는 세션 리셋뿐이다.
@@ -115,4 +117,3 @@ worker가 죽거나(전역 `error` 이벤트) 부팅 뒤(REPL 루프)에서 잡�
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/04-session-reset.md`,
 `/work/cp949/pyodide-samples/apps/repl/src/repl/ReplTerminal.tsx`,
 `/work/cp949/pyodide-samples/docs/repl/traps/TRP-001-strictmode-readline-dispose-race.md`
-

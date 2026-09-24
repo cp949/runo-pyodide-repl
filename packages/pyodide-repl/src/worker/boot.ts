@@ -16,5 +16,8 @@ export function bootReplWorker(
   frame: InitFrame,
   deps: BootDeps,
 ): Promise<void> {
-  return bootWorker(frame, { driver: replDriver, loadPyodide: deps.loadPyodide });
+  return bootWorker(frame, {
+    driver: replDriver,
+    loadPyodide: deps.loadPyodide,
+  });
 }

@@ -9,7 +9,12 @@ import {
   type RunRejectedReason,
   type RunResult,
 } from "@cp949/runo-pyodide-core";
-import { endRun, rejection, createSourceSlot, type SourceEnd } from "./run-source";
+import {
+  endRun,
+  rejection,
+  createSourceSlot,
+  type SourceEnd,
+} from "./run-source";
 import { startSession, type ReplSession } from "./session";
 import {
   createSelectionCopy,
@@ -151,9 +156,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
     if (run !== undefined && end !== undefined) endRun(run, end);
   };
   // isolated일 때만 있다. not-isolated에서 reset()은 no-op(ReplHandle.reset 문서).
-  let resetSession:
-    | ((next?: { topLevelAwait?: boolean }) => void)
-    | undefined;
+  let resetSession: ((next?: { topLevelAwait?: boolean }) => void) | undefined;
 
   if (!isolated) {
     // SharedArrayBuffer가 없어 초기화 프레임을 만들 수 없다(ADR-0004, TRP-002). 폴백은 없다.
@@ -209,7 +212,8 @@ export function createRepl(options: ReplOptions): ReplHandle {
         // 옛 세션이 남겼을 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않게 한다.
         Atomics.store(interruptBuffer, SIGNAL, 0);
         // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006).
-        if (options.terminal.buffer.active.cursorX !== 0) readline.write("\r\n");
+        if (options.terminal.buffer.active.cursorX !== 0)
+          readline.write("\r\n");
         writeNotice(readline, RESET_NOTICE, "info");
         try {
           spawnSession();
@@ -282,10 +286,13 @@ export function createRepl(options: ReplOptions): ReplHandle {
     },
     runSource(code) {
       if (typeof code !== "string") {
-        return Promise.reject(new TypeError("runSource 인자 오류 — code: 문자열 필요"));
+        return Promise.reject(
+          new TypeError("runSource 인자 오류 — code: 문자열 필요"),
+        );
       }
       const verdict = judge();
-      if (verdict.kind === "reject") return Promise.reject(rejection(verdict.reason));
+      if (verdict.kind === "reject")
+        return Promise.reject(rejection(verdict.reason));
       // 첫 프롬프트 전(`loading`)이면 슬롯이 기다린다. 첫 `readLine` 요청이 오면 그 요청에 `{ source }`로 응답한다.
       if (verdict.kind === "wait") return slot.occupy(code, "waiting");
       // 프롬프트가 열려 있다: 열린 읽기를 가져가고 줄을 보존한다. `judge()`가 `open`이면 가져갈 수 있다.

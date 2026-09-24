@@ -34,7 +34,7 @@ def oracle(text, pos, last_used):
 type Oracle = (
   text: string,
   pos: number,
-  lastUsed: string | null
+  lastUsed: string | null,
 ) => [string, string | null];
 
 let oracle: Oracle;
@@ -70,7 +70,10 @@ const CASES: Case[] = [
   { name: "본문 줄 뒤", buffer: "for i in range(2):\n    print(i)" },
   { name: "들여쓰기 없는 일반 줄", buffer: "x = 1" },
   { name: "빈 버퍼", buffer: "" },
-  { name: "첫 들여쓰기가 8칸인 중첩 헤더", buffer: "if True:\n        if True:" },
+  {
+    name: "첫 들여쓰기가 8칸인 중첩 헤더",
+    buffer: "if True:\n        if True:",
+  },
   { name: "2칸 들여쓴 본문", buffer: "if True:\n  x=1" },
   { name: "본문 없이 공백뿐인 줄", buffer: "if True:\n    " },
   { name: "공백뿐인 줄이 여러 개", buffer: "if True:\n    \n    " },
@@ -96,7 +99,11 @@ const CASES: Case[] = [
   { name: "커서가 앞 줄 끝", buffer: "a = 1\nb = 2", pos: 5 },
   { name: "커서가 들여쓴 줄 중간", buffer: "if x:\n    ab", pos: 11 },
   { name: "이전 블록의 들여쓰기가 탭", buffer: "if True:", lastUsed: "\t" },
-  { name: "이전 블록의 들여쓰기가 8칸", buffer: "if True:", lastUsed: "        " },
+  {
+    name: "이전 블록의 들여쓰기가 8칸",
+    buffer: "if True:",
+    lastUsed: "        ",
+  },
   {
     name: "헤더가 아닌 줄은 이전 들여쓰기를 쓰지 않는다",
     buffer: "x = 1",

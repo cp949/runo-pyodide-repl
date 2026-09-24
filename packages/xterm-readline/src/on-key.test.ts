@@ -89,7 +89,9 @@ const ENTER = "\r";
 describe("onKey 훅", () => {
   test("onKey가 true를 돌려주면 벤더는 그 키를 처리하지 않는다", () => {
     const { term, readline } = setup();
-    void readline.read("> ", { onKey: (input) => input.inputType === InputType.Backspace });
+    void readline.read("> ", {
+      onKey: (input) => input.inputType === InputType.Backspace,
+    });
 
     term.type("ab");
     term.feed(BACKSPACE);

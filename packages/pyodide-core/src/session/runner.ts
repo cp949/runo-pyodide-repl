@@ -342,7 +342,11 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
             setStatus("ready");
             // 로딩·재시작 대기 중이던 run을 이제 보낸다. `onStatus("ready")` 콜백이 `reset()`·`dispose()`를 불렀으면 이 세션은
             // 이미 옛것이다: 대기 run은 새 세션의 `ready`가 보낸다.
-            if (isCurrent() && status === "ready" && active?.phase === "waiting") {
+            if (
+              isCurrent() &&
+              status === "ready" &&
+              active?.phase === "waiting"
+            ) {
               dispatch(active);
             }
             break;
@@ -427,7 +431,10 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
           status === "crashed"
         ) {
           reject(
-            new RunRejectedError("unavailable", `실행할 수 없는 상태: ${status}`),
+            new RunRejectedError(
+              "unavailable",
+              `실행할 수 없는 상태: ${status}`,
+            ),
           );
           return;
         }

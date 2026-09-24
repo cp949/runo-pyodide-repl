@@ -604,9 +604,7 @@ describe("bootReplWorker", () => {
     ]);
 
     await bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
-    await waitFor(
-      () => events.filter((e) => e[0] === "readLine").length >= 3,
-    );
+    await waitFor(() => events.filter((e) => e[0] === "readLine").length >= 3);
     const elapsedMs = performance.now() - (pressedAt as number);
     await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
 
@@ -669,14 +667,11 @@ describe("bootReplWorker", () => {
     });
 
     // 두 번째 readLine이 열려 있는 동안(atPrompt=true, 아직 응답 전): 실제 후보.
-    await waitFor(
-      () => events.filter((e) => e[0] === "readLine").length >= 2,
-    );
-    const duringPrompt = await rpc.call<{ completions: string[]; start: number }>(
-      "complete",
-      "os.pa",
-      undefined,
-    );
+    await waitFor(() => events.filter((e) => e[0] === "readLine").length >= 2);
+    const duringPrompt = await rpc.call<{
+      completions: string[];
+      start: number;
+    }>("complete", "os.pa", undefined);
     expect(duringPrompt.completions.length).toBeGreaterThan(0);
     expect(duringPrompt.completions).toContain("os.path");
 
@@ -689,9 +684,7 @@ describe("bootReplWorker", () => {
       start: 0,
     });
 
-    await waitFor(
-      () => events.filter((e) => e[0] === "readLine").length >= 3,
-    );
+    await waitFor(() => events.filter((e) => e[0] === "readLine").length >= 3);
     await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
   }, 30_000);
 });
@@ -732,7 +725,9 @@ describe("bootReplWorker: 루프 명령 `{ source }`(RD-022a)", () => {
     expect(events.filter((e) => e[0] === "sessionTerminated")).toHaveLength(1);
     expect(events.at(-1)).toEqual(["sessionTerminated"]);
     // 출력은 그 결말을 싣는 다음 프롬프트 요청보다 먼저 온다(확정 9의 재료).
-    const firstWrite = events.findIndex((e) => e[0] === "write" && e[1] === "1");
+    const firstWrite = events.findIndex(
+      (e) => e[0] === "write" && e[1] === "1",
+    );
     const secondRequest = events.findIndex(
       (e, i) => e[0] === "readLine" && i > firstWrite,
     );

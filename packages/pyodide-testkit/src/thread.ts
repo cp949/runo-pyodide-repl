@@ -67,12 +67,18 @@ export function spawnRole(roleUrl: URL, workerData?: unknown): Role {
  * 역할 스크립트를 DOM `Worker`와 같은 모양으로 띄운다(`createWorker` 주입용). 지원하는 것은 `postMessage(메시지, 전송 목록)`·
  * `terminate()`·`error` 이벤트 리스너(`{ message }`)뿐이다. 시험이 끝나면 스레드를 종료한다.
  */
-export function spawnWorkerLike(roleUrl: URL, workerData?: unknown): WorkerLike {
+export function spawnWorkerLike(
+  roleUrl: URL,
+  workerData?: unknown,
+): WorkerLike {
   const worker = new Worker(roleUrl, {
     execArgv: ["--import", RESOLVE_HOOK],
     workerData,
   });
-  const listeners = new Map<(event: { message: string }) => void, (error: Error) => void>();
+  const listeners = new Map<
+    (event: { message: string }) => void,
+    (error: Error) => void
+  >();
   onTestFinished(async () => {
     await worker.terminate();
   });
@@ -107,6 +113,12 @@ export function spawnWorkerLike(roleUrl: URL, workerData?: unknown): WorkerLike 
 export interface WorkerLike {
   postMessage(message: unknown, transfer?: readonly unknown[]): void;
   terminate(): void;
-  addEventListener(type: string, listener: (event: { message: string }) => void): void;
-  removeEventListener(type: string, listener: (event: { message: string }) => void): void;
+  addEventListener(
+    type: string,
+    listener: (event: { message: string }) => void,
+  ): void;
+  removeEventListener(
+    type: string,
+    listener: (event: { message: string }) => void,
+  ): void;
 }

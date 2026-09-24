@@ -90,7 +90,11 @@ export function createSubmissionRunner(
     const result = await repl.runLine(line, options);
     if (result.kind === "syntax-error" || result.kind === "error") {
       io.writeError(withoutTrailingNewline(result.formattedError));
-    } else if (result.kind === "complete" && options.echo && result.echo !== null) {
+    } else if (
+      result.kind === "complete" &&
+      options.echo &&
+      result.echo !== null
+    ) {
       io.writeOutput(result.echo);
     }
     return result;
