@@ -695,3 +695,51 @@ describe("bootReplWorker", () => {
     await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
   }, 30_000);
 });
+
+describe("bootReplWorker: 루프 명령 `{ source }`(RD-022a)", () => {
+  test("`{ source }` 응답을 실행하고 결말을 다음 readLine 요청의 네 번째 인자로 싣는다", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    // `sys`를 globals에 남기지 않도록 `__import__`를 쓴다(다른 시험의 globals 기대를 흔들지 않는다).
+    const { frame, events, waitFor } = createMainSide([
+      { source: "print(1)\n__import__('sys').exit(3)" },
+      'print("명령")',
+      { source: "1/0" },
+      "exit()",
+    ]);
+
+    await bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
+    await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
+
+    // 결말은 `{ source }` 응답 바로 다음 요청에만 실린다. 첫 요청과 명령 뒤 요청은 기존 3인자 그대로다.
+    expect(events.filter((e) => e[0] === "readLine")).toEqual([
+      PROMPT_REQUEST,
+      [...PROMPT_REQUEST, { kind: "exit", code: 3 }],
+      PROMPT_REQUEST,
+      [
+        ...PROMPT_REQUEST,
+        {
+          kind: "error",
+          errorType: "ZeroDivisionError",
+          traceback: expect.stringMatching(
+            /^Traceback \(most recent call last\):\n {2}File "<console>", line 1, in <module>\nZeroDivisionError: division by zero\n$/,
+          ),
+        },
+      ],
+    ]);
+    // `sys.exit(3)`는 세션을 끝내지 않았다: 종료 통지는 마지막 `exit()` 명령 뒤 한 번뿐이고 마지막 이벤트다.
+    expect(events.filter((e) => e[0] === "sessionTerminated")).toHaveLength(1);
+    expect(events.at(-1)).toEqual(["sessionTerminated"]);
+    // 출력은 그 결말을 싣는 다음 프롬프트 요청보다 먼저 온다(확정 9의 재료).
+    const firstWrite = events.findIndex((e) => e[0] === "write" && e[1] === "1");
+    const secondRequest = events.findIndex(
+      (e, i) => e[0] === "readLine" && i > firstWrite,
+    );
+    expect(firstWrite).toBeGreaterThan(-1);
+    expect(secondRequest).toBeGreaterThan(firstWrite);
+    // 실행 뒤 명령이 이어졌다.
+    expect(events).toContainEqual(["write", "명령"]);
+    expect(consoleError).not.toHaveBeenCalled();
+  }, 30_000);
+});

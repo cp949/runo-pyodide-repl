@@ -18,7 +18,11 @@ import {
   discardPendingInterrupt,
   readRequestSeq,
 } from "@cp949/runo-pyodide-core/worker";
-import { createConsole, type PyodideConsoleProxy } from "../worker/console";
+import {
+  createConsole,
+  type PyodideConsoleProxy,
+  type ReplConsole,
+} from "../worker/console";
 import { loadSplitPaste } from "../worker/multiline";
 import {
   type InterruptIdle,
@@ -103,6 +107,8 @@ export interface ConsoleRunner {
   screen: { stdout: string; stderr: string };
   buffer: Int32Array;
   pyconsole: PyodideConsoleProxy;
+  /** 이 조립의 REPL 콘솔. `runSource` 시험(`run-source.test.ts`)이 같은 콘솔에 실행기를 붙인다. */
+  repl: ReplConsole;
   /** 눌림 스레드를 띄운다. 시험이 끝나면 종료된다. */
   presser: () => Presser;
   /** 설치가 돌려준 Python `interrupt_idle`. `teardownConsoleRunner`가 destroy한다. */
@@ -281,6 +287,7 @@ export function setupConsoleRunner(
     screen,
     buffer,
     pyconsole: repl.pyconsole,
+    repl,
     presser,
     interruptIdle,
     wakeAfter,

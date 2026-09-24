@@ -1,7 +1,7 @@
 /**
  * REPL worker driver(RD-020). core worker 커널(`runWorker`, `@cp949/runo-pyodide-core/worker`)이 공통 부팅
  * (RPC → loadPyodide → 콘솔 → webloop 억제 → Ctrl+C 연결 → stdin 배선 → `ready` → 감시 타이머)을 맡고, 이 driver는
- * REPL 전용 부분을 낸다(초기화 프레임 `driver` 필드 `{ topLevelAwait }`의 검증 포함): `complete` RPC 핸들러, 콘솔 확장(`sys.ps1/ps2`·헬퍼·TLA·완성기), pyodide 비공개 지점 탐지(`probe`), 배너·제출 러너·`readLine` 루프.
+ * REPL 전용 부분을 낸다(초기화 프레임 `driver` 필드 `{ topLevelAwait }`의 검증 포함): `complete` RPC 핸들러, 콘솔 확장(`sys.ps1/ps2`·헬퍼·TLA·완성기), pyodide 비공개 지점 탐지(`probe`), 배너·제출 러너·`{ source }` 실행기(RD-022a)·`readLine` 루프.
  */
 import {
   discardPendingInterrupt,
@@ -12,10 +12,12 @@ import {
   type WorkerDriverSession,
 } from "@cp949/runo-pyodide-core/worker";
 import { parseReplDriverOptions, type ReplDriverOptions } from "../driver-options";
+import type { ReadLineReply } from "../repl-protocol";
 import { loadCompleteSource, type CompleteSource } from "./complete-source";
 import { createConsole, type ReplConsole } from "./console";
 import { loadSplitPaste } from "./multiline";
 import { runReplLoop } from "./repl-loop";
+import { createSourceRunner } from "./run-source";
 import { createSubmissionRunner } from "./submission-runner";
 
 /** `atPrompt`가 아니거나 `completer`가 아직 없을 때(콘솔 생성 전) `complete` 요청에 돌려주는 빈 응답. */
@@ -56,26 +58,42 @@ function createReplSession(options: ReplDriverOptions): WorkerDriverSession {
         },
         { splitPaste },
       );
-      await runReplLoop({
-        readLine: (prompt, pending) =>
-          rpc.call<string | null>("readLine", prompt, pending, true),
-        setAtPrompt: (value) => {
-          atPrompt = value;
-        },
-        discardPendingInterrupt: () =>
-          discardPendingInterrupt(frame.interruptBuffer),
-        run: (line) => runner.run(line),
-        onTerminated: () => rpc.notify("sessionTerminated"),
-        onError: (error) => {
-          console.error("[repl.worker] 루프 오류", error);
-          rpc.notify("writeError", `repl 내부 오류: ${String(error)}`);
-          try {
-            repl.clearPending();
-          } catch {
-            // 콘솔 상태를 읽을 수 없으면 다음 push가 새 상태를 만든다.
-          }
-        },
-      });
+      // `{ source }` 응답(RD-022a `runSource`) 실행기. 세션마다 한 번 올리고 루프가 끝나면(정상 종료·RPC 종료) 놓는다.
+      const sourceRunner = createSourceRunner(pyodide, repl);
+      try {
+        await runReplLoop({
+          readLine: (prompt, pending, outcome) =>
+            // 결말은 `{ source }` 실행 직후 요청에만 싣는다. 없으면 기존 3인자 요청 그대로다.
+            outcome === undefined
+              ? rpc.call<ReadLineReply>("readLine", prompt, pending, true)
+              : rpc.call<ReadLineReply>(
+                  "readLine",
+                  prompt,
+                  pending,
+                  true,
+                  outcome,
+                ),
+          setAtPrompt: (value) => {
+            atPrompt = value;
+          },
+          discardPendingInterrupt: () =>
+            discardPendingInterrupt(frame.interruptBuffer),
+          run: (line) => runner.run(line),
+          runSource: (source) => sourceRunner.run(source),
+          onTerminated: () => rpc.notify("sessionTerminated"),
+          onError: (error) => {
+            console.error("[repl.worker] 루프 오류", error);
+            rpc.notify("writeError", `repl 내부 오류: ${String(error)}`);
+            try {
+              repl.clearPending();
+            } catch {
+              // 콘솔 상태를 읽을 수 없으면 다음 push가 새 상태를 만든다.
+            }
+          },
+        });
+      } finally {
+        sourceRunner.destroy();
+      }
     },
     atPrompt: () => atPrompt,
   };

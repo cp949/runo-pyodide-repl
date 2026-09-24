@@ -6,13 +6,16 @@
  */
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { runReplLoop } from "./repl-loop";
+import type { RunOutcome } from "@cp949/runo-pyodide-core/worker";
 import type { SubmissionResult } from "./submission-runner";
 
 type ReadLine = (
   prompt: string,
   pending: string | undefined,
-) => Promise<string | null>;
+  outcome?: RunOutcome,
+) => Promise<string | null | { source: string }>;
 type Run = (line: string | null) => Promise<SubmissionResult>;
+type RunSource = (source: string) => Promise<RunOutcome>;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -52,6 +55,7 @@ describe("runReplLoop", () => {
       setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
+      runSource: vi.fn<RunSource>(),
       onTerminated,
       onError: vi.fn(),
     });
@@ -75,6 +79,7 @@ describe("runReplLoop", () => {
       setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
+      runSource: vi.fn<RunSource>(),
       onTerminated,
       onError: vi.fn(),
     });
@@ -101,6 +106,7 @@ describe("runReplLoop", () => {
       setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
+      runSource: vi.fn<RunSource>(),
       onTerminated,
       onError,
     });
@@ -131,6 +137,7 @@ describe("runReplLoop", () => {
       setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
+      runSource: vi.fn<RunSource>(),
       onTerminated,
       onError,
     });
@@ -155,6 +162,7 @@ describe("runReplLoop", () => {
       setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
+      runSource: vi.fn<RunSource>(),
       onTerminated,
       onError,
     });
@@ -175,6 +183,7 @@ describe("runReplLoop", () => {
       setAtPrompt: vi.fn(),
       discardPendingInterrupt: vi.fn(),
       run,
+      runSource: vi.fn<RunSource>(),
       onTerminated: vi.fn(),
       onError: vi.fn(),
     });
@@ -195,6 +204,7 @@ describe("runReplLoop", () => {
       setAtPrompt,
       discardPendingInterrupt,
       run,
+      runSource: vi.fn<RunSource>(),
       onTerminated: vi.fn(),
       onError: vi.fn(),
     });
@@ -203,7 +213,12 @@ describe("runReplLoop", () => {
     const timeline = [
       ...setAtPrompt.mock.invocationCallOrder.map(
         (n, i) =>
-          [n, setAtPrompt.mock.calls[i]?.[0] ? "atPrompt(true)" : "atPrompt(false)"] as const,
+          [
+            n,
+            setAtPrompt.mock.calls[i]?.[0]
+              ? "atPrompt(true)"
+              : "atPrompt(false)",
+          ] as const,
       ),
       ...readLine.mock.invocationCallOrder.map((n) => [n, "readLine"] as const),
       ...discardPendingInterrupt.mock.invocationCallOrder.map(
@@ -235,6 +250,7 @@ describe("runReplLoop", () => {
       discardPendingInterrupt,
       setAtPrompt: vi.fn(),
       run: vi.fn<Run>(),
+      runSource: vi.fn<RunSource>(),
       onTerminated: vi.fn(),
       onError: vi.fn(),
     });
@@ -250,10 +266,359 @@ describe("runReplLoop", () => {
       setAtPrompt,
       discardPendingInterrupt: vi.fn(),
       run: vi.fn<Run>(),
+      runSource: vi.fn<RunSource>(),
       onTerminated: vi.fn(),
       onError: vi.fn(),
     });
 
     expect(setAtPrompt.mock.calls).toEqual([[true]]);
+  });
+});
+
+/** `{ source }` 응답 각본: 단계마다 `readLine`이 돌려줄 응답과 `runSource`가 돌려줄 결말(또는 던질 오류)을 쓴다. */
+function sourceScript(
+  steps: {
+    reply: string | null | { source: string };
+    outcome?: RunOutcome | Error;
+    result?: SubmissionResult;
+  }[],
+) {
+  const readLine = vi.fn<ReadLine>();
+  const run = vi.fn<Run>();
+  const runSource = vi.fn<RunSource>();
+  for (const { reply, outcome, result } of steps) {
+    readLine.mockResolvedValueOnce(reply);
+    if (outcome instanceof Error) runSource.mockRejectedValueOnce(outcome);
+    else if (outcome) runSource.mockResolvedValueOnce(outcome);
+    if (result) run.mockResolvedValueOnce(result);
+  }
+  return { readLine, run, runSource };
+}
+
+describe("runReplLoop: 루프 명령 `{ source }`", () => {
+  test("`{ source }` 응답은 run이 아니라 runSource로 실행하고 소스를 그대로 넘긴다", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      { reply: { source: "x = 1\nprint(x)" }, outcome: { kind: "ok" } },
+      { reply: null, result: EXIT },
+    ]);
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(runSource.mock.calls).toEqual([["x = 1\nprint(x)"]]);
+    // run은 두 번째 응답(`null`)에만 불렸다.
+    expect(run.mock.calls).toEqual([[null]]);
+  });
+
+  test("setAtPrompt(false) → discardPendingInterrupt → runSource 순서다", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      { reply: { source: "1" }, outcome: { kind: "ok" } },
+      { reply: null, result: EXIT },
+    ]);
+    const setAtPrompt = vi.fn<(value: boolean) => void>();
+    const discardPendingInterrupt = vi.fn();
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt,
+      discardPendingInterrupt,
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    const timeline = [
+      ...setAtPrompt.mock.invocationCallOrder.map(
+        (n, i) =>
+          [
+            n,
+            setAtPrompt.mock.calls[i]?.[0]
+              ? "atPrompt(true)"
+              : "atPrompt(false)",
+          ] as const,
+      ),
+      ...readLine.mock.invocationCallOrder.map((n) => [n, "readLine"] as const),
+      ...discardPendingInterrupt.mock.invocationCallOrder.map(
+        (n) => [n, "discard"] as const,
+      ),
+      ...runSource.mock.invocationCallOrder.map(
+        (n) => [n, "runSource"] as const,
+      ),
+      ...run.mock.invocationCallOrder.map((n) => [n, "run"] as const),
+    ]
+      .sort(([a], [b]) => a - b)
+      .map(([, name]) => name);
+    expect(timeline).toEqual([
+      "atPrompt(true)",
+      "readLine",
+      "atPrompt(false)",
+      "discard",
+      "runSource",
+      "atPrompt(true)",
+      "readLine",
+      "atPrompt(false)",
+      "discard",
+      "run",
+    ]);
+  });
+
+  test("runSource 실행 중에는 atPrompt가 거짓이고 끝난 뒤 다음 읽기 직전에 다시 참이 된다", async () => {
+    let atPrompt = false;
+    const seenDuringRun: boolean[] = [];
+    const atPromptAtRead: boolean[] = [];
+    const readLine = vi.fn<ReadLine>(async () => {
+      atPromptAtRead.push(atPrompt);
+      return atPromptAtRead.length === 1 ? { source: "1" } : null;
+    });
+    const runSource = vi.fn<RunSource>(async () => {
+      seenDuringRun.push(atPrompt);
+      return { kind: "ok" };
+    });
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: (value) => {
+        atPrompt = value;
+      },
+      discardPendingInterrupt: vi.fn(),
+      run: vi.fn<Run>().mockResolvedValue(EXIT),
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(seenDuringRun).toEqual([false]);
+    expect(atPromptAtRead).toEqual([true, true]);
+  });
+
+  test("결말은 다음 readLine 요청의 세 번째 인자로 실려 가고 `>>> `·pending 없음이다", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      {
+        reply: { source: "1/0" },
+        outcome: {
+          kind: "error",
+          errorType: "ZeroDivisionError",
+          traceback: "Traceback...\n",
+        },
+      },
+      { reply: null, result: EXIT },
+    ]);
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(readLine.mock.calls).toEqual([
+      [">>> ", undefined],
+      [
+        ">>> ",
+        undefined,
+        {
+          kind: "error",
+          errorType: "ZeroDivisionError",
+          traceback: "Traceback...\n",
+        },
+      ],
+    ]);
+  });
+
+  test("결말은 한 번만 싣고 그 다음 요청에는 싣지 않는다", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      { reply: { source: "1" }, outcome: { kind: "ok" } },
+      { reply: "1+1", result: READY },
+      { reply: null, result: EXIT },
+    ]);
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(readLine.mock.calls.map((call) => call.length)).toEqual([2, 3, 2]);
+  });
+
+  test("exit 결말이어도 onTerminated를 부르지 않고 다음 프롬프트를 요청한다(세션 유지)", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      { reply: { source: "sys.exit(3)" }, outcome: { kind: "exit", code: 3 } },
+      { reply: "print(1)", result: READY },
+      { reply: null, result: EXIT },
+    ]);
+    const onTerminated = vi.fn();
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated,
+      onError: vi.fn(),
+    });
+
+    // exit 결말 뒤에도 루프가 다음 readLine으로 돌아와 결말을 싣고, 이어진 명령이 실행된다.
+    expect(readLine.mock.calls[1]).toEqual([
+      ">>> ",
+      undefined,
+      { kind: "exit", code: 3 },
+    ]);
+    expect(run.mock.calls).toEqual([["print(1)"], [null]]);
+    // 종료 통지는 마지막 `run(null)`의 exit 결과 한 번뿐이다.
+    expect(onTerminated).toHaveBeenCalledTimes(1);
+    expect(readLine).toHaveBeenCalledTimes(3);
+  });
+
+  test("runSource가 던지면 onError로 알리고 InternalError 결말을 싣고 계속한다", async () => {
+    const boom = new Error("boom");
+    const { readLine, run, runSource } = sourceScript([
+      { reply: { source: "1" }, outcome: boom },
+      { reply: null, result: EXIT },
+    ]);
+    const onError = vi.fn();
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError,
+    });
+
+    expect(onError.mock.calls).toEqual([[boom]]);
+    // 사용자 코드 오류가 아니라 worker 내부 오류라는 표지: errorType이 `InternalError`다.
+    expect(readLine.mock.calls[1]).toEqual([
+      ">>> ",
+      undefined,
+      {
+        kind: "error",
+        errorType: "InternalError",
+        traceback: "repl 내부 오류: Error: boom\n",
+      },
+    ]);
+  });
+
+  test("성공 결말은 프롬프트·pending을 바꾸지 않는다(열린 블록은 콘솔 buffer에 그대로 있다)", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      {
+        reply: "if True:",
+        result: { prompt: "... ", exit: false, pending: "if True:" },
+      },
+      { reply: { source: "1" }, outcome: { kind: "ok" } },
+      { reply: null, result: EXIT },
+    ]);
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(readLine.mock.calls[2]).toEqual([
+      "... ",
+      "if True:",
+      { kind: "ok" },
+    ]);
+  });
+
+  test("runSource 내부 오류는 onError가 블록을 버리므로 `>>> `·pending 없음으로 돌아간다", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      {
+        reply: "if True:",
+        result: { prompt: "... ", exit: false, pending: "if True:" },
+      },
+      { reply: { source: "1" }, outcome: new Error("boom") },
+      { reply: null, result: EXIT },
+    ]);
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(readLine.mock.calls[2]?.slice(0, 2)).toEqual([">>> ", undefined]);
+  });
+
+  test("결말을 실은 읽기가 `rpc disposed`로 끝나면 조용히 끝난다", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const readLine = vi
+      .fn<ReadLine>()
+      .mockResolvedValueOnce({ source: "1" })
+      .mockRejectedValueOnce(new Error("rpc disposed"));
+    const onTerminated = vi.fn();
+    const onError = vi.fn();
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run: vi.fn<Run>(),
+      runSource: vi.fn<RunSource>().mockResolvedValue({ kind: "ok" }),
+      onTerminated,
+      onError,
+    });
+
+    expect(onTerminated).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  test("`{ source }` 뒤 문자열 응답은 기존 경로 그대로 프롬프트·pending을 갱신한다", async () => {
+    const { readLine, run, runSource } = sourceScript([
+      { reply: { source: "1" }, outcome: { kind: "ok" } },
+      {
+        reply: "if True:",
+        result: { prompt: "... ", exit: false, pending: "if True:" },
+      },
+      { reply: "", result: READY },
+      { reply: null, result: EXIT },
+    ]);
+
+    await runReplLoop({
+      readLine,
+      setAtPrompt: vi.fn(),
+      discardPendingInterrupt: vi.fn(),
+      run,
+      runSource,
+      onTerminated: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    expect(readLine.mock.calls).toEqual([
+      [">>> ", undefined],
+      [">>> ", undefined, { kind: "ok" }],
+      ["... ", "if True:"],
+      [">>> ", undefined],
+    ]);
   });
 });
