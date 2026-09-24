@@ -110,3 +110,4 @@ RD-013(자동 들여쓰기) 범위와 무관한 파일이라 그 RD에서는 다
 - 중첩 `run_sync` 대기가 여럿이고 하나만 깨운 상태에서 온 눌림은 다른 대기를 깨우지 않는다(수정 전 동기 코드는 깨웠다).
   판별 시험 없음.
 
+- 2026-09-24 같은 시험(`정지한 run_sync 루프의 콜백이 소비한 SIGINT도 루프를 끊는다`)이 다른 모양(`<frozen abc>` `__subclasscheck__` 안 `KeyboardInterrupt` + `pyodide.ffi.ConversionError`)으로 1회 실패했다. 이 이슈의 원인 A·B와 모양이 달라 재개하지 않고 [05](./05-sigint-idle-subclasscheck-conversion-error-flake.md)(`deferred`)로 따로 등록했다.

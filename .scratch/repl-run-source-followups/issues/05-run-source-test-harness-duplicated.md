@@ -18,3 +18,4 @@ repl `src/run-source.test.ts`는 `index.test.ts`(2100줄)에 더하지 않고 �
 ## Comments
 
 - 2026-09-24 등록 시점 분류: 코드 읽기로만 확인한 중복이고 거짓 결과를 관찰하지 않았다. `deferred`(`docs/agents/issue-tracker.md` "코드 읽기로만 추정한 테스트 도구 문제").
+- 2026-09-24 RD-022b 추가 관찰(분류 `deferred` 유지): 재개 조건 "세 번째 시험 파일이 같은 화면 모델을 필요로 할 때"를 충족해 화면 모델 부분만 처리했다. repl `src/test/vt-screen.ts`를 `@repo/pyodide-testkit/vt-screen`(`packages/pyodide-testkit/src/vt-screen.ts`)으로 옮기고 `attachVtScreen(fake, vt)`(가짜 터미널 write를 화면에 반영)를 더했다. 소비자는 repl `run-source.test.ts`(import 경로만 변경, `startSession`의 write 가로채기는 그대로)·`terminal/read-guard.test.ts`, terminal `sinks.test.ts`·`terminal-runner.test.ts`다. 남은 것: 가짜 worker·세션 하니스 복제(`index.test.ts` ↔ `run-source.test.ts`)와 `VtScreen`이 벤더 `vterm.ts`의 축소 복제라는 점. 남은 부분의 재개 조건은 본문 그대로(세 번째 파일이 가짜 worker 하니스를 필요로 할 때, 또는 복제 사이 불일치로 거짓 결과가 실측될 때). 문서 경로는 `docs/design/00-architecture.md`·`02-console-core.md` 5.6.8에서 고쳤다.
