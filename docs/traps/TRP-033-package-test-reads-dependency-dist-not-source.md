@@ -26,3 +26,7 @@
 
 - 자기 `dist`를 검사하는 것은 시험이 아니라 별도 태스크로 둔다(`turbo.json`의 `check-dist`: `dependsOn: ["build"]`, `cache: false`, 루트 `pnpm test`가 함께 실행, 단독은 `pnpm check-dist`).
 - 진입점 시험에서 `vi.mock`이 안 걸리는 경우도 같은 뿌리다. repl 시험이 core `dist`를 import하면 `dist/worker.mjs` 안에서 `bootWorker`가 이미 묶여 있어 mock 대상이 아니다. 진입점 시험은 진입점과 같은 패키지(core, 소스 import)에 둔다.
+
+## 정정(2026-09-24 실측)
+
+(a)의 "repl 시험은 `dist`를 읽는다"는 vitest 5.0.1 단독 실행에서는 성립하지 않았다. core `dist` 폴더를 치운 채 `packages/pyodide-repl`에서 `npx vitest run src/index.test.ts src/worker/boot.test.ts`를 돌려도 2파일 162건이 통과했다(vitest가 `development` 조건으로 core 소스를 읽는다). 반대로 core 소스를 고치면 `pnpm build` 없이도 repl 시험에 반영됐다. `tsc`(`check-types`)와 `dist`를 직접 읽는 시험(산출물 검사)의 해석은 이 실측 대상이 아니다. 그러므로 (a)의 "빌드 뒤에 돌린다"는 회피는 무해하지만 vitest에서는 필요 조건이 아니고, "통과·실패가 낡은 core를 뜻한다"는 신호 설명은 vitest 단독 실행에는 해당하지 않는다. (b)는 이 실측과 무관하다.

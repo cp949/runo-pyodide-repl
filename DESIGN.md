@@ -8,7 +8,7 @@
 
 처음 오는 에이전트는 1→2→3 순서로 읽는다. 특정 RD를 맡았으면 3의 해당 절만 읽어도 된다.
 
-1. **무엇을, 왜**: `docs/design/00-architecture.md`(목표·채널·생명주기·패키지·공개 인터페이스), `docs/adr/`(결정 6건)
+1. **무엇을, 왜**: `docs/design/00-architecture.md`(목표·채널·생명주기·패키지·공개 인터페이스), `docs/adr/`(결정 7건)
 2. **통신 계약**: `docs/design/01-protocols.md`(RPC 메시지, stdin 메일박스, interrupt buffer, 초기화 프레임, 시퀀스)
 3. **기능 규칙**(이전 구현이 3.14 pty 실측으로 확정한 것을 계승):
    - `02-console-core.md` PyodideConsole·제출 실행·top-level await·종료
@@ -18,7 +18,7 @@
    - `06-editing.md` 벤더링 xterm-readline·자동 들여쓰기·블록 히스토리·붙여넣기·선택 복사·읽기 없는 구간의 키 버퍼링
    - `07-tab-completion.md` Tab 완성
    - `08-session.md` 리셋·이중 마운트·종료 후 상태
-4. **검증과 한계**: `09-testing.md`(패키지 경계 검사 9.8 포함), `10-parity-deviations.md`(3.14 편차 49건 등록: 해소 22·28·32와 동등 항목 23 포함, 범위 밖은 별도), `11-known-traps.md`(함정 33건)
+4. **검증과 한계**: `09-testing.md`(패키지 경계 검사 9.8 포함), `10-parity-deviations.md`(3.14 편차 49건 등록: 해소 22·28·32와 동등 항목 23 포함, 범위 밖은 별도), `11-known-traps.md`(함정 33건), `13-version-upgrade.md`(pyodide 버전 원천·업그레이드 절차·호환 탐지 등급표, [ADR-0007](docs/adr/0007-pyodide-single-version-policy.md))
 5. **이전 구현 참조**: `12-previous-implementation.md`(이전 RD 인벤토리·모듈 지도)
 
 ## 결정된 스택
@@ -31,7 +31,7 @@
 | 줄 편집 | `packages/xterm-readline` = `@cp949/runo-xterm-readline`. strtok/xterm-readline 1.2.2 소스 벤더링(MIT). 원본 `/work/thrd/xterm-readline` |
 | 터미널 | `@xterm/xterm` 6 |
 | 데모 | `apps/demo`: Vite 8 + React 19. UI 라이브러리 미정(필수 아님) |
-| Python | pyodide `314.0.7`(Python 3.14.2), CDN `loadPyodide`. `pyodide` npm 패키지는 타입·node 시험용 devDependency |
+| Python | pyodide `314.0.7`(Python 3.14.2), CDN `loadPyodide`. 버전 원천은 `pnpm-workspace.yaml` catalog 한 곳이고 코드는 `pyodide/package.json`에서 유도한다(ADR-0007, `13-version-upgrade.md`). `pyodide` npm 패키지는 타입·node 시험용 devDependency이며 core가 optional peer로도 선언한다 |
 | 동등성 기준 | CPython 3.14.4 `_pyrepl`, pty 24×80 `TERM=xterm` 실측 |
 | 통신 | 네이티브 Worker + MessageChannel RPC + `input()` 전용 SAB 메일박스 + interrupt buffer. coincident 없음 |
 | 테스트 | vitest 5. node 환경에서 실제 pyodide 로드, jsdom + 가짜 터미널, 브라우저는 Playwright 수동 하니스. 시험 도우미는 `packages/pyodide-testkit` = `@repo/pyodide-testkit`(private, 빌드·pack 없음). 패키지 경계 검사(의존 트리 시험·`check-dist`·`pnpm smoke:pack`)는 `09-testing.md` 9.8 |

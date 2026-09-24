@@ -45,7 +45,7 @@ _Avoid_: 등록, 미들웨어
 ### worker 쪽
 
 **worker 커널**:
-`runWorker({ driver })`·`bootWorker`. 초기화 프레임 수신 → driver 옵션 검증 → RPC 생성 → pyodide 로드 → `driver.createConsole` → webloop 억제 → Ctrl+C 연결 → `setStdin` → `ready` → 감시 타이머 → `driver.run` 순서를 소유한다.
+`runWorker({ driver })`·`bootWorker`. 초기화 프레임 수신 → driver 옵션 검증 → RPC 생성 → pyodide 로드 → interrupt 공개 API 확인 → `driver.createConsole` → `driver.probe` → webloop 억제 → Ctrl+C 연결 → `setStdin` → `ready` → 감시 타이머 → `driver.run` 순서를 소유한다.
 _Avoid_: 부트로더, 런처
 
 **init 필터**:
@@ -63,4 +63,23 @@ _Avoid_: 싱글턴 driver
 ### 소비자 요구
 
 **core 타입 소비자**:
-core `./worker`의 `.d.mts`를 import하는 코드. 그 파일이 `pyodide`·`pyodide/ffi` 타입을 import하는데 core는 `pyodide`를 배포 의존으로 선언하지 않으므로, 소비자가 `pyodide`(+`@types/node`·`@types/emscripten`)를 직접 설치해야 한다(`docs/design/00-architecture.md` 4.4, `09-testing.md` 9.8.3). repl만 쓰는 소비자는 해당하지 않는다.
+core `./worker`의 `.d.mts`를 import하는 코드. 그 파일이 `pyodide`·`pyodide/ffi` 타입을 import한다. core는 `pyodide`를 배포 `dependencies`가 아니라 optional peer(`^` 범위, Python 3.14 minor `314.x` 안의 타입 호환)로 선언하므로, 소비자가 같은 minor의 `pyodide`(+`@types/node`·`@types/emscripten`)를 직접 설치해야 한다(`README.md`, `docs/design/00-architecture.md` 4.4, `09-testing.md` 9.8.3, `13-version-upgrade.md` 13.7). repl만 쓰는 소비자는 해당하지 않는다.
+
+### 호환 탐지
+
+**`ready` 페이로드**:
+`ReadyPayload = { pyodideVersion, versionMismatch, degraded, details? }`. worker가 부팅 중 한 번 탐지한 pyodide 호환 결과를 `ready` 알림에 싣는다(`docs/design/01-protocols.md` 1.2). 공개 API가 아닌 내부 계약이다.
+_Avoid_: 상태 객체, 헬스 체크
+
+**`versionMismatch`**:
+로드된 `pyodide.version`이 core `PYODIDE_VERSION`과 다르다(완전 일치 비교, 범위 없음). 거부하지 않고 경고만 낸다.
+
+**`degraded`**:
+pyodide 비공개 API 지점이 기대와 달라 **해당 기능만 꺼진** 지점의 식별자 배열(`compiler-flags`·`incomplete-input-message`·`webloop-handlers`·`run-sync`·`sleep-slice`·`webloop-filename`). 표는 `docs/design/13-version-upgrade.md` 13.6. interrupt 공개 API 부재는 `degraded`가 아니라 시작 거부(`loadFailed`)다.
+_Avoid_: 오류, 실패, unsupported
+
+**`probe`**:
+`WorkerDriverSession.probe?(context: { pyodide, pyconsole }): string[]`. driver가 자기 비공개 API 지점을 탐지해 `degraded` 식별자 배열을 돌려주는 선택 메서드다. core가 `createConsole` 직후 한 번 부르고 결과를 core 지점 4개와 합쳐 `ready`로 보낸다. 콘솔·전역 상태를 바꾸지 않아야 하고 던지면 `loadFailed`다.
+
+**호환 경고**:
+main core 세션의 `ready` 핸들러가 `versionMismatch` 또는 `degraded`가 비어 있지 않을 때만 세션당 1회 내는 `console.warn("[session] pyodide 호환 경고", { expected, actual, degraded, details })`. worker는 경고를 내지 않고 `report(id, detail)`로 수집기에 보고한다.

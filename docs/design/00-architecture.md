@@ -47,8 +47,8 @@
 2. main이 `MessageChannel`, interrupt buffer, stdin 메일박스를 만들고 worker를 생성한다(`createWorker()` 팩토리).
 3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `driver` 필드(driver 옵션, core는 모양을 모른다. REPL은 `{ topLevelAwait }`), pyodide `indexURL`. worker 스크립트는 모듈 본문에서 동기로(첫 `await` 이전) core `runWorker`를 불러 `message` 리스너를 건다. 리스너는 `kind: "init"`인 객체만 소비하고 배열 같은 다른 메시지는 넘긴다(`01-protocols.md` 4절). 프레임은 하나뿐이다.
 4. worker가 driver 옵션을 검증(`WorkerDriver.parseOptions(frame.driver)`)하고 pyodide를 로드하고 콘솔을 만든 뒤 `ready` 알림(또는 `loadFailed`)을 보낸다. 로드 실패는 worker를 죽이지 않는다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 거부되고 `console.error`만 남는다(`loadFailed`를 보낼 RPC가 아직 없다).
-5. worker(core `bootWorker`)의 순서는 `WorkerDriver.parseOptions` → `createSession` → RPC 생성(core 핸들러 + driver 핸들러 합성) → `loadPyodide` → `driver.createConsole` → `suppressWebLoopReraise` → `connectInterrupts`(SIGINT 핸들러 설치 → interrupt buffer 연결) → `setStdin` → `ready` 알림 → 감시 타이머 시작 → `driver.run`(REPL: 배너 출력 → 제출 러너 생성 → REPL 루프 진입)이다(`03-ctrl-c.md` 2.6 순서).
-   `driver.createConsole` 직후 `suppressWebLoopReraise(pyodide, { warn })`(WebLoop의 `KeyboardInterrupt`·`SystemExit` 재보고 억제, `03-ctrl-c.md` 2.8)를 한 번 부르고, 이어서 `connectInterrupts(pyodide, pyconsole, frame.interruptBuffer, { ack, seq, discard, warn })`(조각 교체 → 핸들러 설치 → 폐기 → 연결, 반환값은 `InterruptIdle`)를 부른 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). `ready` 알림까지 전부 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머(`startInterruptWatch`)는 `ready` 뒤·`driver.run` 직전에 켠다(배너·러너 생성보다 앞이지만 그 사이에 `await`가 없다). `driver.run`이 끝나면 `finally`에서 `stopWatch()`, 부팅 전체의 `finally`에서 `interruptIdle.destroy()`로 정리한다.
+5. worker(core `bootWorker`)의 순서는 `WorkerDriver.parseOptions` → `createSession` → RPC 생성(core 핸들러 + driver 핸들러 합성) → `loadPyodide` → interrupt 공개 API 확인 → `driver.createConsole` → `driver.probe` → `suppressWebLoopReraise` → `connectInterrupts`(SIGINT 핸들러 설치 → interrupt buffer 연결) → `setStdin` → `ready` 알림 → 감시 타이머 시작 → `driver.run`(REPL: 배너 출력 → 제출 러너 생성 → REPL 루프 진입)이다(`03-ctrl-c.md` 2.6 순서).
+   `loadPyodide` 직후 interrupt 공개 API(`setInterruptBuffer`·`checkInterrupt`)가 함수인지 확인하고, 하나라도 아니면 콘솔을 만들기 전에 던져 `loadFailed`로 시작을 거부한다(Ctrl+C가 성립하지 않는다, `13-version-upgrade.md` 13.6). `driver.createConsole` 직후 `driver.probe?.({ pyodide, pyconsole })`(선택, REPL 비공개 API 지점 2개의 저하 식별자 배열, 던지면 `loadFailed`)를 부르고, 이어서 `suppressWebLoopReraise(pyodide, { report })`(WebLoop의 `KeyboardInterrupt`·`SystemExit` 재보고 억제, `03-ctrl-c.md` 2.8)를 한 번 부르고, 이어서 `connectInterrupts(pyodide, pyconsole, frame.interruptBuffer, { ack, seq, discard, report })`(조각 교체 → 핸들러 설치 → 폐기 → 연결, 반환값은 `InterruptIdle`)를 부른 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). `report`는 부팅 중 만든 저하 수집기(`worker/compat.ts` `createDegradedCollector`)의 `report(id, detail)`이고, 수집 결과(`probe` 반환 + core 지점 4개)가 `ready` 페이로드 `{ pyodideVersion, versionMismatch, degraded, details? }`로 나간다(`01-protocols.md` 1.2). worker는 경고를 내지 않고 main 세션이 문제가 있을 때만 `console.warn`을 1회 낸다. `ready` 알림까지 전부 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머(`startInterruptWatch`)는 `ready` 뒤·`driver.run` 직전에 켠다(배너·러너 생성보다 앞이지만 그 사이에 `await`가 없다). `driver.run`이 끝나면 `finally`에서 `stopWatch()`, 부팅 전체의 `finally`에서 `interruptIdle.destroy()`로 정리한다.
 
 ### 3.2 REPL 루프(worker)
 
@@ -115,7 +115,7 @@ export function createRepl(options: ReplOptions): ReplHandle
 interface ReplOptions {
   terminal: Terminal                       // @xterm/xterm. 호출자가 만들고 dispose한다
   createWorker: () => Worker               // 리셋마다 다시 호출된다
-  pyodide?: { indexURL?: string }          // 기본 CDN https://cdn.jsdelivr.net/pyodide/v314.0.7/full/
+  pyodide?: { indexURL?: string }          // 기본 CDN `DEFAULT_PYODIDE_INDEX_URL` = https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/ (13-version-upgrade.md 13.1)
   topLevelAwait?: boolean                  // 기본 false. 바꾸려면 reset()
   onStatus?: (s: ReplStatus) => void       // 'loading' | 'ready' | 'load-failed' | 'not-isolated' | 'terminated' | 'crashed'
   onCrash?: (message: string) => void
@@ -185,7 +185,8 @@ export function runWorker(options: { driver: WorkerDriver }): void
 
 ```text
 packages/pyodide-core/src/                      (공통. UI·xterm 비의존)
-  index.ts                 main 쪽 진입점: 프로토콜 + startCoreSession + driver 타입
+  index.ts                 main 쪽 진입점: 프로토콜 + startCoreSession + driver 타입 + PYODIDE_VERSION·DEFAULT_PYODIDE_INDEX_URL
+  pyodide-version.ts       `pyodide/package.json`의 version에서 PYODIDE_VERSION·DEFAULT_PYODIDE_INDEX_URL 유도(tsdown이 JSON을 인라인)   ← 13-version-upgrade.md 13.1
   worker.ts                worker 쪽 진입점: runWorker·bootWorker + worker 쪽 프로토콜 + 콘솔 뼈대 + driver 타입
   protocol/
     rpc.ts                 MessagePort 위 요청/응답/알림          ← 01-protocols.md 1절
@@ -194,6 +195,7 @@ packages/pyodide-core/src/                      (공통. UI·xterm 비의존)
     interrupt-protocol.ts  interrupt buffer 슬롯·원자 연산         ← 01 3절, 03-ctrl-c.md
     interrupt-sender.ts    송신·점검·재전송 상태기계(main 절반)      ← 03 2.3
     init-frame.ts          초기화 프레임 타입·검증(`driver` 필드는 존재만)   ← 01 4절
+    ready-payload.ts       `ReadyPayload`·`createReadyPayload`: `ready` 알림 페이로드와 `versionMismatch` 완전 일치 비교   ← 01 1.2, 13-version-upgrade.md 13.6
   terminal/
     output-tail.ts         출력 꼬리 추적(순수 모듈)                  ← 04 3.3, 05-output.md 4.1
   session/                 main 쪽. worker 하나에 대응하는 공통 자원·게이트
@@ -201,7 +203,8 @@ packages/pyodide-core/src/                      (공통. UI·xterm 비의존)
     driver.ts              MainDriver·OutputChunk·SessionStatus (driver 경계)
   worker/                  worker 쪽. 대부분 pyodide 프록시에만 의존(boot.ts·run-worker.ts는 조립 모듈이라 예외, 아래)
     run-worker.ts          runWorker: init 필터 수신 → 검증 → CDN 로더를 주입해 bootWorker 호출   ← 01 4절
-    boot.ts                bootWorker: 부팅 시퀀스(옵션 검증 → RPC → 로드 → 콘솔 → 연결 → ready → 감시 → driver.run)   ← 01 5절 S1
+    boot.ts                bootWorker: 부팅 시퀀스(옵션 검증 → RPC → 로드 → interrupt API 확인 → 콘솔 → probe → 연결 → ready → 감시 → driver.run)   ← 01 5절 S1
+    compat.ts              저하 수집기(`createDegradedCollector`)·`findMissingInterruptApi`·`CoreDegradedId`   ← 13-version-upgrade.md 13.6
     driver.ts              WorkerDriver·WorkerDriverSession·ConsoleContext·RunContext (driver 경계)
     core-console.ts        installStdioWriters·createCoreConsole(PyodideConsole 뼈대)·콘솔 프록시 타입   ← 02 5.1
     load-pyodide.ts        CDN 동적 import(브라우저 전용, 시험은 npm loadPyodide 주입)
@@ -286,8 +289,8 @@ RD-001에서 클린 체크아웃(`dist` 없음)으로 재현한 결과다.
 - `pnpm preview`는 `build`에 의존한다.
 - 패키지 의존 순서(RD-020): `pyodide-repl`이 `pyodide-core`에 `workspace:*`로 의존하므로 turbo `^build`가 core를 먼저 빌드한다. repl의 `check-types`·`test`도 core `dist`(`./dist/*.d.mts`·`./dist/*.mjs`)를 읽는다(vitest·tsc에는 `development` 조건이 없다). demo는 dev에서 `development` 조건으로 core 소스를 직접 읽고 build·preview에서는 repl `dist`가 core를 외부 import로 남기므로 vite 워커 번들링이 `node_modules`의 core를 해석한다.
 - `pyodide-testkit`은 빌드하지 않는다. `exports`가 `./src/*.ts`(`./thread`·`./fake-terminal`·`./package-boundary`)와 `./ts-resolve-hook.mjs`를 직접 가리키고 소비자가 vitest·tsc뿐이다. `private`이고 pack 대상이 아니다.
-- `check-dist` 태스크(RD-020): `dependsOn: ["build"]`, `cache: false`. xterm-readline·core·repl의 `dist`에 `coincident`·`reflected-ffi` 문자열이 없는지 검사한다(`scripts/check-dist.mjs`). 루트 `pnpm test`는 `turbo run test check-dist`라 시험과 함께 돌고 `pnpm check-dist`로 단독 실행할 수 있다. turbo `test`가 자기 패키지 `build`에 의존하지 않아 `dist` 검사를 시험 안에 둘 수 없다(`09-testing.md` 9.8.2).
-- core는 `pyodide`를 `devDependencies`로만 두고 `tsdown.config.ts`의 `external`(`pyodide`·`pyodide/*`)로 `.d.mts`에 pyodide 타입을 인라인하지 않는다. core `./worker` 타입을 쓰는 소비자는 `pyodide`(+`@types/node`·`@types/emscripten`)를 직접 설치해야 한다(`packages/pyodide-core/CONTEXT.md`, `09-testing.md` 9.8.3). repl만 쓰는 소비자는 영향이 없다.
+- `check-dist` 태스크(RD-020, RD-021): `dependsOn: ["build"]`, `cache: false`. xterm-readline·core·repl의 `dist`에 `coincident`·`reflected-ffi` 문자열이 없는지, `.mjs`에 `pyodide` 런타임 import(`from "pyodide`·`import("pyodide`)가 없는지 검사한다(`scripts/check-dist.mjs`). 루트 `pnpm test`는 `turbo run test check-dist`라 시험과 함께 돌고 `pnpm check-dist`로 단독 실행할 수 있다. turbo `test`가 자기 패키지 `build`에 의존하지 않아 `dist` 검사를 시험 안에 둘 수 없다(`09-testing.md` 9.8.2).
+- core는 `pyodide`를 `devDependencies`(`"catalog:"`, 원천은 `pnpm-workspace.yaml` catalog, ADR-0007)로 두고 optional peer(`^314.0.7`)로도 선언한다. `tsdown.config.ts`의 `deps.neverBundle`(`pyodide`, `pyodide/*`에서 `pyodide/package.json` 제외)로 `.d.mts`에 pyodide 타입을 인라인하지 않고, `deps.alwaysBundle: ["pyodide/package.json"]`로 `PYODIDE_VERSION`용 `version` 문자열만 `dist`에 인라인한다(런타임 `pyodide` import 없음). core `./worker` 타입을 쓰는 소비자는 `pyodide`(+`@types/node`·`@types/emscripten`)를 설치해야 한다(`packages/pyodide-core/README.md`, `packages/pyodide-core/CONTEXT.md`, `09-testing.md` 9.8.3, `13-version-upgrade.md` 13.7). repl만 쓰는 소비자는 영향이 없다.
 - tarball 스모크: 루트 `pnpm smoke:pack`(`pnpm build && node scripts/pack-smoke.mjs`)이 xterm-readline·core·repl을 pack해 저장소 밖에 설치·`import`·`tsc`로 확인한다. 기본 파이프라인에는 넣지 않는다(`09-testing.md` 9.8.3).
 
 ## 5. 이전 구현 대비 무엇이 사라지고 무엇이 남는가

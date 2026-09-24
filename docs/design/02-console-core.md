@@ -134,6 +134,14 @@ worker 안에서 도는 REPL 코어의 규칙이다. main과의 통신은 `01-pr
   (main에 되묻지 않는다, `01-protocols.md` 4절). 값을 바꾸려면
   worker를 새로 만든다(실행 중 콘솔의 플래그를 바꾸면 다음 `push`가 buffer 전체를 새 플래그로 재컴파일해
   `_IncompleteInputError`가 나고 buffer가 비워진다). `=== true`일 때만 ON으로 취급한다.
+- **`_compile.compiler.flags` 부재 fallback**(RD-021, 저하 식별자 `compiler-flags`): 이 경로는 pyodide 비공개 속성이다. REPL 콘솔은
+  `createConsole`에서 `setTopLevelAwait` 직전에 `hasCompilerFlags`(repl `worker/top-level-await.ts`)로 경로가 number인지 판정한다.
+  아니면 세 가지가 바뀐다. (1) `setTopLevelAwait`를 건너뛴다(pyodide 기본이 TLA 켬이라 `topLevelAwait: false`는 무시된다).
+  (2) `normalizeSyntaxError`가 재컴파일하지 않고 원문(`_IncompleteInputError: incomplete input`)을 돌려준다.
+  (3) `compilerFlags()`는 상수 `TOP_LEVEL_AWAIT_FLAG`(0x2000)를 돌려줘 `split_paste`의 붙여넣기 분할이 유지된다.
+  판정을 건너뛰면 `flags`만 없는 경우 `undefined & ~비트`가 0이 되어 `compiler.flags = 0`이 조용히 써지므로 판정이 앞이어야 한다.
+  결과는 driver `probe`가 `compiler-flags`로 돌려주고 main이 경고를 낸다(`13-version-upgrade.md` 13.6). 문구 탐지
+  (`incomplete-input-message`)는 이와 독립이다.
 - ON은 컴파일 플래그만 켠다. `asyncio` 선주입·배너 변경 등 `python -m asyncio`의 나머지는 흉내내지 않는다.
   설정은 저장하지 않아 페이지를 다시 열면 OFF다.
 - **main 쪽 연동**(RD-012, `00-architecture.md` 4.1): `createRepl({ topLevelAwait })`와 `reset({ topLevelAwait })`가

@@ -32,12 +32,22 @@ type RpcMessage =
 | `writeErrorRaw` | ntf | worker→main | `text: string` | — | stderr 조각(개행 미강제, main이 빨강) |
 | `writeOutput` | ntf | worker→main | `text: string` | — | 값 에코·배너(main이 개행을 붙인다) |
 | `writeError` | ntf | worker→main | `text: string` | — | 트레이스백·SyntaxError(main이 개행·빨강) |
-| `ready` | ntf | worker→main | `{ pyodideVersion: string }` | — | 콘솔 생성 뒤 REPL 루프 직전 |
+| `ready` | ntf | worker→main | `ReadyPayload` = `{ pyodideVersion: string, versionMismatch: boolean, degraded: string[], details?: Record<string, string[]> }` | — | 콘솔 생성·호환 탐지 뒤 REPL 루프 직전. 필드 규칙은 아래 "`ready` 페이로드" |
 | `loadFailed` | ntf | worker→main | `message: string` | — | pyodide 로드 실패. worker는 살아 있고 루프에 들어가지 않는다 |
 | `sessionTerminated` | ntf | worker→main | — | — | `exit()`/`quit()`/`SystemExit` |
 | `crashed` | ntf | worker→main | `{ message: string }` | — | 부팅 뒤(REPL 루프)의 잡히지 않은 예외. worker는 살아 있을 수 있으나 루프는 끝났다(RD-010) |
 
 표의 핸들러 소유(RD-020): `write`·`writeErrorRaw`·`readInput`·`ready`·`loadFailed`·`sessionTerminated`·`crashed`는 core 핸들러(main 쪽 표 `CORE_MAIN_HANDLER_NAMES`)이고, `readLine`(worker→main)·`writeOutput`·`writeError`는 REPL main driver 핸들러, `complete`(main→worker)는 REPL worker driver 핸들러다. 각 RPC 끝점은 생성 시 `composeRpcHandlers(core 표, driver 표)`로 표를 합치고 이름이 겹치면 예외를 던진다(늦은 등록 API 없음). core는 `write`·`writeErrorRaw`를 `{ stream: 'stdout' | 'stderr', text }` 원문으로 세션 `output` 콜백에 넘긴다.
+
+**`ready` 페이로드**(RD-021, core `protocol/ready-payload.ts`의 `ReadyPayload`·`createReadyPayload`): worker가 부팅 중 한 번 탐지한 pyodide 호환 결과다. 공개 API가 아닌 내부 계약이다.
+
+- `pyodideVersion`: worker가 로드한 `pyodide.version`(실제 값).
+- `versionMismatch`: `pyodideVersion !== PYODIDE_VERSION`(core 고정 버전과 **완전 일치** 비교, 부분 일치·범위 없음).
+- `degraded`: 비공개 API 지점 중 기대와 달라 해당 기능만 꺼진 식별자 배열(처음 보고한 순서, 중복 없음, 문제가 없으면 빈 배열). 식별자 6개와 지점·탐지 방법은 `13-version-upgrade.md` 13.6.
+- `details`: 식별자별 상세 이름(`pyodide.ffi.run_sync` 등)의 `Record<string, string[]>`. 상세가 하나도 없으면 **키 자체가 없다**(`undefined`를 싣지 않는다).
+- main 경고 규칙: core 세션의 `ready` 핸들러(`session/core-session.ts`)가 `versionMismatch`이거나 `degraded`가 비어 있지 않을 때만 `console.warn("[session] pyodide 호환 경고", { expected, actual, degraded, details })`를 1회 낸다. 문제가 없으면 경고를 내지 않는다. 그 뒤 `driver.onReady(payload)`(REPL은 `console.info("[repl] pyodide 준비", …)`)와 `onStatus("ready")`가 이어진다. worker는 경고를 직접 내지 않는다.
+- 시작 거부: `pyodide.setInterruptBuffer`·`pyodide.checkInterrupt` 중 하나라도 함수가 아니면 `ready`가 아니라 `loadFailed`다(콘솔을 만들기 전, `message`에 없는 API 이름이 들어간다). `degraded`에는 오지 않는다.
+- driver `probe`가 던져도 `loadFailed`다.
 
 `loadFailed`의 `message`는 worker의 `String(error)`이고 main이 `pyodide 로드 실패: ` 접두사를 붙여 `writeError`로 낸다(빨강 + 개행). pyodide 로드뿐 아니라 콘솔 생성 실패도 같은 알림으로 온다.
 
@@ -167,12 +177,12 @@ main : Terminal/Readline·interrupt buffer 생성(핸들) → REPL main driver �
        → MessageChannel 생성 → createRpc → createWorker() → postMessage(init, [port]) → onStatus('loading')
        (crossOriginIsolated가 거짓이면 위를 하지 않고 경고 한 줄 + onStatus('not-isolated')로 끝난다)
 worker: init 수신(필터 리스너, 4절) → parseOptions(frame.driver) → driver.createSession → createRpc(core 핸들러 + driver 핸들러 합성)
-      → loadPyodide → driver.createConsole(setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(driver 옵션 값))
-      → webloop 재보고 억제 → sleep 조각 + 핸들러 설치 → 폐기 → 버퍼 연결 → setStdin → ntf ready → 감시 타이머 시작
+      → loadPyodide → interrupt 공개 API 확인(없으면 loadFailed) → driver.createConsole(setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(driver 옵션 값))
+      → driver.probe(비공개 API 지점 탐지) → webloop 재보고 억제 → sleep 조각 + 핸들러 설치 → 폐기 → 버퍼 연결 → setStdin → ntf ready(ReadyPayload) → 감시 타이머 시작
       → driver.run(ntf writeOutput(BANNER) → req readLine('>>> '))   (RD-004는 readLine 대신 시험용 스크립트를 runLine으로 실행)
       옵션 검증·핸들러 합성 실패 → console.error만 남기고 부팅을 시작하지 않는다(RPC가 아직 없어 loadFailed를 보낼 수 없다)
-      로드·콘솔 생성 실패 → ntf loadFailed(String(error))만 보내고 돌아온다(worker는 살아 있다)
-main : ready → onStatus('ready') → readLine 핸들러: 꼬리 + '>>> ' 합성 → readline.read()
+      로드·interrupt API 확인·콘솔 생성·probe 실패 → ntf loadFailed(String(error))만 보내고 돌아온다(worker는 살아 있다)
+main : ready → (versionMismatch·degraded면 console.warn 1회) → driver.onReady → onStatus('ready') → readLine 핸들러: 꼬리 + '>>> ' 합성 → readline.read()
        loadFailed → writeError('pyodide 로드 실패: ' + message) + onStatus('load-failed')
 
 (S2) 한 줄 실행
