@@ -93,8 +93,11 @@ function createFakeCore(initial: RunnerStatus = "ready") {
     reset() {
       calls.reset += 1;
       abortInput();
-      const run = activeRun;
-      activeRun = undefined;
+      // 실제 core처럼 보낸 run만 restarted로 끝내고, 로딩·재시작 대기 run은 슬롯에 남겨 새 worker의 ready에서 보낸다.
+      const wasSent = status === "running" || status === "waiting-input";
+      const run = wasSent ? activeRun : undefined;
+      if (wasSent) activeRun = undefined;
+      if (status !== "not-isolated") setStatus("restarting");
       run?.resolve({ kind: "restarted" });
     },
     dispose() {
@@ -107,6 +110,9 @@ function createFakeCore(initial: RunnerStatus = "ready") {
     },
     get status() {
       return status;
+    },
+    get busy() {
+      return activeRun !== undefined || status === "waiting-input";
     },
   };
 
@@ -126,6 +132,11 @@ function createFakeCore(initial: RunnerStatus = "ready") {
       return options;
     },
     setStatus,
+    /** worker가 준비됐다: 실제 core처럼 `ready`를 알린 뒤(콜백 안의 재호출 포함) 대기 run이 있으면 보낸다(`running`). */
+    becomeReady() {
+      setStatus("ready");
+      if (status === "ready" && activeRun) setStatus("running");
+    },
     /** 실행 중인 run을 끝낸다. */
     finishRun(result: RunResult = { kind: "ok" }) {
       const run = activeRun;
@@ -482,6 +493,58 @@ describe("run 시작 시 화면 준비: 커서 줄바꿈·clearOnRun", () => {
     void handle.run("second"); // 새 worker가 준비되면 실행된다(가짜 core도 슬롯을 잡는다)
 
     expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(1);
+  });
+
+  test("실행 중 reset 직후 같은 틱에 부른 run은 받아들여지므로 화면을 준비한다", () => {
+    const { fake, handle } = setup();
+    void handle.run("first");
+    handle.reset();
+    fake.written.length = 0;
+    fake.screen.cursorX = 3;
+
+    void handle.run("second"); // 옛 run의 결과 Promise는 아직 정착 콜백 전이다
+
+    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(1);
+  });
+
+  test("reset 직후 받아들여진 run이 재시작을 기다리는 동안 부른 run은 busy로 거부되고 화면을 건드리지 않는다", async () => {
+    const { fake, handle } = setup({ runner: { clearOnRun: true } });
+    void handle.run("first");
+    handle.reset();
+    void handle.run("second").catch(() => {});
+    await tick(); // 옛 run의 정착 콜백까지 돈다
+    fake.written.length = 0;
+    fake.screen.cursorX = 3;
+
+    await expect(handle.run("third")).rejects.toMatchObject({ reason: "busy" });
+
+    expect(fake.written).toEqual([]);
+  });
+
+  test("대기 run이 있는 onStatus(ready) 콜백 안에서 부른 run은 busy로 거부되고 화면을 건드리지 않는다", async () => {
+    let inner: Promise<unknown> | undefined;
+    // 첫 상태(loading)는 `setup()`이 반환하기 전에 오지만 ready가 아니라 `started`를 읽지 않는다.
+    const started: ReturnType<typeof setup> = setup({
+      initial: "loading",
+      runner: {
+        clearOnRun: true,
+        onStatus: (status) => {
+          if (status === "ready" && inner === undefined) {
+            inner = started.handle.run("inner");
+            inner.catch(() => {});
+          }
+        },
+      },
+    });
+    const { fake, core, handle } = started;
+    void handle.run("first");
+    fake.written.length = 0;
+    fake.screen.cursorX = 3;
+
+    core.becomeReady();
+
+    await expect(inner).rejects.toMatchObject({ reason: "busy" });
+    expect(fake.written).toEqual([]);
   });
 
   test("worker가 없는 상태(unavailable)의 run도 화면을 건드리지 않는다", async () => {

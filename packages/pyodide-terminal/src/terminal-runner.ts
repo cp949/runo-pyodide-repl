@@ -118,12 +118,6 @@ export function createTerminalRunnerWith(
 
   let disposed = false;
   let runner: RunnerHandle | undefined;
-  /**
-   * `run()`이 core에 넘겨져 아직 끝나지 않았다. `loading`·`restarting` 대기 중인 run은 상태만으로는 슬롯 점유를 알 수 없어
-   * 이 값이 필요하다(`running`·`waiting-input`은 상태로 안다). `ready`에서는 core가 이미 슬롯을 비웠으므로 이 값이 남아 있어도
-   * 새 run은 받아들여진다(결과 Promise가 정착하기 전 콜백 안에서 다시 `run()`을 부르는 경우).
-   */
-  let inFlight = false;
   /** 열려 있는 xterm 입력 읽기 수(기본 provider만 올린다). */
   let openReads = 0;
 
@@ -236,28 +230,26 @@ export function createTerminalRunnerWith(
   }
   const core = runner;
 
-  /** core가 이 `run()`을 코드 실행 없이 거부할 것이 확실한가(그렇다면 화면을 준비하지 않는다). */
+  /**
+   * core가 이 `run()`을 코드 실행 없이 거부할 것이 확실한가(그렇다면 화면을 준비하지 않는다). core `run()`의 거부 판정과 같은
+   * 재료(`status`·`busy`)를 그 시점에 읽는다. 결과 Promise 정착으로 풀리는 플래그는 `reset()` 직후 같은 틱이나 `ready` 콜백
+   * 안의 재호출에서 낡는다(TRP-047).
+   */
   const willBeRejected = (code: unknown): boolean => {
     if (disposed || typeof code !== "string") return true;
     const status = core.status;
-    if (inFlight && (status === "loading" || status === "restarting")) return true;
     return (
       status === "not-isolated" ||
       status === "load-failed" ||
       status === "crashed" ||
-      status === "running" ||
-      status === "waiting-input"
+      core.busy
     );
   };
 
   return {
     run(code) {
-      if (willBeRejected(code)) return core.run(code);
-      prepareScreen();
-      inFlight = true;
-      return core.run(code).finally(() => {
-        inFlight = false;
-      });
+      if (!willBeRejected(code)) prepareScreen();
+      return core.run(code);
     },
     stop: () => core.stop(),
     reset: () => core.reset(),

@@ -124,6 +124,12 @@ export interface RunnerHandle {
   /** worker·RPC를 정리한다. 실행 중이거나 대기 중인 `run()`은 `RunRejectedError("disposed")`. 두 번 불러도 안전하다. */
   dispose(): void;
   readonly status: RunnerStatus;
+  /**
+   * 지금 `run()`을 부르면 `RunRejectedError("busy")`로 거부되는가: run이 실행 슬롯을 차지하고 있거나(로딩·재시작 대기 포함)
+   * run 없는 배경 `input()` 대기(`waiting-input`)다. `status`만으로는 `loading`·`restarting` 대기 run과 같은 틱의 `reset()`
+   * 직후를 구분하지 못한다(실행창의 화면 준비가 거부 예측에 쓴다).
+   */
+  readonly busy: boolean;
 }
 
 interface ActiveRun {
@@ -202,42 +208,46 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     current.resolve(result);
   }
 
+  // 소비자 콜백(`onStatus`)은 안에서 `run`·`reset`·`dispose`를 다시 부를 수 있다. 그래서 `setStatus` 전에 슬롯·`stop()` 결말 같은
+  // 내부 상태를 먼저 확정하고, `setStatus` 뒤에는 세션·슬롯이 그대로인지 다시 확인한다.
+
   /** `worker`로 `runCode`를 보낸다. 슬롯은 이미 이 run이 차지하고 있다. */
   function dispatch(run: ActiveRun): void {
     run.phase = "sent";
     // 새 실행의 꼬리는 비어 있다. 이전 실행이 미종결 줄로 끝났다면 소비자가 줄바꿈을 처리한다.
     tail.reset();
-    setStatus("running");
     // 응답 전에 worker가 사라지면(`reset`·`dispose`·크래시) 이미 결말이 정해졌고(`active !== run`) rpc의 reject는 버린다.
+    // `running` 알림보다 먼저 보낸다: 콜백이 세션을 바꿔도 이 run은 보낸 세션에 묶이고 결말은 그 사건(`restarted`·`disposed`)이 정한다.
     void session!.call<RunOutcome>("runCode", run.code).then(
       (outcome) => finishRun(run, () => run.resolve(outcome)),
       (error: unknown) => finishRun(run, () => run.reject(error)),
     );
+    setStatus("running");
   }
 
   function finishRun(run: ActiveRun, settle: () => void): void {
     if (active !== run) return;
     active = undefined;
-    if (status === "running") setStatus("ready");
     // stop()이 기다리던 실행이 worker 교체 없이 끝났다.
     resolveStop("stopped");
+    if (status === "running") setStatus("ready");
     settle();
   }
 
-  /** 대기 중이거나 실행 중인 run을 `error`로 끝내고 슬롯을 비운다. */
-  function rejectActive(error: RunRejectedError): void {
+  /** 실행 슬롯을 비우고 차지하던 run(대기·실행 중)을 돌려준다. */
+  function takeActive(): ActiveRun | undefined {
     const run = active;
-    if (!run) return;
     active = undefined;
-    run.reject(error);
+    return run;
   }
 
   function handleCrash(): void {
     // 열린 읽기는 세션과 함께 사라진다(worker가 죽었거나 부팅 뒤 예외로 끝났다).
     pendingInput?.abandon("gone");
-    setStatus("crashed");
+    const run = takeActive();
     resolveStop("stopped");
-    rejectActive(
+    setStatus("crashed");
+    run?.reject(
       new RunRejectedError("crashed", "worker가 크래시해 실행을 끝냈다"),
     );
   }
@@ -246,12 +256,20 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
   function spawn(): void {
     const gen = ++generation;
     const isCurrent = () => gen === generation;
+    // 이 세션의 크래시를 상태에 반영했다. core 세션은 `onStatus("crashed")` 다음에 `onCrash`를 부르는데, 그 사이 콜백이
+    // `reset()`으로 세대를 올려도 이 세션의 크래시 메시지는 전달한다.
+    let crashReflected = false;
     const driver: MainDriver = {
       options: driverOptions,
       handlers: {},
       // 실행 중이 아니면 눌림이 닿을 대상 코드가 없다(core 게이트 `pythonRunning`의 재료).
       isIdle: () => active?.phase !== "sent",
       readInput: () => {
+        // 크래시 뒤에도 살아 있는 worker(잡히지 않은 예외 뒤의 배경 task)의 읽기는 응답 없이 버린다: `crashed`는 `reset()`으로만
+        // 벗어난다(worker는 메일박스에 정지한 채 남고 `reset()`이 terminate한다).
+        if (!isCurrent() || status === "crashed") {
+          return Promise.reject(new InputAbandoned());
+        }
         // stop() 중에 시작된 읽기(KeyboardInterrupt를 잡고 다시 input()을 부른 프로그램)는 공급자를 거치지 않고 취소한다.
         if (stopping) return Promise.resolve(null);
         const controller = new AbortController();
@@ -286,7 +304,7 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
       isReadCancelled: (error) => error instanceof InputAbandoned,
       // worker가 사용자 코드 안에서 입력을 기다린다.
       inputRequested: () => {
-        if (isCurrent()) setStatus("waiting-input");
+        if (isCurrent() && status !== "crashed") setStatus("waiting-input");
       },
       // 응답(`deliver`·`cancel`)이 끝나 worker가 재개한다.
       inputResumed: () => {
@@ -322,20 +340,26 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
         switch (next) {
           case "ready": {
             setStatus("ready");
-            // 로딩·재시작 대기 중이던 run을 이제 보낸다.
-            if (active?.phase === "waiting") dispatch(active);
+            // 로딩·재시작 대기 중이던 run을 이제 보낸다. `onStatus("ready")` 콜백이 `reset()`·`dispose()`를 불렀으면 이 세션은
+            // 이미 옛것이다: 대기 run은 새 세션의 `ready`가 보낸다.
+            if (isCurrent() && status === "ready" && active?.phase === "waiting") {
+              dispatch(active);
+            }
             break;
           }
-          case "load-failed":
+          case "load-failed": {
+            const run = takeActive();
             setStatus("load-failed");
-            rejectActive(
+            run?.reject(
               new RunRejectedError(
                 "unavailable",
                 "pyodide 로드 실패로 실행할 수 없다",
               ),
             );
             break;
+          }
           case "crashed":
+            crashReflected = true;
             handleCrash();
             break;
           case "terminated":
@@ -344,7 +368,7 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
         }
       },
       onCrash: (message) => {
-        if (isCurrent()) onCrash?.(message);
+        if (crashReflected && !disposed) onCrash?.(message);
       },
     });
   }
@@ -360,16 +384,21 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     session = undefined;
     oldSession?.terminate();
     tail.reset();
-    setStatus("restarting");
+    // worker는 이미 교체됐다(옛 것은 terminate). 새 worker 생성이 실패해도 기다리던 `stop()`의 결말은 `"restarted"`다
+    // (`handleCrash()`의 `"stopped"`보다 먼저 정한다).
+    resolveStop("restarted");
     try {
       spawn();
     } catch (error) {
-      // worker를 만들지 못했다. 복구는 다시 `reset()`이다.
+      // worker를 만들지 못했다. `restarting`을 거치지 않고 `crashed`가 된다. 복구는 다시 `reset()`이다.
       generation += 1;
       handleCrash();
-      onCrash?.(String(error));
+      if (!disposed) onCrash?.(String(error));
+      sent?.resolve({ kind: "restarted" });
+      return;
     }
-    resolveStop("restarted");
+    // 새 세션을 만든 뒤에 알린다: 콜백이 `dispose()`·`reset()`을 불러도 정리할 세션이 이미 `session`에 있다.
+    setStatus("restarting");
     sent?.resolve({ kind: "restarted" });
   }
 
@@ -467,6 +496,8 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     dispose() {
       if (disposed) return;
       disposed = true;
+      // 옛 세션의 뒤늦은 콜백(열린 읽기를 버린 뒤의 `inputResumed`·출력·크래시)이 상태·소비자에 닿지 않게 세대를 올린다.
+      generation += 1;
       const run = active;
       active = undefined;
       session?.terminate();
@@ -476,6 +507,9 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     },
     get status() {
       return status;
+    },
+    get busy() {
+      return active !== undefined || status === "waiting-input";
     },
   };
 }

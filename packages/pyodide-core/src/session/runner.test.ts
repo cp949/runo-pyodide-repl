@@ -431,6 +431,41 @@ describe("createRunner: run 거부와 로딩 대기", () => {
     });
   });
 
+  test("busy는 run이 슬롯을 차지한 동안(로딩 대기·실행 중) 참이고 결과가 오면 거짓이다", async () => {
+    const started = start();
+    expect(started.runner.busy).toBe(false);
+
+    const result = started.runner.run("late");
+    expect(started.runner.busy).toBe(true);
+    started.workers[0]!.ready();
+    await until(() => started.workers[0]!.pending.length === 1);
+    expect(started.runner.busy).toBe(true);
+    started.workers[0]!.pending[0]!.resolve({ kind: "ok" });
+    await result;
+
+    expect(started.runner.busy).toBe(false);
+  });
+
+  test("busy는 run 없는 배경 input() 대기(waiting-input)에서도 참이다", async () => {
+    const started = await startReady({
+      inputProvider: () => new Promise<string | null>(() => {}),
+    });
+
+    started.workers[0]!.readInput();
+    await until(() => started.runner.status === "waiting-input");
+
+    expect(started.runner.busy).toBe(true);
+  });
+
+  test("reset 직후 같은 틱에도 busy는 실행 중이던 run이 비운 슬롯을 거짓으로 읽는다", async () => {
+    const started = await startReady();
+    await runAndWait(started);
+
+    started.runner.reset();
+
+    expect(started.runner.busy).toBe(false);
+  });
+
   test("로딩 대기 중 stop은 대기를 취소한다: run은 unavailable로 거부되고 stop은 idle이며 ready 뒤에도 실행하지 않는다", async () => {
     const started = start();
     const result = started.runner.run("waiting");
@@ -747,6 +782,49 @@ describe("createRunner: 생애 사건(reset·dispose·크래시)", () => {
     await expect(result).resolves.toStrictEqual({ kind: "ok" });
   });
 
+  test("ready 알림 콜백 안에서 reset을 부르면 대기 run은 준비 안 된 새 worker에 보내지 않고 그 worker가 ready가 되면 실행한다", async () => {
+    let resetOnReady = true;
+    // 첫 상태(loading)는 `start()`가 반환하기 전에 오지만 ready가 아니라 `started`를 읽지 않는다.
+    const started: Started = start({
+      onStatus: (status) => {
+        if (status === "ready" && resetOnReady) {
+          resetOnReady = false;
+          started.runner.reset();
+        }
+      },
+    });
+    const result = started.runner.run("waiting");
+
+    started.workers[0]!.ready();
+    await until(() => started.workers.length === 2);
+    await settle();
+
+    expect(started.workers[0]!.pending).toHaveLength(0);
+    expect(started.workers[1]!.pending).toHaveLength(0);
+    expect(started.runner.status).toBe("restarting");
+
+    started.workers[1]!.ready();
+    await until(() => started.workers[1]!.pending.length === 1);
+    started.workers[1]!.pending[0]!.resolve({ kind: "ok" });
+    await expect(result).resolves.toStrictEqual({ kind: "ok" });
+  });
+
+  test("stop 폴백의 재생성에서 createWorker가 던지면 run·stop 모두 restarted이고 상태는 crashed다", async () => {
+    const started = await startReady();
+    const { result } = await runAndWait(started);
+    started.createWorker.mockImplementationOnce(() => {
+      throw new Error("worker 생성 실패");
+    });
+
+    const stopped = started.runner.stop();
+    await vi.advanceTimersByTimeAsync(STOP_FALLBACK_MS);
+
+    await expect(stopped).resolves.toBe("restarted");
+    await expect(result).resolves.toStrictEqual({ kind: "restarted" });
+    expect(started.runner.status).toBe("crashed");
+    expect(started.onCrash).toHaveBeenCalledWith("Error: worker 생성 실패");
+  });
+
   test.each(["crashed", "load-failed"] as const)(
     "%s에서 reset은 새 worker로 복구한다",
     async (state) => {
@@ -1060,6 +1138,155 @@ describe("createRunner: 출력과 InputProvider", () => {
     });
     await expect(started.runner.stop()).resolves.toBe("idle");
     await until(() => started.workers[0]!.mailboxState() === MAILBOX_CANCELLED);
+  });
+});
+
+describe("createRunner: 상태 콜백 안의 재진입과 dispose 뒤 알림", () => {
+  /** `onStatus`에서 `when` 상태를 처음 받을 때 `act(runner)`를 부르는 runner. */
+  function startReentrant(
+    when: RunnerStatus,
+    act: (runner: RunnerHandle) => void,
+    options: Partial<RunnerOptions> = {},
+  ): Started {
+    let fired = false;
+    // 첫 상태(loading)는 `start()`가 반환하기 전에 온다. `when`은 그 뒤 상태라 그때는 runner가 채워져 있다.
+    const holder: { runner?: RunnerHandle } = {};
+    const started = start({
+      ...options,
+      onStatus: (status) => {
+        if (status === when && !fired) {
+          fired = true;
+          act(holder.runner!);
+        }
+      },
+    });
+    holder.runner = started.runner;
+    return started;
+  }
+
+  test("waiting-input 중 dispose하면 그 뒤로 상태 알림이 오지 않고 status도 바뀌지 않는다", async () => {
+    const started = await startReady({
+      inputProvider: () => new Promise<string | null>(() => {}),
+    });
+    await runAndWait(started);
+    started.workers[0]!.readInput();
+    await until(() => started.runner.status === "waiting-input");
+    const count = started.statuses.length;
+
+    started.runner.dispose();
+    await settle();
+
+    expect(started.statuses.slice(count)).toEqual([]);
+    expect(started.runner.status).toBe("waiting-input");
+  });
+
+  test("dispose 뒤 도착한 출력은 onOutput으로 전달하지 않는다", async () => {
+    const started = await startReady();
+    await runAndWait(started);
+
+    started.runner.dispose();
+    started.workers[0]!.write("late");
+    await settle();
+
+    expect(started.onOutput).not.toHaveBeenCalled();
+  });
+
+  test("크래시 뒤 살아 있는 worker가 input()을 부르면 공급자를 부르지 않고 crashed에 머물며 run은 unavailable이다", async () => {
+    const provider = vi.fn<InputProvider>(() => Promise.resolve("x"));
+    const started = await startReady({ inputProvider: provider });
+    started.workers[0]!.dispatchError("Uncaught PythonError");
+    await until(() => started.runner.status === "crashed");
+
+    started.workers[0]!.readInput();
+    await settle();
+
+    expect(provider).not.toHaveBeenCalled();
+    expect(started.runner.status).toBe("crashed");
+    expect(started.workers[0]!.mailboxState()).toBe(MAILBOX_IDLE);
+    await expect(started.runner.run("x")).rejects.toMatchObject({
+      reason: "unavailable",
+    });
+  });
+
+  test("crashed 콜백 안에서 reset해도 실행 중이던 run은 crashed로 거부되고 onCrash는 불린다", async () => {
+    const started = startReentrant("crashed", (runner) => runner.reset());
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+    const { result } = await runAndWait(started);
+
+    started.workers[0]!.dispatchError("boom");
+
+    await expect(result).rejects.toMatchObject({ reason: "crashed" });
+    expect(started.onCrash).toHaveBeenCalledWith("boom");
+    expect(started.runner.status).toBe("restarting");
+    expect(started.createWorker).toHaveBeenCalledTimes(2);
+  });
+
+  test("load-failed 콜백 안에서 reset해도 대기 run은 unavailable로 거부되고 새 worker에서 실행되지 않는다", async () => {
+    const started = startReentrant("load-failed", (runner) => runner.reset());
+    const result = started.runner.run("waiting");
+    result.catch(() => {});
+
+    started.workers[0]!.loadFailed("실패");
+    await expect(result).rejects.toMatchObject({ reason: "unavailable" });
+    await until(() => started.workers.length === 2);
+    started.workers[1]!.ready();
+    await settle();
+
+    expect(started.workers[1]!.pending).toHaveLength(0);
+  });
+
+  test("running 콜백 안에서 reset하면 runCode는 새 worker로 가지 않고 run은 restarted다", async () => {
+    const started = startReentrant("running", (runner) => runner.reset());
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    const result = started.runner.run("first");
+    await until(() => started.workers.length === 2);
+    await settle();
+
+    await expect(result).resolves.toStrictEqual({ kind: "restarted" });
+    expect(started.workers[1]!.pending).toHaveLength(0);
+  });
+
+  test("대기 run을 보내는 running 콜백 안에서 dispose해도 ready 알림 처리가 던지지 않고 run은 disposed다", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const started = startReentrant("running", (runner) => runner.dispose());
+    const result = started.runner.run("waiting");
+    result.catch(() => {});
+
+    started.workers[0]!.ready();
+    await settle();
+
+    await expect(result).rejects.toMatchObject({ reason: "disposed" });
+    expect(started.workers[0]!.terminate).toHaveBeenCalledTimes(1);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  test("restarting 콜백 안에서 dispose하면 새로 만든 worker도 terminate된다", async () => {
+    const started = startReentrant("restarting", (runner) => runner.dispose());
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    started.runner.reset();
+
+    for (const worker of started.workers) {
+      expect(worker.terminate).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test("restarting 콜백 안에서 reset하면 마지막 worker 말고는 모두 terminate된다", async () => {
+    const started = startReentrant("restarting", (runner) => runner.reset());
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    started.runner.reset();
+
+    expect(started.workers).toHaveLength(3);
+    expect(started.workers.map((w) => w.terminate.mock.calls.length)).toEqual([
+      1, 1, 0,
+    ]);
   });
 });
 
