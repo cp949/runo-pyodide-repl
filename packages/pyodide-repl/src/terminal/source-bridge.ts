@@ -122,14 +122,17 @@ export function createSourceBridge(deps: SourceBridgeDeps): SourceBridge {
         if (seq === readSeq) readState = "none";
       };
       read.then(ended, ended);
-      // 벤더 `read()`가 이미 그리기 콜백을 큐에 넣었다. 이 콜백은 그 뒤에 오므로 그때는 프롬프트·복원한 줄이 그려졌고 쌓인 type-ahead도
-      // 재생된 뒤다.
+      // 벤더 `read()`가 이미 그리기 콜백을 큐에 넣었다. 이 콜백은 그 뒤에 오므로 그때는 벤더가 프롬프트·복원한 줄을 그리는 write를
+      // 냈고 쌓인 type-ahead도 재생한 뒤다.
       terminal.write("", () => {
-        if (seq !== readSeq || readState !== "opening") return;
-        readState = "open";
+        if (seq !== readSeq) return;
+        if (readState === "opening") readState = "open";
+        // 정착은 읽기 상태와 떼어 낸다: type-ahead의 Enter로 복원한 읽기가 이미 끝났어도(xterm이 write 처리를 끊어 그 사이 `ended`가
+        // 돌았을 때) 그 읽기는 그려졌으므로 여기서 정착한다. 다음 읽기로 미루면 제출된 명령이 끝날 때까지 resolve하지 않는다.
         if (settleOnDraw) {
           settleOnDraw = false;
-          link.settle();
+          // 그리기 write는 벤더 콜백 안에서 나와 이 콜백보다 뒤에 큐에 섰다. 한 번 더 기다려 그것들이 처리된 뒤에 정착한다(확정 9).
+          terminal.write("", () => link.settle());
         }
       });
     },

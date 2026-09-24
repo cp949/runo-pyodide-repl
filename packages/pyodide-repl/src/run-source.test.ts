@@ -903,3 +903,104 @@ describe("runSource 거부 표와 busy 게터", () => {
     await expect(first.promise).resolves.toEqual({ source: "print(1)" });
   });
 });
+
+/**
+ * xterm처럼 write를 차례로 처리한다: 하나씩 화면에 반영하고 그 콜백을 부른 뒤 macrotask를 넘긴다. xterm이 write 처리를 시간 예산
+ * (12ms)에서 끊어 `setTimeout`으로 넘긴 경우다 — 콜백 사이에 마이크로태스크가 돌고, 콜백 안에서 낸 write는 큐 뒤에 선다. 돌려주는 함수는
+ * 큐가 빌 때까지 처리한다.
+ */
+function serialWrites(session: Session): () => Promise<void> {
+  const queue: { text: string; callback?: () => void }[] = [];
+  const inner = session.fake.term.write;
+  session.fake.term.write = ((text: string, callback?: () => void) => {
+    queue.push({ text, callback });
+  }) as typeof session.fake.term.write;
+  return async () => {
+    for (let entry = queue.shift(); entry !== undefined; entry = queue.shift()) {
+      inner(entry.text, entry.callback);
+      await tick();
+    }
+  };
+}
+
+describe("runSource 정착·정리 경계(사후 리뷰)", () => {
+  test("실행 중 친 Enter로 복원한 줄이 그려지자마자 제출돼도 그 읽기에서 정착한다(write 처리가 끊겨도)", async () => {
+    const session = startSession();
+    const first = await openPrompt(session, "pri");
+    const drain = serialWrites(session);
+    const run = observe(runQuietly(session, "print(1)"));
+    await expect(first.promise).resolves.toEqual({ source: "print(1)" });
+    await drain();
+    // 활성 읽기가 없으므로 type-ahead에 쌓였다가 복원한 읽기에서 재생돼 `pri`를 제출한다.
+    session.fake.type("\r");
+    session.rpc.notify("write", "1\n");
+    await settle();
+    await drain();
+
+    const second = session.rpc.call<ReadLineReply>("readLine", ">>> ", undefined, true, OK);
+    const secondState = observe(second);
+    for (let round = 0; round < 3; round += 1) {
+      await settle();
+      await drain();
+    }
+
+    expect(secondState()).toEqual({ state: "resolved", value: "pri" });
+    // 다음 읽기(제출된 `pri`가 끝난 뒤)를 기다리지 않는다.
+    expect(run()).toEqual({ state: "resolved", value: OK });
+  });
+
+  test("정착하는 순간 복원한 >>> pri가 이미 화면에 반영돼 있다(write를 차례로 처리해도)", async () => {
+    const session = startSession();
+    const first = await openPrompt(session, "pri");
+    const drain = serialWrites(session);
+    const run = runQuietly(session, "print(1)");
+    let screenAtSettle: string | undefined;
+    void run.then(() => {
+      screenAtSettle = session.vt.screen();
+    });
+    await first.promise;
+    await drain();
+    session.rpc.notify("write", "1\n");
+    await settle();
+    await drain();
+
+    void session.rpc
+      .call<ReadLineReply>("readLine", ">>> ", undefined, true, OK)
+      .catch(() => {});
+    for (let round = 0; round < 3; round += 1) {
+      await settle();
+      await drain();
+    }
+
+    expect(screenAtSettle).toBe("1\n>>> pri");
+  });
+
+  test("reset() 중 새 worker 생성이 던져도 실행 중이던 runSource는 restarted로 끝난다", async () => {
+    const session = startSession();
+    const first = await openPrompt(session, "pri");
+    const run = runQuietly(session, "while True: pass");
+    await first.promise;
+    session.createWorkerSpy.mockImplementationOnce(() => {
+      throw new Error("worker 생성 실패");
+    });
+
+    // 생성 실패는 기존대로 `reset()` 호출자에게 던진다.
+    expect(() => session.handle.reset()).toThrow("worker 생성 실패");
+
+    await expect(run).resolves.toEqual({ kind: "restarted" });
+  });
+
+  test("dispose() 정리 중 worker terminate가 던져도 실행 중이던 runSource는 disposed로 거부한다", async () => {
+    const session = startSession();
+    const first = await openPrompt(session, "pri");
+    const run = runQuietly(session, "while True: pass");
+    await first.promise;
+    session.worker.terminate.mockImplementationOnce(() => {
+      throw new Error("terminate 실패");
+    });
+
+    expect(() => session.handle.dispose()).toThrow("terminate 실패");
+
+    await expect(run).rejects.toMatchObject({ reason: "disposed" });
+  });
+});

@@ -37,7 +37,8 @@ function describeError(error: unknown): string {
  * (`COPY_ON_SELECT_KEY`), Ctrl+C 복사는 이 값과 무관하게 항상 동작한다(RD-017). 복사 결과는 우측
  * 하단 토스트로 1초간 보여준다. `runSource(code)` 시험용으로 plain 요소 `textarea`(`source`)·버튼
  * (`run-source`)·결과(`source-result`, JSON 텍스트, 거부는 `{"rejected":"<reason>"}`)를 둔다. 새 호출을
- * 시작하면 이전 결과를 지운다(RD-022a). 결과 칸은 xterm DOM보다 먼저 바뀔 수 있다.
+ * 시작하면 이전 결과를 지우고, 늦게 끝난 이전 호출은 결과 칸을 쓰지 않는다(RD-022a). 결과 칸은 xterm DOM보다 먼저
+ * 바뀔 수 있다.
  */
 export function ReplView() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,6 +51,8 @@ export function ReplView() {
   const [source, setSource] = useState("");
   const [sourceResult, setSourceResult] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // `runSource` 호출 번호. 늦게 끝난 이전 호출(예: 실행 중 다시 눌러 `busy`를 받은 뒤 끝난 첫 호출)이 새 결과를 덮어쓰지 않게 한다.
+  const sourceCallRef = useRef(0);
 
   // `setToast`·`toastTimerRef`만 참조하는 안정된 콜백(useCallback 빈 deps) — 아래 마운트 effect의
   // deps에 넣어도 재마운트를 일으키지 않는다.
@@ -101,9 +104,13 @@ export function ReplView() {
     const repl = replRef.current;
     if (repl === null) return;
     setSourceResult("");
+    const call = ++sourceCallRef.current;
+    const show = (text: string) => {
+      if (call === sourceCallRef.current) setSourceResult(text);
+    };
     repl.runSource(source).then(
-      (result) => setSourceResult(JSON.stringify(result)),
-      (error: unknown) => setSourceResult(describeError(error)),
+      (result) => show(JSON.stringify(result)),
+      (error: unknown) => show(describeError(error)),
     );
   };
 

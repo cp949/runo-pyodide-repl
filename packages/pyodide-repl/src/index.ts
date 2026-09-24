@@ -196,17 +196,21 @@ export function createRepl(options: ReplOptions): ReplHandle {
       // 실행 중이던 runSource는 `restarted`로 끝난다. 대기 중인 것은 유지해 새 worker의 첫 `>>> `에서 실행한다(아직 실행되지 않았다).
       // 슬롯은 콜백이 불리기 전에 비운다(TRP-051). 이미 결말이 도착한 것은 그 결말로 끝난다(`endRun`).
       const run = slot.waiting ? undefined : slot.take();
-      // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
-      // rpc.dispose() → worker.terminate()(session.terminate()).
-      session?.terminate();
-      // 옛 세션이 남겼을 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않게 한다.
-      Atomics.store(interruptBuffer, SIGNAL, 0);
-      // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006).
-      if (options.terminal.buffer.active.cursorX !== 0) readline.write("\r\n");
-      writeNotice(readline, RESET_NOTICE, "info");
-      spawnSession();
-      emitStatus("loading");
-      if (run !== undefined) endRun(run, "restarted");
+      // `finally`: 새 worker 생성(`createWorker`)이 던져도 슬롯에서 뗀 실행은 끝낸다. 옛 worker는 이미 교체됐으므로 `restarted`다.
+      try {
+        // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
+        // rpc.dispose() → worker.terminate()(session.terminate()).
+        session?.terminate();
+        // 옛 세션이 남겼을 SIGINT를 지운다. 리셋 직전 Ctrl+C가 새 세션의 시작 코드를 죽이지 않게 한다.
+        Atomics.store(interruptBuffer, SIGNAL, 0);
+        // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006).
+        if (options.terminal.buffer.active.cursorX !== 0) readline.write("\r\n");
+        writeNotice(readline, RESET_NOTICE, "info");
+        spawnSession();
+        emitStatus("loading");
+      } finally {
+        if (run !== undefined) endRun(run, "restarted");
+      }
     };
   }
 
@@ -237,16 +241,20 @@ export function createRepl(options: ReplOptions): ReplHandle {
       disposed = true;
       // 실행 중·대기 중이던 runSource는 `disposed`로 끝난다(이미 결말이 도착한 것은 그 결말로). 슬롯은 정리 앞에서 비운다.
       const run = slot.take();
-      // 게이트를 닫고 재전송을 멈춘다. 이후 도착하는 키·알림은 눌림을 보내지 않는다.
-      session?.endSession();
-      // 알림 핸들러가 dispose된 줄 편집기에 쓰지 않도록 RPC를 먼저 끊는다. `cancelRead()`가 추가로 앞서지만
-      // 뒤이어 `readline.dispose()`가 돌아 관찰 가능한 차이는 없다.
-      session?.terminate();
-      // mousedown/mouseup 리스너를 뗀다. readline보다 먼저 떼도 순서상 문제 없다(서로 독립).
-      selectionCopy.dispose();
-      // 벤더 dispose가 멱등이라 term.dispose()가 addon을 다시 dispose해도 안전하다.
-      readline.dispose();
-      if (run !== undefined) endRun(run, "disposed");
+      // `finally`: 정리 중 무엇이 던져도 슬롯에서 뗀 실행은 끝낸다(`reset()`과 같은 이유).
+      try {
+        // 게이트를 닫고 재전송을 멈춘다. 이후 도착하는 키·알림은 눌림을 보내지 않는다.
+        session?.endSession();
+        // 알림 핸들러가 dispose된 줄 편집기에 쓰지 않도록 RPC를 먼저 끊는다. `cancelRead()`가 추가로 앞서지만
+        // 뒤이어 `readline.dispose()`가 돌아 관찰 가능한 차이는 없다.
+        session?.terminate();
+        // mousedown/mouseup 리스너를 뗀다. readline보다 먼저 떼도 순서상 문제 없다(서로 독립).
+        selectionCopy.dispose();
+        // 벤더 dispose가 멱등이라 term.dispose()가 addon을 다시 dispose해도 안전하다.
+        readline.dispose();
+      } finally {
+        if (run !== undefined) endRun(run, "disposed");
+      }
     },
     reset(options) {
       if (disposed) return;
