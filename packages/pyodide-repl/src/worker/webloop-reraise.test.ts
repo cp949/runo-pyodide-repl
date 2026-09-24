@@ -132,7 +132,7 @@ async function settle(): Promise<void> {
 }
 
 describe("pyodide WebLoop 가정", () => {
-  // 억제는 pyodide 314.0.7의 private 속성에 기대므로, pyodide를 올렸을 때 속성이 사라졌는지 이 시험이 알려 준다.
+  // 억제는 고정 버전(`PYODIDE_VERSION`) pyodide의 private 속성에 기대므로, pyodide를 올렸을 때 속성이 사라졌는지 이 시험이 알려 준다.
   // 다른 describe가 설치를 하기 전에 실행돼야 "설치 전 값은 None"을 관측할 수 있다.
   it("_keyboard_interrupt_handler·_system_exit_handler 속성이 있고 억제 설치 전 값은 None이다", () => {
     expect(loopHasAttr("_keyboard_interrupt_handler")).toBe(true);

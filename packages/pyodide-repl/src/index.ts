@@ -4,6 +4,7 @@ import {
   createInterruptBuffer,
   SIGNAL,
   createInterruptSender,
+  DEFAULT_PYODIDE_INDEX_URL,
 } from "@cp949/runo-pyodide-core";
 import { startSession, type ReplSession } from "./session";
 import { createSelectionCopy, type CopyResult } from "./terminal/selection-copy";
@@ -11,9 +12,8 @@ import { writeNotice } from "./terminal/notice";
 
 export type { CopyResult };
 
-/** 기본 pyodide CDN 위치. 끝 `/`를 포함한다(`00-architecture.md` 4.1). */
-export const DEFAULT_PYODIDE_INDEX_URL =
-  "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/";
+/** 기본 pyodide CDN 위치. 끝 `/`를 포함한다(`00-architecture.md` 4.1). 값은 core가 `pyodide/package.json`에서 유도한다. */
+export { DEFAULT_PYODIDE_INDEX_URL };
 
 /** 비격리 페이지에서 세션을 시작하지 않는 이유를 알리는 터미널 안내 문구(ADR-0004). */
 export const NOT_ISOLATED_WARNING =

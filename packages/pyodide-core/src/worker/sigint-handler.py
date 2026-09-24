@@ -67,7 +67,7 @@ class IdleInterrupt(Exception):
 
 
 def find_problems(console):
-    """정지한 실행 깨우기가 기대하는 pyodide 314.0.7 내부 형태와 다른 지점의 이름들. 비어 있으면 설치할 수 있다."""
+    """정지한 실행 깨우기가 기대하는 고정 버전(`PYODIDE_VERSION`) pyodide 내부 형태와 다른 지점의 이름들. 비어 있으면 설치할 수 있다."""
     problems = []
     if not callable(getattr(webloop, 'run_sync', None)):
         problems.append('pyodide.webloop.run_sync')

@@ -31,7 +31,7 @@ export interface StdinCallbackDeps {
 
 /**
  * `pyodide.setStdin({ stdin })`에 넘길 동기 콜백. 항상 cancelable=true, 프롬프트 없음(main이 꼬리로 정한다).
- * pyodide는 돌려준 문자열 끝에 `\n`이 없으면 붙이고, `null`은 EOF로 해석한다(314.0.7 `LegacyReader`) —
+ * pyodide는 돌려준 문자열 끝에 `\n`이 없으면 붙이고, `null`은 EOF로 해석한다(`LegacyReader`, 고정 버전 `PYODIDE_VERSION`) —
  * 그래서 이 콜백은 `\n`을 붙이지 않는다.
  * `checkInterrupt()`가 던지지 않으면(버퍼 미연결 등) 취소를 EOF로 떨어뜨린다: 경고 한 줄을 남기고 `null`을 돌려준다
  * (→ `EOFError`). 던지지 않은 SIGINT를 남겨 두면 다음 문장이 엉뚱한 지점에서 죽는다.

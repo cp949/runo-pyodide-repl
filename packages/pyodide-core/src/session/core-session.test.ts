@@ -11,6 +11,7 @@ import type { InitFrame } from "../protocol/init-frame";
 import { createInterruptBuffer } from "../protocol/interrupt-protocol";
 import type { InterruptSender } from "../protocol/interrupt-sender";
 import { createRpc } from "../protocol/rpc";
+import { PYODIDE_VERSION } from "../pyodide-version";
 import type { Rpc } from "../protocol/rpc";
 import { CORE_MAIN_HANDLER_NAMES, startCoreSession } from "./core-session";
 import type { CoreSession, CoreSessionOptions } from "./core-session";
@@ -420,10 +421,10 @@ describe("startCoreSession: 상태 알림", () => {
     const { workerRpc, onStatus } = start({ driver, log });
     onStatus.mockImplementation((status: string) => log.push(`status:${status}`));
 
-    workerRpc.notify("ready", { pyodideVersion: "314.0.7" });
+    workerRpc.notify("ready", { pyodideVersion: PYODIDE_VERSION });
     await waitFor(() => onStatus.mock.calls.length === 1);
 
-    expect(log).toEqual(["driver.onReady(314.0.7)", "status:ready"]);
+    expect(log).toEqual([`driver.onReady(${PYODIDE_VERSION})`, "status:ready"]);
   });
 
   test("loadFailed 알림은 게이트를 닫고 driver에 알린 뒤 onStatus('load-failed')를 낸다", async () => {

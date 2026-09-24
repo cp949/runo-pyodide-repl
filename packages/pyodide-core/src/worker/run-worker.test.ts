@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { createInterruptBuffer } from "../protocol/interrupt-protocol";
 import { createStdinMailbox } from "../protocol/stdin-mailbox";
+import { DEFAULT_PYODIDE_INDEX_URL } from "../pyodide-version";
 import { bootWorker } from "./boot";
 import type { WorkerDriver } from "./driver";
 import { runWorker } from "./run-worker";
@@ -41,7 +42,7 @@ function createInitFrame() {
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
     driver: {},
-    pyodide: { indexURL: "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/" },
+    pyodide: { indexURL: DEFAULT_PYODIDE_INDEX_URL },
   };
 }
 

@@ -16,6 +16,7 @@ import {
 import { createRpc } from "./rpc";
 import { createMailboxWriter, createStdinMailbox } from "./stdin-mailbox";
 import { spawnRole } from "@repo/pyodide-testkit/thread";
+import { DEFAULT_PYODIDE_INDEX_URL } from "../pyodide-version";
 
 interface Received {
   line: string;
@@ -45,7 +46,7 @@ async function runScenario(options: ScenarioOptions = {}) {
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
     driver: {},
-    pyodide: { indexURL: "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/" },
+    pyodide: { indexURL: DEFAULT_PYODIDE_INDEX_URL },
   };
   const writer = createMailboxWriter(mailbox);
   const log: string[] = [];

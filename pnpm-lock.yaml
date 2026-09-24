@@ -4,6 +4,12 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    pyodide:
+      specifier: 314.0.7
+      version: 314.0.7
+
 importers:
 
   .:
@@ -112,7 +118,7 @@ importers:
         specifier: 30.1.0
         version: 30.1.0
       pyodide:
-        specifier: 314.0.7
+        specifier: 'catalog:'
         version: 314.0.7
       tsdown:
         specifier: 0.23.0
@@ -152,7 +158,7 @@ importers:
         specifier: 30.1.0
         version: 30.1.0
       pyodide:
-        specifier: 314.0.7
+        specifier: 'catalog:'
         version: 314.0.7
       tsdown:
         specifier: 0.23.0

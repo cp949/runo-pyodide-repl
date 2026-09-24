@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // tarball 스모크: xterm-readline·core·repl을 `pnpm pack`으로 묶어 저장소 밖 임시 소비자 프로젝트에 설치하고 실제로 쓸 수 있는지 본다.
-//   1. 세 패키지 `pnpm pack`, tarball 안 package.json에 `workspace:` 의존이 남지 않았는지 확인
+//   1. 세 패키지 `pnpm pack`, tarball 안 package.json에 `workspace:`·`catalog:`가 남지 않았는지, core에 optional peer `pyodide`가
+//      있는지 확인
 //   2. 임시 소비자(`file:` 3개 + 작업공간 파일 `overrides`로 내부 패키지 고정 + `@xterm/xterm`·`pyodide`) `pnpm install`
 //   3. node ESM `import`(세 패키지의 공개 진입점 `.`·`./worker`)
 //   4. `tsc --noEmit`(`skipLibCheck: false`로 배포된 `.d.mts`의 타입 해석까지 검사)
@@ -44,6 +45,8 @@ const ENTRY_POINTS = [
       composeRpcHandlers: "function",
       createRpc: "function",
       postInitFrame: "function",
+      PYODIDE_VERSION: "string",
+      DEFAULT_PYODIDE_INDEX_URL: "string",
     },
   ],
   [
@@ -63,6 +66,26 @@ const ENTRY_POINTS = [
 ];
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+
+/**
+ * `pnpm-workspace.yaml`의 `catalog:` 절에서 `name`의 버전을 읽는다(pyodide 버전의 유일한 원천, ADR-0007). YAML 파서 의존을
+ * 늘리지 않으려고 `catalog:` 절(들여쓴 줄)에서 `name: <버전>` 한 줄만 정규식으로 찾고, 못 찾으면 던진다.
+ */
+function readCatalogVersion(name) {
+  const yaml = readFileSync(join(ROOT, "pnpm-workspace.yaml"), "utf8");
+  const section = yaml.match(
+    /^catalog:[ \t]*\r?\n((?:[ \t]+.*(?:\r?\n|$)|[ \t]*\r?\n)*)/m,
+  );
+  const line = section?.[1].match(
+    new RegExp(`^[ \\t]+["']?${name}["']?:[ \\t]*["']?([^\\s"'#]+)`, "m"),
+  );
+  if (!line)
+    throw new Error(
+      `pnpm-workspace.yaml catalog:에서 ${name} 버전을 찾지 못했다`,
+    );
+  return line[1];
+}
+
 const started = Date.now();
 const elapsed = () => `${((Date.now() - started) / 1000).toFixed(1)}s`;
 const step = (message) => console.log(`\n[${elapsed()}] ${message}`);
@@ -85,8 +108,7 @@ async function main(tmp) {
   // 소비자 설치에 쓰는 외부 버전은 저장소 매니페스트가 원천이다(스모크가 따로 정하지 않는다).
   const rootManifest = readJson(join(ROOT, "package.json"));
   const versions = {
-    pyodide: readJson(join(ROOT, "packages/pyodide-core/package.json"))
-      .devDependencies.pyodide,
+    pyodide: readCatalogVersion("pyodide"),
     xterm: readJson(join(ROOT, "packages/pyodide-repl/package.json"))
       .devDependencies["@xterm/xterm"],
     typescript: rootManifest.devDependencies.typescript,
@@ -112,7 +134,7 @@ async function main(tmp) {
   }
 
   step(
-    "tarball 안 package.json 점검: workspace: 의존이 실제 버전으로 치환됐는지",
+    "tarball 안 package.json 점검: workspace:·catalog: 의존이 실제 버전으로 치환됐는지, core의 optional peer pyodide",
   );
   for (const { name } of PACKAGES) {
     const manifest = JSON.parse(
@@ -140,6 +162,29 @@ async function main(tmp) {
       throw new Error(
         `${name} tarball에 workspace: 의존이 남았다: ${JSON.stringify(leftovers)}`,
       );
+    // pnpm이 `catalog:`를 치환하지 않으면 소비자 설치가 깨진다. 모든 필드(devDependencies 포함)에서 확인한다.
+    const catalogLeft = JSON.stringify(manifest).includes("catalog:");
+    console.log(
+      `${name} peerDependencies=${JSON.stringify(manifest.peerDependencies ?? {})} peerDependenciesMeta=${JSON.stringify(manifest.peerDependenciesMeta ?? {})} catalog: 잔존=${catalogLeft}`,
+    );
+    if (catalogLeft)
+      throw new Error(`${name} tarball package.json에 catalog:가 남았다`);
+    // core는 pyodide 타입을 노출하므로 optional peer로 선언한다. repl은 노출하지 않아 peer에 pyodide가 없어야 한다.
+    const peerRange = manifest.peerDependencies?.pyodide;
+    if (name === "@cp949/runo-pyodide-core") {
+      if (typeof peerRange !== "string" || !peerRange.startsWith("^"))
+        throw new Error(
+          `${name} tarball에 peerDependencies.pyodide(^범위)가 없다: ${peerRange}`,
+        );
+      if (manifest.peerDependenciesMeta?.pyodide?.optional !== true)
+        throw new Error(
+          `${name} tarball에 peerDependenciesMeta.pyodide.optional=true가 없다`,
+        );
+    } else if (peerRange !== undefined) {
+      throw new Error(
+        `${name} tarball에 예상하지 않은 peerDependencies.pyodide가 있다: ${peerRange}`,
+      );
+    }
   }
 
   step("임시 소비자 프로젝트 작성");
@@ -233,6 +278,10 @@ async function main(tmp) {
       `  }`,
       `  console.log(\`import 통과: \${specifier} (export \${Object.keys(mod).length}개)\`);`,
       `}`,
+      // core가 인라인한 고정 버전이 catalog 버전과 같은지(소비자 설치 뒤에도 값이 유지되는지) 본다.
+      `const core = await import("@cp949/runo-pyodide-core");`,
+      `if (core.PYODIDE_VERSION !== ${JSON.stringify(versions.pyodide)}) { failed = true; console.error(\`FAIL PYODIDE_VERSION: \${core.PYODIDE_VERSION}\`); }`,
+      `if (core.DEFAULT_PYODIDE_INDEX_URL !== \`https://cdn.jsdelivr.net/pyodide/v\${core.PYODIDE_VERSION}/full/\`) { failed = true; console.error(\`FAIL DEFAULT_PYODIDE_INDEX_URL: \${core.DEFAULT_PYODIDE_INDEX_URL}\`); }`,
       `if (failed) process.exit(1);`,
       ``,
     ].join("\n"),

@@ -7,7 +7,7 @@
 # 편차: Task 밖의 콜백(call_later 등)에서 난 KeyboardInterrupt·SystemExit도 조용히 버려진다.
 import asyncio
 
-# pyodide 314.0.7의 private 속성이다(webloop.py). 이름이 바뀌면 install()이 건너뛴다.
+# 고정 버전(`PYODIDE_VERSION`) pyodide의 private 속성이다(webloop.py). 이름이 바뀌면 install()이 건너뛴다.
 HANDLERS = ('_keyboard_interrupt_handler', '_system_exit_handler')
 
 

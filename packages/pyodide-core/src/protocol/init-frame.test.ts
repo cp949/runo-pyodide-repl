@@ -7,6 +7,7 @@ import { parseInitFrame, postInitFrame } from "./init-frame";
 import type { InitFrame } from "./init-frame";
 import { createInterruptBuffer } from "./interrupt-protocol";
 import { createStdinMailbox } from "./stdin-mailbox";
+import { DEFAULT_PYODIDE_INDEX_URL } from "../pyodide-version";
 
 function createFrame(): InitFrame {
   const { port1, port2 } = new MessageChannel();
@@ -22,7 +23,7 @@ function createFrame(): InitFrame {
     stdinCtrl: mailbox.ctrl,
     stdinData: mailbox.data,
     driver: {},
-    pyodide: { indexURL: "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/" },
+    pyodide: { indexURL: DEFAULT_PYODIDE_INDEX_URL },
   };
 }
 

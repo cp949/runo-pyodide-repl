@@ -32,7 +32,7 @@ def silent_excepthook(exc_type, exc, tb):
 
 
 def find_problems():
-    """조각 교체가 기대하는 pyodide 314.0.7 형태와 다른 지점의 이름들. 비어 있으면 교체할 수 있다."""
+    """조각 교체가 기대하는 고정 버전(`PYODIDE_VERSION`) pyodide 형태와 다른 지점의 이름들. 비어 있으면 교체할 수 있다."""
     problems = []
     # pyodide(webloop.py)는 time.sleep을 원본 C 함수를 @wraps로 감싼 _sleep으로 바꿔 두고, 조각 래퍼가 그 __wrapped__를 부른다.
     if not inspect.isbuiltin(getattr(time.sleep, '__wrapped__', None)):

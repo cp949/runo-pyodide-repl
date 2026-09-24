@@ -33,6 +33,8 @@ import {
   createRpc,
   type Rpc,
   type RpcHandlers,
+  DEFAULT_PYODIDE_INDEX_URL as CORE_DEFAULT_PYODIDE_INDEX_URL,
+  PYODIDE_VERSION,
 } from "@cp949/runo-pyodide-core";
 import { parseInitFrame } from "@cp949/runo-pyodide-core/worker";
 import {
@@ -805,6 +807,14 @@ describe("격리 페이지의 세션 시작", () => {
     expect(message.pyodide.indexURL).toBe(DEFAULT_PYODIDE_INDEX_URL);
   });
 
+  test("`DEFAULT_PYODIDE_INDEX_URL`은 core가 유도한 값의 재export이다", () => {
+    expect(DEFAULT_PYODIDE_INDEX_URL).toBe(CORE_DEFAULT_PYODIDE_INDEX_URL);
+    // core dist가 낡아 두 값이 모두 undefined여도 통과하지 않게 형태도 본다(값 자체는 core 상수 시험이 맡는다).
+    expect(DEFAULT_PYODIDE_INDEX_URL).toMatch(
+      /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v\d+\.\d+\.\d+\/full\/$/,
+    );
+  });
+
   test("`pyodide.indexURL` 옵션이 프레임에 들어가고 끝 `/`가 보장된다", () => {
     const { fakeWorker } = startSession({
       pyodide: { indexURL: "http://localhost:8000/pyodide" },
@@ -825,11 +835,11 @@ describe("격리 페이지의 세션 시작", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const { onStatus, workerRpc } = startSession();
 
-    workerRpc.notify("ready", { pyodideVersion: "314.0.7" });
+    workerRpc.notify("ready", { pyodideVersion: PYODIDE_VERSION });
     await waitFor(() => onStatus.mock.calls.length === 2);
 
     expect(onStatus.mock.calls.at(-1)).toEqual(["ready"]);
-    expect(info).toHaveBeenCalledWith("[repl] pyodide 준비", "314.0.7");
+    expect(info).toHaveBeenCalledWith("[repl] pyodide 준비", PYODIDE_VERSION);
   });
 
   test("출력 알림 4종이 sink 규칙대로 터미널에 쓰인다", async () => {
@@ -868,7 +878,7 @@ describe("격리 페이지의 세션 시작", () => {
     const statusCallsAtDispose = onStatus.mock.calls.length;
 
     workerRpc.notify("write", "late");
-    workerRpc.notify("ready", { pyodideVersion: "314.0.7" });
+    workerRpc.notify("ready", { pyodideVersion: PYODIDE_VERSION });
     await settle();
 
     expect(fakeWorker.terminate).toHaveBeenCalledTimes(1);

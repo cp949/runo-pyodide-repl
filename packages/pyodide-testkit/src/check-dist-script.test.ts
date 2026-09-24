@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * 루트 `scripts/check-dist.mjs`(빌드 산출물에 `coincident`·`reflected-ffi` 문자열이 없는지 검사) 시험. 스크립트를 자식
+ * 루트 `scripts/check-dist.mjs`(빌드 산출물에 `coincident`·`reflected-ffi` 문자열이 없는지, `.mjs`에 `pyodide` 런타임 import가 없는지 검사) 시험. 스크립트를 자식
  * 프로세스로 실행해 종료 코드와 메시지를 본다. 실제 패키지의 `dist`를 검사하는 것은 각 패키지의 `check-dist` 스크립트다(turbo
  * `check-dist`가 `build` 뒤에 돌린다).
  */
@@ -108,6 +108,38 @@ describe("check-dist 스크립트", () => {
     expect(status).toBe(1);
     expect(output).toContain(FAIL_MARK);
     expect(output).toContain("pnpm build");
+  });
+
+  test.each([
+    ["정적 import(큰따옴표)", 'import { loadPyodide } from "pyodide";\n'],
+    ["정적 import(작은따옴표)", "import { loadPyodide } from 'pyodide';\n"],
+    ["서브패스 import", 'import { x } from "pyodide/ffi";\n'],
+    ["동적 import", 'const m = await import("pyodide");\n'],
+    ["부수효과 import", 'import "pyodide";\n'],
+  ])(
+    "`.mjs`에 pyodide 런타임 import(%s)가 있으면 실패하고 그 파일 이름을 알린다",
+    (_이름, 내용) => {
+      const dist = makeDist({ "index.mjs": "ok\n", "worker.mjs": 내용 });
+
+      const { status, output } = run(dist);
+
+      expect(status).toBe(1);
+      expect(output).toContain(FAIL_MARK);
+      expect(output).toContain("worker.mjs");
+      expect(output).toContain("pyodide 런타임 import");
+    },
+  );
+
+  test("`.d.mts`의 pyodide 타입 import와 `.mjs` 안 Python 코드 문자열은 통과한다", () => {
+    const dist = makeDist({
+      "worker.d.mts": 'import type { PyodideInterface } from "pyodide";\n',
+      "index.mjs":
+        'export const py = "from pyodide.ffi import to_js";\nexport const name = "pyodide-lock";\n',
+    });
+
+    const { status, output } = run(dist);
+
+    expect(status, output).toBe(0);
   });
 
   test("dist 폴더가 비어 있으면 실패한다", () => {

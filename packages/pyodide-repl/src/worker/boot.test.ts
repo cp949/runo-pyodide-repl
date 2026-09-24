@@ -14,6 +14,7 @@ import {
   createInterruptBuffer,
   createMailboxWriter,
   createStdinMailbox,
+  PYODIDE_VERSION,
 } from "@cp949/runo-pyodide-core";
 import {
   type InitFrame,
@@ -117,7 +118,7 @@ const PROMPT_REQUEST = ["readLine", ">>> ", undefined, true];
 
 /** 각본 `["1 + 1", "exit()"]`이 눌림의 영향 없이 끝났을 때의 알림·요청 타임라인. */
 const CLEAN_SESSION = [
-  ["ready", { pyodideVersion: "314.0.7" }],
+  ["ready", { pyodideVersion: PYODIDE_VERSION }],
   ["writeOutput", expect.stringMatching(/^Python 3\.14\.2 \(.*[^\n]$/s)],
   PROMPT_REQUEST,
   ["writeOutput", "2"],
@@ -146,7 +147,7 @@ describe("bootReplWorker", () => {
 
     // 배너는 개행을 더해 보내지 않는다(TRAP-29). 빈 조각(`write ""`)은 main sink가 거른다(여기서는 알림 그대로 기록).
     expect(events).toEqual([
-      ["ready", { pyodideVersion: "314.0.7" }],
+      ["ready", { pyodideVersion: PYODIDE_VERSION }],
       ["writeOutput", expect.stringMatching(/^Python 3\.14\.2 \(.*[^\n]$/s)],
       PROMPT_REQUEST,
       ["writeOutput", "2"],
