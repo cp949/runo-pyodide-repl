@@ -90,8 +90,8 @@ def install(console, ack, seq, report, extra_own_codes=()):
     waiters = set()  # run_sync 래퍼가 기다리는 대기 Task
     woken = set()  # 이미 깨운 대기(중복 취소를 막고, 그 CancelledError가 우리 것임을 표시한다)
     cancelled = set()  # 이미 취소한 콘솔 task(중복 취소 방지)
-    # 설치 시점의 번호는 이미 처리한 것으로 본다: 세션 리셋 뒤 버퍼를 재사용하면 이전 세션이 남긴 번호의 재전송이
-    # 새 세션을 끊으면 안 된다.
+    # 설치 시점의 번호는 이미 처리한 것으로 본다: 부팅 중(설치 전) 눌림의 재전송이 연결 뒤 시작 코드를 끊으면 안 된다.
+    # buffer는 세션마다 새로 만들므로 이전 세션의 번호는 섞이지 않는다(03-ctrl-c.md 2.4 1번).
     last_seq = seq()
     # 깨울 수 없는 순간에 핸들러가 소비한 SIGINT가 있다. 재개하는 run_sync 래퍼가 KeyboardInterrupt로 올리고,
     # runcode 경계에서 지운다.

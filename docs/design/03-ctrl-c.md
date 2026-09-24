@@ -66,7 +66,9 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
 
 1. **진입 첫 줄에서 `seq()` 확인**. `last_seq`와 같으면 ack도 예외도 없이 무시(재전송). 다르면
    `last_seq` 갱신 후 ack. `last_seq` 초기값은 설치 시점의 `buf[SEQ]`다. 두 경로 모두 worker(세션)마다 새 interrupt
-   buffer를 만들어 실제 초기값은 0이다. 설치 시점 값을 읽는 규칙 자체는 바뀌지 않았다. 이 저장소의 `install(console, ack, seq, report, extra_own_codes=())`은
+   buffer를 만들어 이전 세션의 번호와 섞이지 않지만, 로딩 중 눌림(2.7 게이트는 `ready` 전에 참)이 있었으면 0이 아니다.
+   그 번호를 처리한 것으로 보기 때문에, 부팅 중 눌림의 재전송(송신기는 ack 없이 같은 번호로 다시 쓴다, 2.3)이 연결 뒤
+   시작 코드를 끊지 않는다(2.6의 `discard()`는 연결 순간의 SIGNAL만 지운다). 이 저장소의 `install(console, ack, seq, report, extra_own_codes=())`은
    `ack`·`seq`가 항상 필수 인자이고 `sigint_handler`가 무조건 호출한다 — 번호·ack 없이 동작하는 분기는 없다.
    (REPL `createRepl`의 `startSession`과 실행 driver의 `createRunner` 모두 worker마다 새 interrupt buffer·송신기를 만든다. 옛 worker가
    `terminate()` 뒤에도 최대 약 2초 살아 같은 buffer의 눌림을 가로채는 것을 막기 위해서다, `14-runner.md` 14.3.5.)
