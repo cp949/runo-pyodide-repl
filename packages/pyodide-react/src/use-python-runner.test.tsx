@@ -169,6 +169,22 @@ describe("usePythonRunner: worker 수명", () => {
     expect(replaced).not.toHaveBeenCalled();
     expect(factory.workers).toHaveLength(1);
   });
+
+  test("pyodide·filename·topLevelAwait를 core에 넘긴다", () => {
+    mount(
+      options({
+        pyodide: { indexURL: "https://cdn.example/pyodide/" },
+        filename: "app.py",
+        topLevelAwait: true,
+      }),
+    );
+    const frame = factory.workers[0]!.init()!;
+    expect(frame.pyodide.indexURL).toBe("https://cdn.example/pyodide/");
+    expect(frame.driver).toMatchObject({
+      filename: "app.py",
+      topLevelAwait: true,
+    });
+  });
 });
 
 describe("usePythonRunner: 콜백 latest-ref", () => {

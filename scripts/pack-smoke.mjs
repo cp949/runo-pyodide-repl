@@ -221,6 +221,24 @@ async function main(tmp) {
         `${name} tarball에 예상하지 않은 peerDependencies.pyodide가 있다: ${peerRange}`,
       );
     }
+    // react 패키지는 react·react-dom·@xterm/xterm을 소비자 것 한 벌로 쓰도록 peer로만 선언한다(15-react.md 15.1). 소비자가 셋을
+    // 직접 설치하므로 선언이 빠지거나 dependencies로 옮겨져도 설치·import는 통과한다(React가 두 벌이면 hook이 깨진다). addon-fit은
+    // 비공개 API를 써서(TRP-062) 정확 버전으로 고정한다.
+    if (name === "@cp949/runo-pyodide-react") {
+      for (const peer of ["react", "react-dom", "@xterm/xterm"]) {
+        if (typeof manifest.peerDependencies?.[peer] !== "string")
+          throw new Error(`${name} tarball에 peerDependencies.${peer}가 없다`);
+        if (manifest.dependencies?.[peer] !== undefined)
+          throw new Error(
+            `${name} tarball의 dependencies에 peer여야 할 ${peer}가 있다`,
+          );
+      }
+      const fitRange = manifest.dependencies?.["@xterm/addon-fit"];
+      if (!/^\d+\.\d+\.\d+$/.test(String(fitRange)))
+        throw new Error(
+          `${name} tarball의 @xterm/addon-fit이 정확 버전이 아니다: ${fitRange}`,
+        );
+    }
   }
 
   step("임시 소비자 프로젝트 작성");

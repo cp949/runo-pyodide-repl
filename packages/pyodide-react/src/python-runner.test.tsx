@@ -260,8 +260,32 @@ describe("PythonRunner: xterm·worker 수명", () => {
     mount({}, { strict: true });
     await unmount();
     expect(liveWhenTerminalDisposed).toEqual([0, 0]);
-    // TRP-004 일반 가드: 정리 중 xterm의 해제된 저장소 경고가 없다. 순서를 뒤집어도 이 경고는 나지 않는다(위 순서 단언이 순서를 잡는다).
+    // 정리 중 동기 경고가 없다는 것만 본다. 이 시험은 dispose 전에 대기 중인 write 콜백을 만들지 않고 xterm write 파싱은
+    // `setTimeout`으로 미뤄지므로 TRP-004 회귀(dispose 뒤 콜백의 `buffer` 접근)는 여기서 보이지 않는다(브라우저 `react-strictmode` S04 몫).
+    // 순서를 뒤집어도 이 경고는 나지 않는다(TRP-064, 위 순서 단언이 순서를 잡는다).
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  test("createWorker가 던지면 만든 Terminal을 정리하고 오류가 React로 전파된다", () => {
+    // 격리가 아니면 createWorker를 부르지 않으므로 격리 상태에서 시험한다. 던지는 자식을 React가 처리하는 오류 경계는 없으므로 root 렌더가 던진다.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    root = createRoot(container);
+    expect(() =>
+      act(() =>
+        root!.render(
+          <PythonRunner
+            createWorker={() => {
+              throw new Error("worker 생성 실패");
+            }}
+          />,
+        ),
+      ),
+    ).toThrow("worker 생성 실패");
+    // 생성 도중 던져도 열린 Terminal은 정리된다(누수 없음).
+    expect(openSpy).toHaveBeenCalled();
+    expect(disposeSpy).toHaveBeenCalledTimes(openSpy.mock.calls.length);
+    errors.mockRestore();
+    root = undefined;
   });
 
   test("terminalOptions를 Terminal에 넘기고 나머지 div 속성·className·style을 컨테이너에 준다", () => {
@@ -487,6 +511,22 @@ describe("PythonRunner: fit", () => {
     expect(fitSpy).not.toHaveBeenCalled();
   });
 
+  test("rAF 콜백은 실행 시점의 크기를 다시 본다(통지 뒤 프레임 전에 0이 되면 건너뛴다)", () => {
+    const probe = mountFit();
+    const observer = hostObservers(probe)[0]!;
+    hostSize = { width: 400, height: 300 };
+    observer.trigger();
+    // 통지와 프레임 사이에 숨겨졌다(`display: none`).
+    hostSize = { width: 0, height: 0 };
+    raf.flush();
+    expect(fitSpy).not.toHaveBeenCalled();
+    // 같은 경로에서 크기가 남아 있으면 맞춘다(양성 구간).
+    hostSize = { width: 400, height: 300 };
+    observer.trigger();
+    raf.flush();
+    expect(fitSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("크기가 있으면 마운트 직후 fit()을 한 번 부른다", () => {
     hostSize = { width: 400, height: 300 };
     mount();
@@ -537,6 +577,13 @@ describe("PythonRunner: fit", () => {
     vi.stubGlobal("ResizeObserver", undefined);
     expect(() => mount()).not.toThrow();
     expect(activateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("ResizeObserver가 없어도 크기가 있으면 마운트 때 한 번 맞춘다", () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    hostSize = { width: 400, height: 300 };
+    mount();
+    expect(fitSpy).toHaveBeenCalledTimes(1);
   });
 });
 

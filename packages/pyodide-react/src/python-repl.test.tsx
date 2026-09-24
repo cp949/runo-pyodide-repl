@@ -268,7 +268,9 @@ describe("PythonRepl: xterm·worker 수명", () => {
     mount({}, { strict: true });
     await unmount();
     expect(liveWhenTerminalDisposed).toEqual([0, 0]);
-    // TRP-004 일반 가드: 정리 중 xterm의 해제된 저장소 경고가 없다. 순서를 뒤집어도 이 경고는 나지 않는다(위 순서 단언이 순서를 잡는다).
+    // 정리 중 동기 경고가 없다는 것만 본다. 이 시험은 dispose 전에 대기 중인 write 콜백을 만들지 않고 xterm write 파싱은
+    // `setTimeout`으로 미뤄지므로 TRP-004 회귀(dispose 뒤 콜백의 `buffer` 접근)는 여기서 보이지 않는다(브라우저 `react-strictmode` S04 몫).
+    // 순서를 뒤집어도 이 경고는 나지 않는다(TRP-064, 위 순서 단언이 순서를 잡는다).
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -304,6 +306,7 @@ describe("PythonRepl: xterm·worker 수명", () => {
       ),
     ).toThrow("worker 생성 실패");
     // 생성 도중 던져도 열린 Terminal은 정리된다(누수 없음).
+    expect(openSpy).toHaveBeenCalled();
     expect(disposeSpy).toHaveBeenCalledTimes(openSpy.mock.calls.length);
     errors.mockRestore();
     root = undefined;
