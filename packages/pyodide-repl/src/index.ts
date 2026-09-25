@@ -206,8 +206,10 @@ export function createRepl(options: ReplOptions): ReplHandle {
         else readline.cancelRead();
         // 새 worker 생성이 실패해도 끝난 옛 세션을 가리키지 않게 한다(runner `restart()`와 같다).
         session = undefined;
-        // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006).
-        if (options.terminal.buffer.active.cursorX !== 0)
+        // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006). 접두를 썼으면 그 끝이 `\r\n`이라
+        // 이미 행 머리다 — `buffer.active`는 해석이 끝난 바이트까지만 반영하는데 재그리기 콜백 전이라는 것은 앞선
+        // `state.erase()`조차 아직 해석되지 않았다는 뜻이라, 여기서 읽는 `cursorX`는 옛 입력줄 끝(0이 아님)일 수 있다.
+        if (undrawn === "" && options.terminal.buffer.active.cursorX !== 0)
           readline.write("\r\n");
         writeNotice(readline, RESET_NOTICE, "info");
         try {

@@ -28,6 +28,9 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
    `cancelRead()` 앞에서 `접두 + "\x1b[0m\r\n"`을 써 자기 행으로 남긴다(`05-output.md` 4.4).
 2. 커서 행 처리: `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다
    (TRP-006). 개행 여부는 **코어**가 결정한다 — 벤더 `cancelRead()`는 화면에 아무것도 그리지 않는다.
+   단 1에서 접두를 썼으면 이 검사를 건너뛴다: 접두 끝이 `\r\n`이라 이미 행 머리인데, `buffer.active`는 해석이 끝난
+   바이트까지만 반영하고 재그리기 콜백 전이라는 것은 앞선 `state.erase()`조차 해석 전이라는 뜻이라 `cursorX`가
+   옛 입력줄 끝(0이 아님)으로 읽혀 빈 행이 하나 더 난다(RD-026 사후 리뷰).
 3. `writeNotice(readline, RESET_NOTICE, "info")` — 청록 안내 줄
    `[세션 리셋됨 — 이전 변수/import가 모두 초기화되었습니다]`. 세션 밖 출력 경로(TRAP-12의 유일한 예외,
    `05-output.md` 4.1).

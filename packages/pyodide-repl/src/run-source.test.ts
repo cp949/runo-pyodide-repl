@@ -1378,6 +1378,30 @@ describe("재그리기 대기 중 reset()의 접두 복원(이슈 13)", () => {
     expect(lines[1]).toContain("세션 리셋됨");
   });
 
+  // 실제 xterm의 `buffer.active`는 해석이 끝난 바이트까지만 반영한다. 재그리기 콜백 전이라는 것은 앞선 `state.erase()`조차
+  // 아직 해석되지 않았다는 뜻이라 `cursorX`가 옛 입력줄 끝일 수 있다. 가짜 터미널은 write마다 동기로 갱신하므로 묶어서 흉내 낸다.
+  test("접두를 쓴 뒤에는 낡은 cursorX를 보지 않아 안내 줄 앞에 빈 행이 없다", async () => {
+    const session = startSession({ asyncWrite: true });
+    await openPrompt(session, "pri");
+    await session.output("tick");
+    expect(session.vt.screen()).toBe("");
+
+    const write = session.fake.term.write.bind(session.fake.term);
+    session.fake.screen.cursorX = 7;
+    session.fake.term.write = ((text: string, callback?: () => void) => {
+      const stale = session.fake.screen.cursorX;
+      write(text, callback);
+      session.fake.screen.cursorX = stale;
+    }) as typeof session.fake.term.write;
+
+    session.handle.reset();
+    await session.pump();
+
+    const lines = session.vt.lines();
+    expect(lines[0]).toBe("tick");
+    expect(lines[1]).toContain("세션 리셋됨");
+  });
+
   test("대조: 재그리기가 끝난 뒤 reset()하면 접두는 이미 그려진 행에 있고 다시 쓰지 않는다", async () => {
     const session = startSession({ asyncWrite: true });
     await openPrompt(session, "pri");
