@@ -86,7 +86,7 @@ handle 객체는 컴포넌트 수명 내내 같은 참조다(`useImperativeHandl
 - `@xterm/addon-fit` 0.11.0은 비공개 API `terminal._core._renderService.dimensions.css.cell`·`.clear()`를 쓴다(`docs/traps/TRP-062`). 이 경로가 사라지면 `fit()`은 `TypeError`를 던지고 컴포넌트는 삼키지 않는다: 마운트 때는 마운트 effect가 실패하고, `ResizeObserver`·rAF 경로에서는 uncaught 예외가 된다(코드 읽기로 유도, 경로를 지운 xterm으로 재현하지 않음). 렌더러가 DOM이 아니면(addon-webgl·canvas) `react-fit-check`의 `cols` 측정 셀렉터가 바뀐다.
 - 실측(2026-09-25, Chromium headless, DOM 렌더러, `?fit=1`, 창 1280 → 640 → 1000 → 500px): REPL·실행창 모두 `cols` 138 → 67 → 107, 입력 대기 중 107 → 52. 스크롤바 폭 18px이 `.xterm-screen`에서 빠진다. `rows`는 데모 컨테이너 높이가 auto라 리사이즈 대상이 아니어서 확인하지 않았다(높이가 정해진 컨테이너에서의 `rows` 변화는 미확인).
 - `fit`은 고정 높이(또는 명시된 높이) 컨테이너를 전제한다. 높이가 auto인 컨테이너에 `terminalOptions.rows`를 24가 아닌 값으로 주면 addon-fit의 부동소수 행 계산으로 행이 줄 수 있다는 관찰이 있으나 브라우저에서는 실측하지 않았다(코드 읽기·수치 실험 추정, 후속 이슈 `.scratch/react-package-followups/issues/03-fit-auto-height-rows-reduction.md`).
-- 벤더 `Readline`은 재그리기 대기 중 리사이즈에서 입력줄 흔적을 남길 수 있다(`.scratch/repl-run-source-followups/issues/10-*.md`). `react-fit-check`의 입력 대기 중 리사이즈는 프롬프트가 짧아 이를 재현하지 않았다(재현 시도가 아니다).
+- 벤더 `Readline`은 재그리기 대기 중 리사이즈에서 입력줄을 그리지 않는다(`onResize`가 그때는 `refresh()`를 생략하고 콜백이 새 크기로 그린다, `06-editing.md` 6.1; jsdom 판정, 브라우저 재현은 못 했다). `react-fit-check`의 입력 대기 중 리사이즈는 프롬프트가 짧고 배경 출력이 없어 이 경로를 지나지 않는다(재현 시도가 아니다).
 
 ## 15.6 StrictMode
 

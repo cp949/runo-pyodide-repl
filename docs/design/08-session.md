@@ -24,7 +24,8 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
    `06-editing.md` 6.4) `tabReader.readEnded(null)`(`ended=true`·큐 비움을 동기로 확정 — 뒤이은 `rpc.dispose()`의
    `complete` 요청 reject가 취소된 세션의 버퍼·커서로 큐를 다시 처리하는 것을 막는다, RD-015 DELTA-04a) →
    `readline.cancelRead()`(열린 읽기를 `ReadCancelledError`로 끝낸다. 화면·history·리스너·`term`은 건드리지
-   않는다, `06-editing.md` 6.1)다.
+   않는다, `06-editing.md` 6.1)다. 배경 출력 재그리기 콜백 전이라 아직 그리지 않은 접두가 있으면(`readline.undrawnAbovePrefix()`)
+   `cancelRead()` 앞에서 `접두 + "\x1b[0m\r\n"`을 써 자기 행으로 남긴다(`05-output.md` 4.4).
 2. 커서 행 처리: `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다
    (TRP-006). 개행 여부는 **코어**가 결정한다 — 벤더 `cancelRead()`는 화면에 아무것도 그리지 않는다.
 3. `writeNotice(readline, RESET_NOTICE, "info")` — 청록 안내 줄

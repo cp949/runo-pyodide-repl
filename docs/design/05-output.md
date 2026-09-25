@@ -87,7 +87,7 @@ REPL `input()` 읽기, 실행창 `input()` 읽기. `printAbove`·`printAboveRaw`
     비웠으면 버린다). 보관할 때 `\r`부터의 나머지(`\r`·SGR뿐)는 연속 `\r`을 하나로, SGR을 꼬리 추적기 순효과(`\x1b[0m` + 열린 SGR,
     `MAX_ACTIVE_SGR` 상한)로 줄인다 — 보이지 않는 조각(`\r`, `\x1b[0m`)이 이어져도 보관 원문이 자라지 않는다. 그래서 다음 조각은 행 머리부터 계산된다: `20%\r` → 접두 `20%`(`10%20%`로 이어 붙지 않음), `\n` →
     `lines = "100%\r\n"` → `100%` 행이 남는다(읽기 밖에서 같은 입력을 쓴 것과 같은 행). 보이는 구간이 하나도 없으면(`\r`뿐) 꼬리 규칙
-    그대로(접두 `""`)다. `\r` 뒤 SGR이 아닌 제어 시퀀스(`\x1b[K` 등)는 글자로 보고 꼬리 규칙 그대로다(아래 경계의 제어 문자 한계).
+    그대로(접두 `""`)다. `\r` 뒤 SGR이 아닌 CSI 시퀀스(`\x1b[K`·`\x1b[?25l` 등)는 본문에 남고 벤더 폭 계산이 폭 0으로 센다(아래 "접두 안의 제어 문자와 폭").
   - 열린 프롬프트 화면: `100%\r` 뒤에는 보관한 접두를 프롬프트 앞에 그린다(`100%>>> pri`). 실제 터미널이라면 커서가 행 머리라
     프롬프트가 `100%`를 덮어쓰겠지만, 벤더는 접두를 프롬프트 앞 글자로만 그리므로(`\r`을 접두에 넣지 않는다, 6.1 `setPromptPrefix`)
     진행률 값을 보이게 둔다. `\r`의 효과(행 머리)는 다음 조각의 계산에만 반영된다.
@@ -103,17 +103,21 @@ REPL `input()` 읽기, 실행창 `input()` 읽기. `printAbove`·`printAboveRaw`
   - Enter·Ctrl+C 취소: 접두는 그 행(`tick>>> pri`)과 함께 화면에 남고 다음 읽기의 꼬리는 비어 있다(다음 프롬프트는 `>>> `, `tick>>> `
     중복 없음).
   - `takeRead()`(REPL `runSource`): 벤더가 접두째 지우므로 브리지가 `abovePrefix()`를 먼저 읽어 다시 쓴다(`02-console-core.md` 5.6.3).
-  - `reset()`의 `cancelRead()`: 화면을 건드리지 않는다(행이 그대로 남는다). 예외: 배경 출력 재그리기 콜백 전(입력줄이 지워지고 아직
-    다시 그려지지 않은 창)에 오면 그 재그리기가 무효가 되어 입력줄도 아직 그리지 않은 접두도 화면에 없다(jsdom 재현: `> abc` →
-    `printAboveRaw("", "tick")` 콜백 전 `cancelRead()` → 화면 `""`. 실행창 abort의 `cancelRead()`도 같다.
-    `.scratch/repl-run-source-followups/issues/13-*.md` `deferred`).
+  - `cancelRead()`: 벤더는 화면을 건드리지 않는다(행이 그대로 남는다, `06-editing.md` 6.1). 배경 출력 재그리기 콜백 전(입력줄이 접두째
+    지워지고 아직 다시 그려지지 않은 창)에 오면 그 재그리기가 무효가 되어 입력줄도 아직 그리지 않은 접두도 화면에 없다(jsdom 재현:
+    `> abc` → `printAboveRaw("", "tick")` 콜백 전 `cancelRead()` → 화면 `""`). 그래서 재그리기 대기 중 접두는 `cancelRead()` **호출자가**
+    `Readline.undrawnAbovePrefix()`(재그리기 대기 중일 때만 접두를 돌려준다)로 읽어 취소 앞에 `prefix + "\x1b[0m"`으로 쓴다: `reset()`은
+    거기에 `\r\n`을 붙여 접두를 자기 행으로 확정하고, 실행창 abort는 뒤이은 기존 `\r\n`에 잇는다(열린 읽기가 남아 있는 취소 앞이라
+    `sinks.write`가 아니라 벤더 `write`로 직접 쓴다 — `sinks.write`는 `printAboveRaw` 경로로 가 다시 재그리기를 건다). 재그리기가 끝난
+    뒤 취소에는 접두가 이미 프롬프트 행에 그려져 있으므로 `undrawnAbovePrefix()`가 `""`라 다시 쓰지 않는다(`abovePrefix()`를 쓰면
+    `tick>>> pritick`으로 중복된다). `dispose()`·terminate(`repl-main-driver`)의 `cancelRead()`는 화면에 쓰지 않는 경로라 복원하지 않는다.
   - 미뤄진 stdin 읽기: 활성 REPL 읽기 중 배경 `input("bg> ")`의 `bg> `는 REPL 줄의 접두가 되므로, read-guard가 stdin 읽기를 미루는
     순간 그 접두를 꼬리로 옮겨 stdin 읽기의 프롬프트로 쓴다(`TerminalSinks.moveAbovePrefixToTail()`, `04-stdin-input.md` 3.2·3.3).
 - **Tab 후보 목록**: 접두가 있는 채 `printAbove`가 불리면 옛 입력행(`tick>>> pri`)이 목록 위에 남으므로 새 입력행은 접두 없이 그린다.
   그 뒤 이어지는 조각은 별도 행이 된다(편차 55).
 - **적용 범위 — 사실과 가정**:
   - 사실: REPL `>>> `·`... ` 읽기 중에는 worker가 유휴이고 asyncio가 돌아(편차 1) asyncio task·`call_later` 콜백·전역 stdout/stderr
-    출력이 실제로 온다. 브라우저 `apps/demo/e2e/checks/bg-output-check.mjs`(`e2e:bg-output`) B01~B03·B05~B07과
+    출력이 실제로 온다. 브라우저 `apps/demo/e2e/checks/bg-output-check.mjs`(`e2e:bg-output`) B01~B03·B05~B08과
     `stdin-input-check.mjs` `TICK` 절이 이 경로다.
   - 사실: REPL·실행창 `input()` 읽기 중에는 worker가 stdin 메일박스 `Atomics.wait`에 멈춰 있어(`04-stdin-input.md` 3.1) WebLoop
     콜백·JS 이벤트가 돌지 않고, `input()` 앞에 낸 출력은 같은 포트 순서상 `readInput` 알림보다 먼저 도착해 꼬리(프롬프트)가 된다.
@@ -129,17 +133,23 @@ REPL `input()` 읽기, 실행창 `input()` 읽기. `printAbove`·`printAboveRaw`
   - `lines`가 `\n`으로 끝나지 않으면 다음 재그리기가 그 행을 덮는다. 벤더는 검사하지 않고 `splitAboveRead`가 보장한다.
   - sink는 `printAboveRaw` 프로미스를 기다리지 않는다. 재그리기 대기 중 공개 편집 API(`editInsert` 등)는 리뷰 반영에서 고쳤다: 한 행
     입력에서도 Tab 완성 삽입이 콜백 전에 오면 커서가 삽입 전으로 되돌아가 이어 친 글자가 어긋나는 것이 jsdom으로 재현됐고(`imp osort`,
-    기대 `import os`), 이제 버퍼만 고치고 콜백이 편집 뒤 커서로 그린다(`06-editing.md` 6.1). 재그리기 대기 중 리사이즈는 여전히
-    입력줄을 먼저 그려 감긴 입력의 첫 행이 흔적으로 남는다(jsdom 재현, `.scratch/repl-run-source-followups/issues/10-*.md` `deferred`).
+    기대 `import os`), 이제 버퍼만 고치고 콜백이 편집 뒤 커서로 그린다(`06-editing.md` 6.1). 재그리기 대기 중 리사이즈도
+    고쳤다: 벤더 `onResize`가 그때는 `refresh()`를 생략하고 콜백이 새 크기로 그린다(jsdom 재현·수정, 브라우저 미재현, `06-editing.md` 6.1).
   - 출력으로 커지는 접두: 개행 없는 조각이 쌓여 접두+프롬프트+입력이 화면 행 수를 넘으면 읽는 동안 접두 윗행이 화면·스크롤백에 없다
     (다음 완성 행이 전부 다시 써 최종 유실은 없다). 조각마다 접두 전체를 지우고 다시 써 쓰기량이 조각 수에 대해 초선형이다(jsdom 관찰
     N=100 → 8879 B, N=400 → 97677 B). `.scratch/repl-run-source-followups/issues/14-*.md` `deferred`.
-  - 접두 안의 SGR 아닌 제어 문자: 꼬리 규칙이 본문에 남기고 벤더 폭 계산이 모르는 BS·BEL·OSC는 커서 열을 어긋나게 하거나(BS 스피너
-    `|\b/`) 편집 재그리기마다 다시 나간다(BEL). 읽기 시작 꼬리에도 있던 한계다. `.scratch/repl-run-source-followups/issues/15-*.md`
-    `deferred`.
+  - **접두 안의 제어 문자와 폭**(RD-026): 접두와 읽기 시작 꼬리는 같은 `createOutputTail()`이 만든다. 커서를 옮기지 않고 줄 위에서 글자만
+    바꾸는 제어 문자는 꼬리 계산에서 정규화한다: BS(`\b`)는 본문 마지막 글자를 **적용해 지우고**(`|\b/` → `/`, 본문 끝의 SGR 등 CSI
+    시퀀스는 건너뛰고 그 앞 글자 하나, 서로게이트 쌍은 함께; 본문이 비었거나 시퀀스뿐이면 무동작이고 줄 시작 SGR은 건드리지 않는다),
+    BEL(`\x07`)·나머지 C0(`\x00`–`\x06`·`\x0B`·`\x0C`·`\x0E`–`\x1A`·`\x1C`–`\x1F`)·DEL(`\x7F`)은 **제거**한다. `\x1b` 시퀀스·`\t`·`\n`·`\r`은
+    그대로다. 제거하지 않으면 벤더 폭 계산이 BS·BEL을 글자 폭으로 세거나(커서 열 어긋남) 편집 재그리기마다 BEL이 다시 울린다. 벤더 `Tty`
+    폭 계산은 CSI를 ECMA-48대로 읽는다: 파라미터 바이트(0x30–0x3F: 숫자·`:`·`;`·사설 접두 `<=>?`)와 중간 바이트(0x20–0x2F)를 이어가고 최종
+    바이트(0x40–0x7E)에서 폭 0으로 끝낸다(`\x1b[?25l`의 `25l`이 3칸으로 세어져 접두 `\x1b[?25l50%` 뒤 커서 열이 기대 8이 아니라 11이던 것을 없앴다). 한계: BS는 커서 이동이
+    아니라 "마지막 글자 삭제"로 모사하므로 `ab\b`(BS 뒤 글자 없음)는 실제 터미널이 `ab`로 남기지만 접두는 `a`가 된다(`10-parity-deviations.md`
+    편차 4). VT·FF 등 나머지 C0의 커서 이동, OSC·DCS 등 CSI 밖 시퀀스의 폭, 8비트 C1(0x80–0x9F)은 처리하지 않는다.
 - **시험**: 벤더 `print-above-raw.test.ts`, terminal `sinks.test.ts`("열린 읽기 …" describe 5개, `\r`로 끝나는 조각 포함)·
   `terminal-runner.test.ts`, repl `run-source.test.ts`("열린 읽기 위 배경 출력" describe 2개, "Tab 완성 응답과 배경 출력 재그리기의 겹침")·
-  `terminal/read-guard.test.ts`(`inputDeferred`), 브라우저 `e2e:bg-output`(B01~B07, B07이 `\r`로 끝나는 진행률 조각,
+  `terminal/read-guard.test.ts`(`inputDeferred`), 브라우저 `e2e:bg-output`(B01~B08, B07이 `\r`로 끝나는 진행률 조각, B08이 커서 숨김 진행률 조각의 커서 열, core `output-tail.test.ts` 제어 문자 정규화, terminal `sinks.test.ts` "접두의 제어 문자 정규화"·`terminal-runner.test.ts`·repl `run-source.test.ts`의 "재그리기 대기 중 abort·reset()의 접두 복원",
   `apps/demo/e2e/BASELINE.md`).
 
 참고: `/work/cp949/pyodide-samples/apps/repl/docs/design/05-output-streaming.md`,

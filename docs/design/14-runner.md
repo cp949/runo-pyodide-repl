@@ -208,7 +208,7 @@ type InputProvider = (
 
 `running` 중 Ctrl+C는 벤더 `setCtrlCHandler`(읽기 밖 Ctrl+C에만 불린다)가 처리하고 상태는 core `status`를 그 시점에 읽는다.
 
-읽기가 열린 채 `signal`이 abort되면(`stop()`·`reset()`·크래시·`interrupt()`) 기본 provider가 `readline.cancelRead()`로 열린 읽기를 끝내고(화면·history는 건드리지 않는다, `06-editing.md` 6.1) 입력줄 뒤에 `\r\n`을 쓴다(`dispose()` 중에는 화면에 쓰지 않는다). 그래야 이어질 `KeyboardInterrupt` 트레이스백이 입력줄에 붙지 않고, 다음 Enter가 죽은 읽기로 들어가지 않는다. 사유는 provider가 구분하지 못하므로 `reset()`·크래시 뒤에도 줄바꿈이 남고 다음 `run()`은 커서가 행 머리라 줄바꿈을 더하지 않는다.
+읽기가 열린 채 `signal`이 abort되면(`stop()`·`reset()`·크래시·`interrupt()`) 기본 provider가 `readline.cancelRead()`로 열린 읽기를 끝내고(화면·history는 건드리지 않는다, `06-editing.md` 6.1; 배경 출력 재그리기 콜백 전이라 아직 그리지 않은 접두가 있으면 `readline.undrawnAbovePrefix()`를 그 앞에서 벤더 `write`로 남긴다, `05-output.md` 4.4) 입력줄 뒤에 `\r\n`을 쓴다(`dispose()` 중에는 화면에 쓰지 않는다). 그래야 이어질 `KeyboardInterrupt` 트레이스백이 입력줄에 붙지 않고, 다음 Enter가 죽은 읽기로 들어가지 않는다. 사유는 provider가 구분하지 못하므로 `reset()`·크래시 뒤에도 줄바꿈이 남고 다음 `run()`은 커서가 행 머리라 줄바꿈을 더하지 않는다.
 
 ### 14.5.4 `run()` 시작 화면 규칙
 

@@ -1,6 +1,6 @@
 # 배경 출력 재그리기 대기 중 큐에 쌓인 키가 Tab 완성 경합 판정을 우회한다
 
-Status: open
+Status: done
 Origin: RD-022b 독립 second-opinion 리뷰 2차(가설 SO2-R1·SO2-V2), jsdom 재현. 브라우저·사용자 시나리오 미관찰.
 
 ## 현상
@@ -41,3 +41,12 @@ Enter는 `import`였다(리뷰 SO2-V2p·코드 읽기). 창은 `printAboveRaw`�
 - 2026-09-25 등록 시점 분류: RD-022b 이전부터 있던 좁은 경합(재그리기 콜백 한 번의 창)이고 jsdom 재현뿐, 사용자 시나리오 미관찰 →
   `deferred`. 설계 문서 기록: `docs/design/07-tab-completion.md` 7.3·`docs/design/06-editing.md` 6.1 알려진 경계.
 - 2026-09-25 재분류 `deferred` → `open` (RD-026 승격, 예외 근거): 창이 메시지 태스크 한 번이라 브라우저 재현 실패가 결함 부재를 뜻하지 않으므로 사용자 시나리오 관찰을 요구하지 않는다. 대신 `docs/design/07-tab-completion.md` 7.3 경합 규칙 위반 + jsdom 재현·대조 2개를 근거로 삼는다(영향: 사용자가 치지 않은 코드가 제출된다). 추적은 `ROADMAP.md` RD-026.
+
+## 해결
+
+- 결과: 코드 수정 완료(RD-026). 방향은 수정 후보 1이다. 재현 시험 x·Enter가 `"impx"`·`"imp"`로 통과하고 배경 출력 없는 대조 2건이 그대로 통과한다.
+- 원인: 재그리기 대기 중 친 키는 벤더 `queued`에만 있고 콜백에서 재생되기 전까지 버퍼에 없어 `applyResume`의 `getLine()`·`getCursor()` 비교를 통과했다. 완성 삽입이 큐의 키보다 먼저 버퍼에 들어가 `importx`·`import`가 제출됐다.
+- 수정: 벤더 `Readline.hasQueuedInput()`(`redrawing && queued.length > 0`, type-ahead 버퍼 제외)을 공개하고, `packages/pyodide-repl/src/terminal/tab-reader.ts` `applyResume`이 참이면 삽입·목록 둘 다 버린다. 설계: `docs/design/07-tab-completion.md` 7.3, `docs/design/06-editing.md` 6.1.
+- 시험(jsdom): repl `run-source.test.ts` "Tab 완성 응답과 배경 출력 재그리기의 겹침"(x·Enter·목록 3건과 배경 출력 없는 대조 "대조: 배경 출력 없이 Tab 왕복 중 x를 치면 완성은 버려진다(impx)"·"… Enter를 치면 imp가 제출된다" 2건. 이 대조 2건은 저장소에 없어 같은 이름으로 새로 추가했고 수정 전에도 통과한다), 벤더 `print-above-raw.test.ts` "hasQueuedInput(결함 16)" 5건. 수정 전 RED(벤더 5건·repl 3건 실패).
+- 변이 검사: `applyResume`의 `hasQueuedInput()` 항 제거·`hasQueuedInput()` 항상 false 2건 killed. 보조 변이(`redrawing &&` 제거)는 동치라 생존한다(`queued`는 재그리기 대기 중에만 쌓인다).
+- 브라우저: L1 셀 없음. 창이 `printAboveRaw`와 그 write 콜백 사이 메시지 태스크 한 번이라 브라우저 관찰을 완료 기준으로 삼지 않았다(예외 승격 근거와 같다).

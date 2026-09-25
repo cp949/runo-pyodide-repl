@@ -74,11 +74,15 @@ cursorY`)로 갱신 → `State.restoreCursor(cursor)`(저장해 둔 논리 커�
   저장 커서를 삽입 뒤로 옮기고, 콜백이 그 커서로 다시 그린다(RD-022b 리뷰 반영. 이전에는 콜백이 커서를 삽입 전으로 되돌려
   `imp` → Tab → ` os`가 `imp osort`로 제출됐다). 경합 판정(`getCursor() === snap.pos`)은 `printAboveRaw`가 논리 커서를 옮기지 않아
   그대로 통과한다. 시험: repl `run-source.test.ts` "Tab 완성 응답과 배경 출력 재그리기의 겹침".
-  알려진 경계: 재그리기 대기 중 친 키는 벤더 `queued`에 있어 버퍼에 아직 없으므로 경합 판정(`getLine()`·`getCursor()` 비교)에 보이지
-  않는다. `>>> imp` → Tab(완성 왕복 중) → 배경 출력 → `x` → 완성 응답 → 재그리기 콜백 순서면 완성이 먼저 버퍼에 들어가고 `x`가 콜백에서
-  뒤에 재생돼 `importx`가 제출된다(배경 출력이 없으면 버퍼가 달라져 완성을 버리고 `impx`). Enter면 `import`(기대 `imp`). 창은
-  `printAboveRaw`와 그 write 콜백 사이 한 번이다. jsdom 재현(second-opinion 2차 SO2-R1), 브라우저 미관찰,
-  `.scratch/repl-run-source-followups/issues/16-*.md` `deferred`.
+  **재그리기 큐도 경합으로 판정한다**(RD-026): 재그리기 대기 중 친 키는 벤더 `queued`에만 있고 콜백이 재생하기 전까지 버퍼에 없어
+  `getLine()`·`getCursor()` 비교를 통과한다. `applyResume`은 위 비교에 더해 `readline.hasQueuedInput()`(`06-editing.md` 6.1)이
+  참이면 삽입·목록 **둘 다** 버린다. `>>> imp` → Tab(완성 왕복 중) → 배경 출력(재그리기 콜백 전) → `x` → 완성 응답 → 콜백이면 완성을
+  버려 `impx`가 제출된다(배경 출력이 없을 때와 같다). Enter를 쳤으면 `imp`다. 목록만 살리면 큐 재생 뒤 버퍼와 맞지 않는 목록이 화면에
+  남으므로 목록도 버린다. 이전에는 완성이 큐의 키보다 먼저 버퍼에 들어가 `x`가 콜백에서 뒤에 재생돼 `importx`(Enter는 `import`)가
+  제출됐다. 판정 항은 `generation`·`ended`·`getLine()`·`getCursor()`·`hasQueuedInput()` 5개다. 시험: repl `run-source.test.ts`
+  "Tab 완성 응답과 배경 출력 재그리기의 겹침"(x·Enter·목록 3개, 배경 출력 없는 대조 2개), 벤더 `print-above-raw.test.ts`
+  "hasQueuedInput". jsdom 재현·수정이고 브라우저는 관찰하지 않았다(창이 `printAboveRaw`와 그 write 콜백 사이 메시지 태스크 한 번이다).
+  벤더 type-ahead 버퍼는 활성 읽기가 없을 때의 것이라 Tab 왕복(읽기 중)과 겹치지 않아 `hasQueuedInput()`에 포함하지 않는다.
 
 ## 7.4 인덱스 변환
 

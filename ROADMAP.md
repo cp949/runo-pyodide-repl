@@ -886,7 +886,7 @@ RD-018·019가 `apps/demo/e2e/pty/`에 rd-008·015·016·019 기준 데이터와
 
 ### RD-026 — 재그리기 대기 창·접두 경로의 정확성 결함 4건
 
-상태: 대기 · 이전: 없음(2026-09-25 `.scratch/repl-run-source-followups/issues/` 15·16·10·12 승격 판정) · 설계: `05-output.md` 4.4, `04-stdin-input.md` 3.2, `06-editing.md` 6.1, `07-tab-completion.md` 7.3, `02-console-core.md` 5.6.3·5.6.7
+상태: 완료(2026-09-25, `dev` 병합) · 이전: 없음(2026-09-25 `.scratch/repl-run-source-followups/issues/` 15·16·10·12 승격 판정) · 설계: `05-output.md` 4.4, `04-stdin-input.md` 3.2, `06-editing.md` 6.1, `07-tab-completion.md` 7.3, `02-console-core.md` 5.6.3·5.6.7
 
 RD-022b가 배경 출력을 열린 읽기 위 접두 경로에 넣은 뒤 남은 결함 4건을 한 항목으로 고친다. 근인은 둘이다: (가) `printAboveRaw`와 벤더 write 콜백 사이의 `redrawing` 상태 기계(16·10·12), (나) 접두 문자열의 폭 계산(`packages/xterm-readline/src/tty.ts` `width`, 15). 각 결함의 재현 순서·수정 후보는 이슈 파일에 있다.
 
@@ -897,20 +897,32 @@ RD-022b가 배경 출력을 열린 읽기 위 접두 경로에 넣은 뒤 남은
 - 15: 배경 task가 `print("\x1b[?25l50%\r", end="")`(진행률·커서 숨김)이나 `\b` 스피너를 찍는 동안 REPL 줄을 편집하면 커서 열이 실제 글자 끝과 어긋난다(화면 `50%> abc`에서 커서 열 11, 기대 8).
 - 16: `>>> imp` + Tab 왕복 중 배경 출력이 오고 그 재그리기 콜백 전에 `x`를 치면 `importx`가 제출된다(기대 `impx`).
 - 10: `?fit=1`(RD-024 기본 `fit`)에서 배경 출력 직후 창 크기를 바꾸면 입력줄 흔적 행이 남는다.
-- 12: REPL 줄이 열린 채 배경 `input("bg> ")`이 오고 `write`·`readInput` 두 알림 사이에 Enter를 치면 stdin 입력 행에 프롬프트가 없다. 확정 행에 이미 그려진 `bg> `는 되돌릴 수 없으므로 기대 화면은 `bg> >>> x = 41` / `bg> hello`다(프롬프트 2회 표시를 받아들인다, 그릴링 확정 4).
+- 12: REPL 줄이 열린 채 배경 `input("bg> ")`이 오고 `write`·`readInput` 두 알림 사이에 Enter를 치면 stdin 입력 행에 프롬프트가 없다. 코드로 고치지 않고 편차 56으로 등록했다(사용자 확정 2026-09-25: read-guard의 `replOpen` 게이트 때문에 경합과 정상 지연을 main이 구분할 수 없고, 게이트를 풀면 기존 read-guard 시험 2건의 기대값을 바꿔야 한다).
 
 완료 기준:
 
-- 각 이슈 "완료 기준"의 jsdom 시험이 기대값으로 통과한다: 15(CSI 사설 접두 `\x1b[?25l` + `\r` 경로, BS 스피너, BEL 재출력 3재현), 16(제출 `impx`·`imp`, 배경 출력 없는 대조 2개 유지), 10(`> abcdefgh` 1번·콜백 뒤 커서 복원), 12(stdin 입력 행 `bg> hello`), 13(취소 뒤 화면에 `tick`이 남는다).
-- 5건 각각 구현 전 RED를 확인하고, 구현을 뒤집는 변이 검사로 시험 검출력을 확인한다(변이 12건).
-- L1: 15·10은 브라우저 확인 셀을 새로 만들어 수정 전 실패·수정 후 통과를 본다(`apps/demo/e2e/checks/bg-output-check.mjs`에 B08·B09로 넣는다. B09는 `FIT=1`에서만 돈다. RD-018 확정 11). 16·12는 브라우저 관찰을 완료 기준으로 삼지 않는다(jsdom RED로 판정).
+- 각 이슈 "완료 기준"의 jsdom 시험이 기대값으로 통과한다: 15(CSI 사설 접두 `\x1b[?25l` + `\r` 경로, BS 스피너, BEL 재출력 3재현), 16(제출 `impx`·`imp`, 배경 출력 없는 대조 2개 유지), 10(`> abcdefgh` 1번·콜백 뒤 커서 복원), 13(취소 뒤 화면에 `tick`이 남는다). 12는 코드 수정 대신 편차 56 등록(사용자 확정 2026-09-25)으로 대체한다.
+- 15·16·10·13 각각 구현 전 RED를 확인하고, 구현을 뒤집는 변이 검사로 시험 검출력을 확인한다(변이 9건: 결함 12의 코드 수정이 빠져 12 → 9).
+- L1: 15·10은 브라우저 확인 셀을 새로 만들어 수정 전 실패·수정 후 통과를 본다(`apps/demo/e2e/checks/bg-output-check.mjs`에 B08·B09로 넣는다. B09는 `FIT=1`에서만 돈다. RD-018 확정 11). 16·12는 브라우저 관찰을 완료 기준으로 삼지 않는다(jsdom RED로 판정). [정정 2026-09-25 사용자 확정] B09는 양성 대조가 수정 전에도 통과해 L1 완료 기준에서 제외하고 결함 10은 jsdom RED·변이로 판정한다.
 - 기존 L1 중 변경 영역(`repl-check`·`stdin-input`·`prompt-cancel`·`run-source`·`react-fit`·`bg-output`)이 `BASELINE.md`와 같은 개수·`pageErrors`다. L2는 사용자 지시 때만.
-- 이슈 13(`cancelRead()`가 미그린 접두를 잃는다)도 고친다(2026-09-25 그릴링 확정 5로 `deferred` → `open`): 벤더 `cancelRead()`의 "화면에 아무것도 쓰지 않는다" 계약은 그대로 두고, 호출자(reset·실행창 abort)가 `takeRead()`와 같은 패턴으로 `abovePrefix()`를 먼저 읽어 복원한다.
+- 이슈 13(`cancelRead()`가 미그린 접두를 잃는다)도 고친다(2026-09-25 그릴링 확정 5로 `deferred` → `open`): 벤더 `cancelRead()`의 "화면에 아무것도 쓰지 않는다" 계약은 그대로 두고, 호출자(reset·실행창 abort)가 `takeRead()`와 같은 패턴으로 접두를 먼저 읽어 복원한다. 구현에서는 `abovePrefix()`가 아니라 벤더에 새로 둔 `undrawnAbovePrefix()`(재그리기 대기 중일 때만 접두)를 읽는다: `abovePrefix()`로 복원하면 재그리기가 끝난 뒤 취소에서 접두가 중복된다(`tick>>> pritick`).
 - 이슈 09·14·04는 범위 밖이다(`deferred` 유지, 사유는 각 이슈 Comments).
 
-L1 예산: 새 셀 2종 × (양성 대조 1 + 통과 1) + 기존 6종 × 1 = 10회.
+L1 예산: B08 2회(양성 대조 1 + 통과 1) + B09 1회(양성 대조) + 기존 6종 × 1 = 9회(계획은 10회, B09 통과 실행 제외).
 
-계획서: `_works/20260925-34-rd-026-redraw-window/`(2026-09-25 그릴링 19건 확정. 브랜치·코드 0, 착수는 사용자 결정).
+결과(2026-09-25):
+
+- 성공: 결함 15(폭 계산 CSI 사설 접두 + 접두 정규화 BS 적용·BEL 제거)·16(`Readline.hasQueuedInput()` + `applyResume`이 큐가 있으면 삽입·목록을 버림)·10(`onResize`가 재그리기 대기 중 `refresh()` 생략, `takeRead()` 잔여 입력줄도 해소)·13(reset·실행창 abort가 `Readline.undrawnAbovePrefix()`로 미그림 접두 복원)의 코드 수정과 jsdom 시험이 끝났다. 각 결함 수정 전 RED·수정 후 GREEN 로그가 있다. 변이 검사 계획 9건(결함 15 4·10 1·16 2·13 2) 전부 killed, 보조 변이 4건 중 3건 killed·1건은 동치 변이로 생존(`hasQueuedInput()`의 `redrawing &&`).
+- 예외(1) 결함 12: 코드로 고치지 않고 편차 56으로 등록했다(사용자 확정 2026-09-25). 재현 시험·변이 3건은 대상이 없어졌다.
+- 예외(2) B09(`FIT=1`, 결함 10의 브라우저 셀): 수정 전 코드에서도 통과해 양성 대조 미검출이다. L1 완료 기준에서 제외했고(사용자 확정 2026-09-25) 결함 10은 브라우저에서 재현하지 못했다. 판정은 jsdom RED 3건 + 변이 1/1 killed다. 셀은 남겼으나 `BASELINE.md` 기대에 넣지 않았다(`docs/traps/TRP-080`).
+- 예외(3) 계획과 다른 구현: 이슈 13은 `abovePrefix()` 대신 `undrawnAbovePrefix()`를 새로 두었다(위). 새 공개 API는 `hasQueuedInput()`·`undrawnAbovePrefix()` 2개다(계획의 `takeLastAbovePrefix()`는 결함 12와 함께 폐기).
+- L1(dev, 각 1회): `bg-output` 기본 10/10(B08 통과 포함: 커서 열 14), `repl-check`(normal) 15/15, `stdin-input` 19/19, `prompt-cancel` 23/23, `run-source` 12/12, `react-fit` 12/12. `pageErrors` 0, `problemLogs` 0, `BASELINE.md`와 같은 개수(기대값이 바뀐 행 없음). B08 양성 대조는 수정 전 코드에서 열 14 대기가 시간 초과로 실패했다. 누적 L1 9회, 예산 안. L2·L3 미실행.
+- L0: `pnpm check-types`·`pnpm lint`·`pnpm test --force --concurrency=1`(21/21 태스크, `check-dist`·`package-boundary` 포함)·`pnpm build`·`pnpm --filter demo e2e:check`(34개 중 0개 실패) 각 통과. 기존 시험 기대값 변경 0·시험 제목 삭제 0(`dev` 대비 삭제 줄은 스텁 `onResize` 시그니처 2줄뿐). 작업 중 L0 전체 실행에서 형제 deferred 이슈 04·06과 같은 모양의 간헐 실패가 3회 관찰됐고(sleep-slice 시간 판정 2회, `sigint-handler` 25ms 20회 1회) 실패 파일 단독 재실행은 통과했다. 이슈 `sigint-test-isolation/04`·`06` Comments에 기록했다.
+- 문서: `05-output.md` 4.4(제어 문자·폭 규칙, `cancelRead()` 호출자 복원, 경계 정리)·`06-editing.md` 6.1(새 API 2개·`onResize` 규칙)·`07-tab-completion.md` 7.3(큐 경합 판정)·`04-stdin-input.md` 3.3(꼬리 정규화 한 줄)·`08-session.md`·`14-runner.md`·`15-react.md`·`10-parity-deviations.md` 편차 4(BS·BEL·CSI 규칙; 편차 54·55는 변경 0)·벤더 README 변경 목록. 편차 56(결함 12)·`04-stdin-input.md` 3.2는 착수 중 별도로 등록했다. 신규 TRP 4건: TRP-077(CSI 사설 접두 폭)·078(재그리기 큐가 버퍼 비교 경합 판정을 우회)·079(미그림 접두 복원은 `undrawnAbovePrefix()`)·080(재그리기 대기 창 브라우저 셀이 결함 없이도 통과).
+- 한계: BS를 "마지막 글자 삭제"로 모사하므로 `ab\b`가 실제 터미널과 다르다(편차 4). 결함 16·13은 브라우저 관찰이 없다(jsdom 판정). VT·FF 등 나머지 C0 커서 이동, OSC·DCS 폭, 8비트 C1은 처리하지 않는다.
+- 후속: 이슈 09·14·04는 범위 밖으로 `deferred` 유지. 새로 등록한 이슈 없음(`hasVisibleText`가 정규화로 사라지는 제어 문자를 보이는 글자로 세는 불일치는 화면 영향이 없어 등록하지 않았다).
+
+계획서: `_works/_completed/20260925-34-rd-026-redraw-window/`.
 
 ---
 
