@@ -97,7 +97,7 @@ async def exec_in_console(console, source, top_level_await, filename=None):
     if filename is None:
         filename = console.filename
     # `return_mode="none"`: 마지막 식을 값으로 돌려주거나 raise로 바꾸지 않는다. `dedent=False`: 첫 줄 들여쓰기를 없애지 않는다.
-    # `dont_inherit=True`: 호출 모듈의 `__future__` 플래그를 사용자 코드가 물려받지 않는 방어다(pyodide 314.0.7의 `_base.py`·
+    # `dont_inherit=True`: 호출 모듈의 `__future__` 플래그를 사용자 코드가 물려받지 않는 방어다(현재 고정 버전 pyodide의 `_base.py`·
     # `console.py`에는 `__future__`가 없어 지금은 결과가 같다).
     flags = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT if top_level_await else 0
     try:

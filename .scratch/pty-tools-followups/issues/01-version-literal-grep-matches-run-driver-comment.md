@@ -1,6 +1,6 @@
 # 13.8 버전 리터럴 grep이 `run-driver.py` 주석 1건을 잡아 "0줄" 주장과 어긋난다
 
-Status: open
+Status: done
 Origin: RD-025 DELTA-04(2026-09-26). 이 RD가 만든 줄이 아니라 커밋되어 있던 상태다.
 
 ## 현상
@@ -28,3 +28,5 @@ packages/pyodide-core/src/worker/run-driver.py:100:    # `dont_inherit=True`: ..
 (a)를 권고한다. 규칙("버전 리터럴은 코드·시험에 두지 않는다")을 그대로 유지한다. 단 `packages/pyodide-core/src` 주석을 고치는 커밋은 `pnpm check-dist`가 동기 브리지 라이브러리 이름을 거른다(`docs/traps/TRP-076`) — 이 줄에는 해당 이름이 없다.
 
 ## Comments
+
+- 2026-09-26 해결: (a)를 적용했다. `packages/pyodide-core/src/worker/run-driver.py:100`의 주석 `pyodide 314.0.7의 `_base.py`·`를 `현재 고정 버전 pyodide의 `_base.py`·`로 바꿨다. 13.8의 확인 명령은 0줄(종료 코드 1 = grep 미일치)이다. 13.8 본문은 고치지 않았다(허용 목록 변경 없음). L0 전체 통과(`check-types` 14/14·`lint` 8/8·`test --concurrency=1` 21/21·`build` 7/7).
