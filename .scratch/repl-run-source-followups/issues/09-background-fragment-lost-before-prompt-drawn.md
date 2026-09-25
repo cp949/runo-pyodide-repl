@@ -20,3 +20,4 @@ REPL·stdin 리더가 `readline.read(prompt)`를 부른 뒤 벤더 write 콜백�
 ## Comments
 
 - 2026-09-24 등록 시점 분류: 1회도 관찰되지 않은 코드 읽기 경계라 `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준"). RD-022b checklist "범위(제외)" 1번.
+- 2026-09-25 판정: `deferred` 유지(RD-026 범위 밖). 재현이 아직 없고(코드 읽기 경계) 기존 시험 `print-above-raw.test.ts`의 기대값 변경 여부를 먼저 정해야 한다. 재개 조건 그대로.

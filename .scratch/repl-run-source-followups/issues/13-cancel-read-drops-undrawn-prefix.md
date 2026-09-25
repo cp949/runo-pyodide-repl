@@ -25,3 +25,4 @@ Origin: RD-022b 독립 second-opinion 리뷰(가설 SO-V5), 벤더 jsdom 재현 
 ## Comments
 
 - 2026-09-25 등록 시점 분류: 창이 xterm write 파싱 한 번이고 jsdom 재현뿐 → `deferred`. `05-output.md` 4.4에 창 예외를 적었다.
+- 2026-09-25 판정: `deferred` 유지. 문서(`05-output.md` 4.4)가 이미 창 예외로 적어 코드와 문서가 일치한다. 다만 근인이 같아 RD-026의 같은 하니스에서 곁들여 판정한다(수정 또는 문서화 유지 결론을 RD-026에 적는다).

@@ -1,6 +1,6 @@
 # 배경 `input()`의 `write`와 `readInput` 알림 사이에 REPL 줄 Enter가 끼면 stdin 프롬프트를 잃는다
 
-Status: deferred
+Status: open
 Origin: RD-022b 독립 second-opinion 리뷰(가설 SO-R2), jsdom 재현 1회. 브라우저·사용자 시나리오 미관찰.
 
 ## 현상
@@ -27,3 +27,4 @@ RD-022b 전에는 sink가 읽기 중 출력도 꼬리에 먹여 이 경합에서
 ## Comments
 
 - 2026-09-25 등록 시점 분류: 같은 포트로 연달아 오는 두 알림 사이의 키 입력이라는 좁은 경합이고 jsdom 재현뿐, 사용자 시나리오 미관찰 → `deferred`. 설계 문서 기록: `docs/design/04-stdin-input.md` 3.2.
+- 2026-09-25 재분류 `deferred` → `open` (RD-026 승격, 예외 근거): 창이 두 알림 사이 태스크 한 번이라 브라우저 관찰을 요구하지 않고, `docs/design/04-stdin-input.md` 3.2의 접두→꼬리 이전 규칙 위반 + jsdom 재현을 근거로 삼는다(영향: 무엇을 입력해야 하는지 화면에 없다). 추적은 `ROADMAP.md` RD-026.

@@ -1,6 +1,6 @@
 # 배경 출력 재그리기 대기 중 큐에 쌓인 키가 Tab 완성 경합 판정을 우회한다
 
-Status: deferred
+Status: open
 Origin: RD-022b 독립 second-opinion 리뷰 2차(가설 SO2-R1·SO2-V2), jsdom 재현. 브라우저·사용자 시나리오 미관찰.
 
 ## 현상
@@ -40,3 +40,4 @@ Enter는 `import`였다(리뷰 SO2-V2p·코드 읽기). 창은 `printAboveRaw`�
 
 - 2026-09-25 등록 시점 분류: RD-022b 이전부터 있던 좁은 경합(재그리기 콜백 한 번의 창)이고 jsdom 재현뿐, 사용자 시나리오 미관찰 →
   `deferred`. 설계 문서 기록: `docs/design/07-tab-completion.md` 7.3·`docs/design/06-editing.md` 6.1 알려진 경계.
+- 2026-09-25 재분류 `deferred` → `open` (RD-026 승격, 예외 근거): 창이 메시지 태스크 한 번이라 브라우저 재현 실패가 결함 부재를 뜻하지 않으므로 사용자 시나리오 관찰을 요구하지 않는다. 대신 `docs/design/07-tab-completion.md` 7.3 경합 규칙 위반 + jsdom 재현·대조 2개를 근거로 삼는다(영향: 사용자가 치지 않은 코드가 제출된다). 추적은 `ROADMAP.md` RD-026.
