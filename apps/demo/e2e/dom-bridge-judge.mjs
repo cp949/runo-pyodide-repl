@@ -68,6 +68,29 @@ export function judgeAfterCallReturn(events, id, expectKind, requestType) {
 }
 
 /**
+ * S5 stop 셀: 동기 호출 도중 누른 `stop()`의 결말(`outcome`, kind `restarted`)이 옛 호출이 끝나기(`slowDone`) **전에** 왔는가. `events`는 실행 시작부터
+ * 판정 시점까지의 열이고 `id`는 그 호출의 `slowStart`·`slowDone` id다. 성립 조건: `slowStart` 뒤 첫 결말이 `restarted`이고, 그 앞에 `stop` 요청이 있으며,
+ * 그 id의 `slowDone`이 없거나 결말보다 뒤다. 판정 시점(새 worker `ready` 뒤 등)에 `slowDone`이 이미 기록됐는지는 보지 않는다: 재부팅 시간이 길면 결말 뒤
+ * `slowDone`이 먼저 기록될 수 있고, 그 경우도 순서상 성립이다(재부팅 시간을 판정선으로 쓰지 않는다, 9.7).
+ * @returns {{ ok: boolean, reason: string }}
+ */
+export function judgeStopBeforeCallReturn(events, id) {
+  const start = events.findIndex((e) => e.type === "slowStart" && e.data?.id === id);
+  if (start < 0) return { ok: false, reason: `slowStart(id ${id})가 없다` };
+  const outcome = events.findIndex((e, i) => i > start && e.type === "outcome");
+  if (outcome < 0) return { ok: false, reason: "결말(outcome)이 없다" };
+  const kind = events[outcome].data?.kind;
+  if (kind !== "restarted") return { ok: false, reason: `결말 kind = ${kind}(기대 restarted)` };
+  const stop = events.findIndex((e, i) => i > start && e.type === "stop");
+  if (stop < 0 || stop > outcome) return { ok: false, reason: `결말 #${outcome} 앞에 stop 요청 기록이 없다` };
+  const done = events.findIndex((e) => e.type === "slowDone" && e.data?.id === id);
+  if (done >= 0 && done < outcome) {
+    return { ok: false, reason: `옛 slow가 결말 전에 끝났다(slowDone #${done} → outcome #${outcome}): 호출 도중 종료가 아니라 시험 불성립` };
+  }
+  return { ok: true, reason: `stop #${stop} → outcome #${outcome}(restarted), slowDone ${done < 0 ? "아직 없음" : `#${done}(결말 뒤)`}` };
+}
+
+/**
  * `events`(status 이벤트 포함)의 `from` 이후 status 전이가 `wanted`를 이 순서로 부분 수열로 포함하는가. 예: `["restarting", "ready"]`.
  * @returns {{ ok: boolean, seen: string[] }}
  */
@@ -108,7 +131,7 @@ export const ORDER_METHODS = ["C", "Ag", "Ar"];
  * S6 경로 하나(core `createRunner` 직접 또는 `<PythonRunner>` + terminal)의 출력·DOM 도착 순서 판정. `methods`는 방식(`C`·`Ag`·`Ar`)별
  * `{ pairs, inversions, missing, outcomes }`(`outcomes`는 실행별 결말 `kind`)다. 필수는 세 방식이 모두 있고, 쌍이 있으며, 기록 누락 0·모든 실행 `ok`인 것이다.
  * **역전 수는 어느 경로·방식이든 판정하지 않고 `summary`·`reason`에 기록만 한다**(사용자 재확정 2026-09-25: 출력은 core MessagePort, DOM 호출은 coincident
- * 채널로 가서 두 채널 사이의 도착 순서는 보장되지 않는다. 관측 수치는 이슈 `dom-bridge` 07).
+ * 채널로 가서 두 채널 사이의 도착 순서는 보장되지 않는다. 관측 수치는 `.scratch/dom-bridge-followups/issues/03-output-dom-arrival-order-inversion.md`).
  * @returns {{ ok: boolean, reason: string, summary: Record<string, { pairs: number, inversions: number, missing: number }> }}
  */
 export function judgeOrderPath(methods) {

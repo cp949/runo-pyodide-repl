@@ -15,7 +15,7 @@
 //   runlate  `&mode=late-run`                        — RUNLATE(`runWorker`를 늦게 불러도 ready, init 버퍼링)
 //
 // 사용: node dom-bridge-check.mjs [url](생략 시 http://localhost:5173)   ONLY=S5,N0 처럼 이름 접두어로 셀·페이지를 거른다("초기"는 페이지마다 실행).
-// 결과 파일: `dom-bridge-check-<plain|slow|core|native0g|native0|late|runlate>-dev.json`
+// 결과 파일: `dom-bridge-check-<label>.json`(label = plain|slow|core|native0g|native0|late|runlate, `lib.mjs` `resultFileName`·`finish({ label })`. `-dev` 접미 없음)
 //
 // 시간 판정(`docs/design/09-testing.md` 9.7): 고정 대기·ms 상한을 쓰지 않는다. 순서는 이벤트 열의 앞뒤(S5·S6), 상태는 `waitFor` 조건 대기, `timeoutMs`는
 // 정지 감지용이다. 오래 걸리는 동기 호출(S5)의 길이(2000ms·8000ms)는 시험이 만드는 상황이지 판정 상한이 아니다. 옛 worker는 `terminate()` 뒤 최대 약 2초
@@ -28,6 +28,7 @@ import {
   judgeOrderPath,
   ORDER_METHODS,
   judgeStatusSubsequence,
+  judgeStopBeforeCallReturn,
   squashRows,
   userLine,
 } from "../dom-bridge-judge.mjs";
@@ -214,6 +215,8 @@ await runPage({
       const count = await page.locator(".xterm").count();
       if (count !== 1) throw new Error(`.xterm 요소 ${count}개`);
       // 옛 worker는 terminate() 뒤 최대 약 2초 살아 있다(TRP-049): 사라지는 조건을 기다린다.
+      // 판정 범위의 한계(TRP-061): `workers().length === 1`은 최종 개수만 본다. 재생성 잔재(worker 누수)는 잡지만, StrictMode 이중 마운트가
+      // 실제로 일어나 worker를 만들고 치웠는지는 구분하지 못한다. 이중 마운트가 없었던 경우(예: StrictMode가 빠진 빌드)에도 이 셀은 통과한다.
       await waitFor(() => page.workers().length === 1, "workers().length === 1", BOOT_TIMEOUT_MS);
     });
 
@@ -461,13 +464,13 @@ await runPage({
       await waitStatus(["ready"], "재시작 뒤 ready", BOOT_TIMEOUT_MS);
       const seq = judgeStatusSubsequence(await getEvents(), at, ["restarting", "ready"]);
       if (!seq.ok) throw new Error(`status 이력 = ${show(seq.seen)}`);
-      // 옛 호출은 결말 전에 끝나지 않았다(slowDone이 restarted 결말 뒤에 온다) — 호출 도중에 worker가 종료됐다는 근거.
+      // 옛 호출은 결말 전에 끝나지 않았다(이벤트 열에서 slowDone이 없거나 restarted 결말 뒤에 온다) — 호출 도중에 worker가 종료됐다는 근거.
+      // `ready` 시점에 slowDone이 이미 기록됐는지는 보지 않는다: 새 worker 재부팅이 길면 결말 뒤 slowDone이 먼저 올 수 있고, 그것을 실패로 보면
+      // 재부팅 시간이 판정선이 된다(9.7 위반). 판정은 결말과 slowDone의 순서다(`judgeStopBeforeCallReturn`).
       const evsStop = (await getEvents()).slice(from);
-      const doneBefore = evsStop.findIndex((e) => e.type === "slowDone" && e.data.id === id);
-      const stopAt = evsStop.findIndex((e) => e.type === "stop");
-      if (stopAt < 0) throw new Error("stop 클릭 기록이 없다");
-      record.slow.stop = { id, outcome: r.kind, statuses: seq.seen, slowDoneAlreadyRecorded: doneBefore >= 0 };
-      if (doneBefore >= 0) throw new Error(`stop() 결말 전에 옛 slow가 이미 끝났다(호출 길이 ${SLOW_STOP_MS}ms가 너무 짧은 환경): 시험이 성립하지 않았다`);
+      const judged = judgeStopBeforeCallReturn(evsStop, id);
+      record.slow.stop = { id, outcome: r.kind, statuses: seq.seen, judged: judged.reason };
+      if (!judged.ok) throw new Error(judged.reason);
       // 새 worker는 브리지도 새로 만들었다.
       await startRun('from runo.browser import document\ndocument.title = "after-stop"\nprint("after-stop", flush=True)');
       const after = await waitResult("ok", BOOT_TIMEOUT_MS);

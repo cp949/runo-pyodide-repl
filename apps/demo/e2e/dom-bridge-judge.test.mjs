@@ -7,6 +7,7 @@ import {
   judgeLoadFailedRows,
   judgeOrder,
   judgeStatusSubsequence,
+  judgeStopBeforeCallReturn,
   squashRows,
   userLine,
 } from "./dom-bridge-judge.mjs";
@@ -97,6 +98,60 @@ describe("judgeAfterCallReturn", () => {
   it("다른 id의 slowDone은 세지 않는다", () => {
     const other = { type: "slowDone", data: { id: 2, ms: 1 } };
     expect(judgeAfterCallReturn([start, other, interrupted], 1, "interrupted").ok).toBe(false);
+  });
+});
+
+describe("judgeStopBeforeCallReturn", () => {
+  const start = { type: "slowStart", data: { id: 3, ms: 8000 } };
+  const done = { type: "slowDone", data: { id: 3, ms: 8000 } };
+  const stop = { type: "stop" };
+  const restarted = { type: "outcome", data: { kind: "restarted" } };
+  const st = (s) => ({ type: "status", data: s });
+  // 옛 셀 구현: 새 worker `ready`까지 기다린 뒤 이벤트 열에 그 id의 slowDone이 **있는지만** 봤다(순서를 보지 않음).
+  const oldJudge = (events) => ({ ok: events.findIndex((e) => e.type === "slowDone" && e.data?.id === 3) < 0 });
+
+  it("slowDone이 아직 없으면 성립이다", () => {
+    const events = [{ type: "runStart" }, start, stop, st("restarting"), restarted, st("ready")];
+    const r = judgeStopBeforeCallReturn(events, 3);
+    expect(r.ok).toBe(true);
+    expect(r.reason).toContain("아직 없음");
+  });
+  it("slowDone이 restarted 결말 뒤면(재부팅이 길어 ready 전에 기록돼도) 성립이다", () => {
+    const events = [{ type: "runStart" }, start, stop, st("restarting"), restarted, done, st("ready")];
+    const r = judgeStopBeforeCallReturn(events, 3);
+    expect(r.ok).toBe(true);
+    expect(r.reason).toContain("결말 뒤");
+  });
+  it("옛 판정(ready 뒤 slowDone 존재만 봄)은 slowDone이 결말 뒤인 성립 경우를 잘못 실패시킨다", () => {
+    const events = [{ type: "runStart" }, start, stop, st("restarting"), restarted, done, st("ready")];
+    expect(oldJudge(events).ok).toBe(false);
+    expect(judgeStopBeforeCallReturn(events, 3).ok).toBe(true);
+  });
+  it("slowDone이 결말보다 앞이면 호출 도중 종료가 아니라 불성립이다(양성 대조)", () => {
+    const r = judgeStopBeforeCallReturn([start, stop, done, restarted, st("ready")], 3);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("시험 불성립");
+  });
+  it("결말 이벤트가 없으면 실패다", () => {
+    const r = judgeStopBeforeCallReturn([start, stop, st("restarting")], 3);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("결말(outcome)이 없다");
+  });
+  it("결말이 restarted가 아니면 실패다", () => {
+    const r = judgeStopBeforeCallReturn([start, stop, { type: "outcome", data: { kind: "interrupted" } }], 3);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("kind = interrupted");
+  });
+  it("stop 요청이 없거나 결말 뒤에만 있으면 실패다", () => {
+    expect(judgeStopBeforeCallReturn([start, restarted], 3).ok).toBe(false);
+    expect(judgeStopBeforeCallReturn([start, restarted, stop], 3).ok).toBe(false);
+  });
+  it("slowStart가 없으면 실패다", () => {
+    expect(judgeStopBeforeCallReturn([stop, restarted], 3).ok).toBe(false);
+  });
+  it("다른 id의 slowDone이 결말 앞에 있어도 불성립으로 세지 않는다", () => {
+    const other = { type: "slowDone", data: { id: 2, ms: 1 } };
+    expect(judgeStopBeforeCallReturn([start, stop, other, restarted], 3).ok).toBe(true);
   });
 });
 
