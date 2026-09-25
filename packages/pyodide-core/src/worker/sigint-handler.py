@@ -9,6 +9,11 @@
 #   `call_soon`으로 한 틱 미룬다: 핸들러는 asyncio 콜백의 bytecode 사이에서 돌아, 그 자리의 Task 취소가 콜백의
 #   검사-설정(`_set_result_unless_cancelled`)을 깨뜨린다. 이미 깨운 대기가 있으면 미루지 않고 `pending`만 세운다
 #   (그 대기가 올릴 KeyboardInterrupt에 합친다).
+# - 예외: `run_sync` 래퍼가 C `run_sync`를 부르는 동안(`converting`) 사슬에서 `<console>`보다 안쪽에 래퍼 프레임이 있고 그
+#   사이에 사용자 프레임이 없으면(= C가 대기 Task를 JS로 바꾸는 중 `Generator` 추상 클래스 검사 같은 Python 프레임에서
+#   처리된 눌림) 규칙 ①로 올리지 않는다. 거기서 올린 KeyboardInterrupt는 C 변환이 `ConversionError`로 감싸고, 그 과정의
+#   `PyErr_Print()`가 excepthook 출력을 콘솔 `sys.stderr`로 흘린다. 이 눌림은 아래 규칙 ③과 같은 미룬 깨우기로 보내,
+#   대기 Task를 취소하면 래퍼가 사용자 스택에서 KeyboardInterrupt를 올린다.
 # - 그 밖(트레이스백 생성 중, 다음 문장 컴파일 중, 시작 코드)에는 버린다.
 # - `formattraceback`은 가장 안쪽 프레임이 우리 코드일 때만(핸들러·래퍼·조각에서 시작한 예외, 핸들러 실행 중에 또
 #   눌림이 도착하면 핸들러 프레임이 겹치므로 안쪽 하나만 자르면 샌다) 첫 우리 프레임부터 안쪽 전부를 자르고, 자른
@@ -96,6 +101,10 @@ def install(console, ack, seq, report, extra_own_codes=()):
     # 깨울 수 없는 순간에 핸들러가 소비한 SIGINT가 있다. 재개하는 run_sync 래퍼가 KeyboardInterrupt로 올리고,
     # runcode 경계에서 지운다.
     pending = False
+    # `run_sync` 래퍼가 C `run_sync`(대기 Task를 JS로 바꾸고 JSPI로 기다린다)를 부르는 동안 참이다. 그 구간에서 처리된
+    # 눌림을 규칙 ①로 올리지 않기 위한 표시다. 래퍼 코드 객체는 래퍼를 만든 뒤에 정한다(설치 가드에 걸리면 None이다).
+    converting = False
+    run_sync_code = None
 
     def wakeable(task):
         # 취소는 await 지점에서 멈춘(CORO_SUSPENDED) Task에만 안전하다. 코루틴이 실행 중(CORO_RUNNING)인 Task를 취소하면
@@ -132,6 +141,10 @@ def install(console, ack, seq, report, extra_own_codes=()):
         ack()
         f = frame
         while f is not None:
+            if converting and f.f_code is run_sync_code:
+                # C 변환 구간: 이 래퍼 프레임보다 안쪽에 사용자 프레임이 없다(있었다면 위에서 이미 올렸다). 바깥의
+                # `<console>` 프레임은 보지 않고 규칙 ③으로 넘긴다.
+                break
             if f.f_code.co_filename == user_filename:
                 signal.default_int_handler(signum, frame)
             f = f.f_back
@@ -212,7 +225,7 @@ def install(console, ack, seq, report, extra_own_codes=()):
                 return Raised(trim(exc))
 
         def run_sync(awaitable):
-            nonlocal pending
+            nonlocal pending, converting
             coro = guard(awaitable)
             try:
                 fut = asyncio.ensure_future(coro)
@@ -227,9 +240,11 @@ def install(console, ack, seq, report, extra_own_codes=()):
                         awaitable.close()
                 raise
             waiters.add(fut)
+            converting = True
             try:
                 result = original_run_sync(fut)
             finally:
+                converting = False
                 waiters.discard(fut)
                 woken.discard(fut)
             if isinstance(result, Raised):
@@ -265,7 +280,8 @@ def install(console, ack, seq, report, extra_own_codes=()):
         webloop.run_sync = run_sync
         pyodide.ffi.run_sync = run_sync
         console.runcode = runcode
-        own_codes.add(run_sync.__code__)
+        run_sync_code = run_sync.__code__
+        own_codes.add(run_sync_code)
         own_codes.add(guard.__code__)
 
     format_traceback = console.formattraceback

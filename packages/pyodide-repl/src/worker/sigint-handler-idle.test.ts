@@ -601,6 +601,177 @@ asyncio.ensure_future = _ef_pressing
     ).toBe(1);
     expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
   }, 20_000);
+
+  // C `run_sync`는 넘겨받은 guard Task를 JS로 바꾸는 중(python2js → pyproxy_getflags → type_getflags)에 `Generator`
+  // 추상 클래스 검사(`ABCMeta.__subclasscheck__`, Python 프레임)를 부른다. 그 프레임에서 SIGINT가 처리되면 사슬에 `<console>`
+  // 프레임이 있어 규칙 ①이 KeyboardInterrupt를 올리고, pyodide가 그것을 ConversionError로 감싼다. 조건은 식별 비교만
+  // 쓴다(`isinstance`·`issubclass`로 ABC를 검사하면 이 래퍼가 재귀한다). WebLoop의 Task 클래스는 PyodideTask다.
+  const injectSubclasscheck = () =>
+    pyodide.runPython(
+      `import abc, collections.abc, signal
+import pyodide.webloop
+_sc_original = abc.ABCMeta.__subclasscheck__
+_sc_hits = []
+
+def _sc_pressing(cls, subclass):
+    # guard Task를 JS로 바꾸는 Generator 검사에서만, 한 번 눌림을 처리한다.
+    if not _sc_hits and cls is collections.abc.Generator and subclass is pyodide.webloop.PyodideTask:
+        _sc_hits.append(1)
+        press()
+        signal.raise_signal(signal.SIGINT)
+    return _sc_original(cls, subclass)
+
+abc.ABCMeta.__subclasscheck__ = _sc_pressing
+`,
+      { globals: pyodide.globals, filename: "<test>" },
+    );
+
+  /** 주입을 되돌리고 주입 횟수를 돌려준다. 파일이 공유하는 세션에 상태를 남기지 않는다. */
+  const restoreSubclasscheck = () =>
+    pyodide.runPython(
+      `import abc
+abc.ABCMeta.__subclasscheck__ = _sc_original
+_sc_n = len(_sc_hits)
+del _sc_original, _sc_hits, _sc_pressing
+_sc_n`,
+      { globals: pyodide.globals, filename: "<test>" },
+    ) as number;
+
+  it("run_sync 래퍼의 JS 변환 중 처리된 SIGINT도 표준 트레이스백만 남긴다", async () => {
+    const runner = await setup();
+    injectSubclasscheck();
+    let hits: number;
+
+    try {
+      expect(await runner.run("run_sync(asyncio.sleep(0.01))")).toEqual(READY);
+    } finally {
+      hits = restoreSubclasscheck();
+    }
+
+    // 주입 지점을 실제로 지났는지(지나지 않았으면 이 시험은 아무것도 보지 않은 것이다).
+    expect(hits).toBe(1);
+    const stderr = runner.screen.stderr;
+    expect(stderr).toBe(CONSOLE_TRACEBACK);
+    // 위 단언이 통째 비교라 실패 메시지가 길다. 새는 조각을 이름으로 따로 확인한다(TRP-021).
+    for (const leaked of [
+      "ConversionError",
+      "<sigint-handler>",
+      "<frozen abc>",
+      "<test>",
+    ]) {
+      expect(stderr).not.toContain(leaked);
+    }
+    expect(stderr.split("Traceback (most recent call last)").length - 1).toBe(
+      1,
+    );
+  }, 20_000);
+
+  it("run_sync 래퍼의 JS 변환 중 처리된 SIGINT도 사용자 except KeyboardInterrupt가 잡는다", async () => {
+    const runner = await setup();
+    injectSubclasscheck();
+    const program = [
+      "caught = 0",
+      "try:",
+      "    run_sync(asyncio.sleep(0.01))",
+      "except KeyboardInterrupt:",
+      "    caught = 1",
+    ].join("\n");
+    let hits: number;
+
+    try {
+      expect(await runner.run(execSource(program))).toEqual(READY);
+    } finally {
+      hits = restoreSubclasscheck();
+    }
+
+    expect(hits).toBe(1);
+    expect(pyodide.globals.get("caught")).toBe(1);
+    expect(runner.screen.stderr).toBe("");
+  }, 20_000);
+
+  // 변환 중 눌림을 규칙 ①로 올리지 않고 미룬 깨우기로 보내는 수정이 `pending`만 세우는 것으로 줄면, 짧은 awaitable은
+  // 같은 결말이지만 긴 awaitable은 끝까지 실행된 뒤에야 KeyboardInterrupt가 오른다. 판정은 시간이 아니라 이벤트다:
+  // 대기가 끝까지 돌지 않았고(`done`), 취소 처리(`finally`)는 실행됐다(`fin`).
+  it("run_sync 래퍼의 JS 변환 중 처리된 SIGINT는 긴 awaitable을 끝까지 돌리지 않고 취소한다", async () => {
+    const runner = await setup();
+    pyodide.runPython(
+      `import asyncio
+_cv_done = []
+_cv_fin = []
+
+async def _cv_slow():
+    try:
+        await asyncio.sleep(5)
+        _cv_done.append(1)
+    finally:
+        _cv_fin.append(1)
+`,
+      { globals: pyodide.globals, filename: "<test>" },
+    );
+    injectSubclasscheck();
+    let hits: number;
+
+    try {
+      expect(await runner.run("run_sync(_cv_slow())")).toEqual(READY);
+    } finally {
+      hits = restoreSubclasscheck();
+    }
+
+    expect(hits).toBe(1);
+    expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
+    expect(
+      pyodide.runPython("_cv_done", { globals: pyodide.globals }).toJs(),
+    ).toEqual([]);
+    expect(
+      pyodide.runPython("_cv_fin", { globals: pyodide.globals }).toJs(),
+    ).toEqual([1]);
+  }, 20_000);
+
+  // 변환 구간 표시(`converting`)는 C `run_sync`가 끝나면 내려가야 한다. 남아 있으면 다음 `run_sync` 호출의 Task 생성 전
+  // 눌림(규칙 ①로 올려 awaitable을 시작하지 않는 것이 원래 결말)까지 미뤄져, awaitable이 시작된 뒤에야 중단된다.
+  it("앞선 run_sync가 끝난 뒤 Task 생성 전에 처리된 SIGINT는 awaitable을 시작하지 않고 표준 트레이스백만 남긴다", async () => {
+    const runner = await setup();
+    expect(await runner.run("run_sync(asyncio.sleep(0.01))")).toEqual(READY);
+    pyodide.runPython(
+      `import asyncio, signal
+_cs_started = []
+_cs_original = asyncio.ensure_future
+_cs_hits = []
+
+async def _cs_probe():
+    _cs_started.append(1)
+    await asyncio.sleep(5)
+
+def _cs_pressing(*args, **kwargs):
+    # guard 코루틴을 넘긴 호출의 진입 직후(Task 생성 전)에 한 번 눌림을 처리한다.
+    if not _cs_hits and getattr(args[0] if args else None, '__name__', '') == 'guard':
+        _cs_hits.append(1)
+        press()
+        signal.raise_signal(signal.SIGINT)
+    return _cs_original(*args, **kwargs)
+
+asyncio.ensure_future = _cs_pressing
+`,
+      { globals: pyodide.globals, filename: "<test>" },
+    );
+
+    try {
+      expect(await runner.run("run_sync(_cs_probe())")).toEqual(READY);
+    } finally {
+      pyodide.runPython(
+        "import asyncio\nasyncio.ensure_future = _cs_original",
+        { globals: pyodide.globals, filename: "<test>" },
+      );
+    }
+
+    expect(
+      pyodide.runPython("len(_cs_hits)", { globals: pyodide.globals }),
+    ).toBe(1);
+    expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
+    expect(
+      pyodide.runPython("_cs_started", { globals: pyodide.globals }).toJs(),
+    ).toEqual([]);
+  }, 20_000);
 });
 
 describe("깨울 수 없는 순간에 소비된 SIGINT", () => {
