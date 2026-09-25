@@ -95,6 +95,17 @@ export interface RunnerOptions {
   onCrash?: (message: string) => void;
   /** pyodide 로드 실패 메시지. `onStatus("load-failed")` 앞에 온다. */
   onLoadFailed?: (message: string) => void;
+  /**
+   * `run()`이 코드를 받아들인 순간 그 `run()` 호출 안에서 동기로 한 번 부른다(인자 없음). 실행 슬롯을 차지한 뒤·`runCode`
+   * 전송 앞이라 이때 `busy`는 참이고 상태는 아직 `ready`(`running` 전)다. 거부(`busy`·`unavailable`·`disposed`·문자열 아님)에서는
+   * 부르지 않는다. `loading`·`restarting`에서 수락된 run도 즉시 부르고, `ready`가 돼 실행을 시작할 때는 다시 부르지 않는다.
+   *
+   * 콜백 안에서 `run()`은 `busy`로 거부된다. `stop()`·`reset()`·`dispose()`는 불러도 된다: 콜백 뒤에 runner가 `disposed`이거나 슬롯이
+   * 이 run이 아니거나 세션이 바뀌었으면 옛 세션에 `runCode`를 보내지 않는다(`stop()`·`dispose()`가 이미 그 run의 결말을 정했고,
+   * `reset()`이면 새 worker가 `ready`가 될 때 실행한다). 콜백이 던지면 슬롯을 풀고 그 `run()`을 그 오류로 reject하며 `runCode`는
+   * 보내지 않는다(runner는 `busy`에 갇히지 않는다).
+   */
+  onRunAccepted?: () => void;
 }
 
 export interface RunnerHandle {
@@ -171,6 +182,7 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
     topLevelAwait: options.topLevelAwait,
   });
   const { createWorker, onOutput, onStatus, onCrash, onLoadFailed } = options;
+  const onRunAccepted = options.onRunAccepted;
   const inputProvider = options.inputProvider;
   const isolated = globalThis.crossOriginIsolated === true;
   const indexURL = normalizeIndexUrl(
@@ -445,6 +457,17 @@ export function createRunner(options: RunnerOptions): RunnerHandle {
         }
         const run: ActiveRun = { code, phase: "waiting", resolve, reject };
         active = run;
+        // 수락을 알린다(슬롯 점유 뒤·dispatch 앞). 콜백은 `run`·`stop`·`reset`·`dispose`를 다시 부를 수 있어 뒤에 다시 확인한다.
+        const gen = generation;
+        try {
+          onRunAccepted?.();
+        } catch (error) {
+          // 콜백이 던졌다: 슬롯을 풀고 그 오류로 끝낸다. 콜백 안에서 `stop()`·`dispose()`가 이미 이 run을 끝냈으면 `reject`는 무시된다.
+          if (active === run) active = undefined;
+          reject(error);
+          return;
+        }
+        if (disposed || active !== run || generation !== gen) return;
         if (status === "ready") dispatch(run);
         // `loading`·`restarting`이면 `ready` 알림이 dispatch한다.
       });

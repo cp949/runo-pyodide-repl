@@ -86,7 +86,7 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 
 ## 14.3 `createRunner`(core main)
 
-옵션: `createWorker`(필수, worker를 만들 때마다 부른다), `onOutput`(필수), `pyodide?: { indexURL? }`, `filename?`, `topLevelAwait?`, `inputProvider?`, `onStatus?`, `onCrash?`, `onLoadFailed?`. 핸들: `run(code)`·`stop()`·`interrupt()`·`reset()`·`dispose()`·`status`·`busy`. `busy`는 지금 `run()`을 부르면 `busy`로 거부되는가다(run이 실행 슬롯을 차지함 — 로딩·재시작 대기 포함 — 또는 `waiting-input`). `status`만으로는 대기 run의 슬롯 점유를 알 수 없다. 옵션 검증 오류(14.2.3)는 worker·버퍼를 만들기 전에 동기로 던진다. 첫 상태(`loading` 또는 `not-isolated`)는 `createRunner`가 반환하기 전에 `onStatus`로 동기 통지한다. `onLoadFailed(message)`는 `onStatus("load-failed")` 앞에 온다(core는 로드 실패 사유를 훅으로만 알린다). `onCrash(message)`는 `crashed` 다음에 부른다.
+옵션: `createWorker`(필수, worker를 만들 때마다 부른다), `onOutput`(필수), `pyodide?: { indexURL? }`, `filename?`, `topLevelAwait?`, `inputProvider?`, `onStatus?`, `onCrash?`, `onLoadFailed?`, `onRunAccepted?`. 핸들: `run(code)`·`stop()`·`interrupt()`·`reset()`·`dispose()`·`status`·`busy`. `busy`는 지금 `run()`을 부르면 `busy`로 거부되는가다(run이 실행 슬롯을 차지함 — 로딩·재시작 대기 포함 — 또는 `waiting-input`). `status`만으로는 대기 run의 슬롯 점유를 알 수 없다. 옵션 검증 오류(14.2.3)는 worker·버퍼를 만들기 전에 동기로 던진다. 첫 상태(`loading` 또는 `not-isolated`)는 `createRunner`가 반환하기 전에 `onStatus`로 동기 통지한다. `onLoadFailed(message)`는 `onStatus("load-failed")` 앞에 온다(core는 로드 실패 사유를 훅으로만 알린다). `onCrash(message)`는 `crashed` 다음에 부른다. `onRunAccepted()`는 `run()`이 코드를 받아들인 순간(거부 아님) 그 호출 안에서 동기로 한 번, 슬롯을 차지한 뒤·`runCode` 전송 앞에서 부른다(인자 없음, `loading`·`restarting`에서 수락돼도 즉시 부르고 `ready`에서 실행이 시작될 때는 다시 부르지 않는다).
 
 ### 14.3.1 상태 8종
 
@@ -147,7 +147,7 @@ const result = await runner.run('print("hi")'); // { kind: "ok" }
 - `dispose()`는 worker·RPC를 정리하고 실행·대기 중 run을 `RunRejectedError("disposed")`로 끝낸다. 두 번 불러도 안전하다. `dispose()` 뒤에는 `onStatus`·`onOutput`·`onCrash`를 부르지 않고 `status`도 바뀌지 않는다(열린 읽기를 버린 뒤의 재개 알림 포함).
 - 크래시: worker `error` 이벤트나 `crashed` 알림이 오면 열린 읽기를 버리고 상태 `crashed` → 실행·대기 중 run은 `RunRejectedError("crashed")`. 크래시 뒤 새 `run()`은 `unavailable`이다. 자동 재생성은 없고 복구는 `reset()`이다(REPL `08-session.md`와 같다). 재생성 중 `createWorker`가 던져도 `crashed`가 된다(첫 생성이 던지면 `createRunner`가 던진다).
 
-- 상태 콜백 재진입: `onStatus` 콜백 안에서 `run()`·`stop()`·`reset()`·`dispose()`를 불러도 된다. `createRunner`는 콜백을 부르기 전에 슬롯·`stop()` 결말을 확정하고 콜백 뒤에 세션·슬롯을 다시 확인한다. 그래서 `crashed` 콜백 안의 `reset()`(자동 복구)에서도 실행 중이던 run은 `crashed`로 거부되고 `onCrash`는 불리며, `load-failed` 콜백 안의 `reset()`에서도 대기 run은 `unavailable`이다. `ready` 콜백 안의 `reset()`은 대기 run을 새 worker의 `ready`까지 미루고, `running` 콜백 안의 `reset()`·`dispose()`는 그 run을 `restarted`·`disposed`로 끝낸다(`runCode`는 알림 전에 옛 worker로 이미 보냈다). `restarting` 콜백 안의 `dispose()`·`reset()`은 방금 만든 worker를 정리한다(누수 없음).
+- 상태 콜백 재진입: `onStatus` 콜백 안에서 `run()`·`stop()`·`reset()`·`dispose()`를 불러도 된다. `createRunner`는 콜백을 부르기 전에 슬롯·`stop()` 결말을 확정하고 콜백 뒤에 세션·슬롯을 다시 확인한다. 그래서 `crashed` 콜백 안의 `reset()`(자동 복구)에서도 실행 중이던 run은 `crashed`로 거부되고 `onCrash`는 불리며, `load-failed` 콜백 안의 `reset()`에서도 대기 run은 `unavailable`이다. `ready` 콜백 안의 `reset()`은 대기 run을 새 worker의 `ready`까지 미루고, `running` 콜백 안의 `reset()`·`dispose()`는 그 run을 `restarted`·`disposed`로 끝낸다(`runCode`는 알림 전에 옛 worker로 이미 보냈다). `restarting` 콜백 안의 `dispose()`·`reset()`은 방금 만든 worker를 정리한다(누수 없음). `onRunAccepted` 콜백도 같은 규칙이다: 콜백 안의 `run()`은 `busy`로 거부되고, 콜백 뒤에 `disposed`·슬롯·세션이 바뀌었으면 `runCode`를 보내지 않으며(`stop()`은 `unavailable`, `dispose()`는 `disposed`, `reset()`은 새 worker의 `ready`까지 미룬다), 콜백이 던지면 슬롯을 풀고 그 오류로 `run()`을 reject한다.
 
 ### 14.3.5 worker(세션)마다 새 interrupt buffer
 

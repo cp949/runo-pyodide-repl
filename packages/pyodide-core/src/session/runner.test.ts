@@ -22,6 +22,7 @@ import {
   type RunnerHandle,
   type RunnerOptions,
   type RunnerStatus,
+  type RunResult,
 } from "./runner";
 
 // stdin 메일박스 ctrl[STATE] 값(`protocol/stdin-mailbox.ts`)
@@ -1305,6 +1306,288 @@ describe("createRunner: 상태 콜백 안의 재진입과 dispose 뒤 알림", (
     expect(started.workers.map((w) => w.terminate.mock.calls.length)).toEqual([
       1, 1, 0,
     ]);
+  });
+});
+
+describe("createRunner: onRunAccepted", () => {
+  /** 수락 콜백이 부른 횟수와 매 호출 때의 `busy`·`status` 스냅샷을 모으는 runner. `act`는 콜백 안에서 runner를 다룬다. */
+  function startAccepting(
+    act?: (runner: RunnerHandle, calls: number) => void,
+    options: Partial<RunnerOptions> = {},
+  ) {
+    const holder: { runner?: RunnerHandle } = {};
+    const snapshots: { busy: boolean; status: RunnerStatus }[] = [];
+    const onRunAccepted = vi.fn(() => {
+      snapshots.push({
+        busy: holder.runner!.busy,
+        status: holder.runner!.status,
+      });
+      act?.(holder.runner!, snapshots.length);
+    });
+    const started = start({ ...options, onRunAccepted });
+    holder.runner = started.runner;
+    return { ...started, onRunAccepted, snapshots };
+  }
+
+  test("수락된 run()은 호출 안에서 동기로 한 번 콜백을 부르고 그 시점에 busy는 참이며 상태는 아직 ready다", async () => {
+    const started = startAccepting();
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    const result = started.runner.run("print(1)");
+
+    // await 없이 확인한다: 콜백은 `run()` 호출 안에서 불렸다.
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+    expect(started.snapshots).toEqual([{ busy: true, status: "ready" }]);
+    await until(() => started.workers[0]!.pending.length === 1);
+    started.workers[0]!.pending[0]!.resolve({ kind: "ok" });
+    await result;
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+  });
+
+  test("콜백은 running 알림(runCode 전송)보다 앞서고 둘 다 run() 반환 전에 일어난다", async () => {
+    const order: string[] = [];
+    const started = start({
+      onStatus: (status) => {
+        if (status === "running") order.push("running");
+      },
+      onRunAccepted: () => {
+        order.push("accepted");
+      },
+    });
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    const result = started.runner.run("print(1)");
+    order.push("returned");
+    await until(() => started.workers[0]!.pending.length === 1);
+    started.workers[0]!.pending[0]!.resolve({ kind: "ok" });
+    await result;
+
+    expect(order).toEqual(["accepted", "running", "returned"]);
+  });
+
+  test("busy 거부에서는 콜백을 부르지 않는다", async () => {
+    const started = startAccepting();
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+    await runAndWait(started, "first");
+
+    await expect(started.runner.run("second")).rejects.toMatchObject({
+      reason: "busy",
+    });
+
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+  });
+
+  test("waiting-input 때문에 busy로 거부되는 run에서도 콜백을 부르지 않는다", async () => {
+    const started = startAccepting(undefined, {
+      inputProvider: () => new Promise<string | null>(() => {}),
+    });
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+    started.workers[0]!.readInput();
+    await until(() => started.runner.status === "waiting-input");
+
+    await expect(started.runner.run("x")).rejects.toMatchObject({
+      reason: "busy",
+    });
+
+    expect(started.onRunAccepted).not.toHaveBeenCalled();
+  });
+
+  test("dispose 뒤 run 거부에서는 콜백을 부르지 않는다", async () => {
+    const started = startAccepting();
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+    started.runner.dispose();
+
+    await expect(started.runner.run("x")).rejects.toMatchObject({
+      reason: "disposed",
+    });
+
+    expect(started.onRunAccepted).not.toHaveBeenCalled();
+  });
+
+  test.each(["crashed", "load-failed"] as const)(
+    "%s 상태의 unavailable 거부에서는 콜백을 부르지 않는다",
+    async (state) => {
+      const started = startAccepting();
+      if (state === "crashed") started.workers[0]!.dispatchError("boom");
+      else started.workers[0]!.loadFailed("실패");
+      await until(() => started.runner.status === state);
+
+      await expect(started.runner.run("x")).rejects.toMatchObject({
+        reason: "unavailable",
+      });
+
+      expect(started.onRunAccepted).not.toHaveBeenCalled();
+    },
+  );
+
+  test("cross-origin isolation이 꺼진 not-isolated 거부에서는 콜백을 부르지 않는다", async () => {
+    vi.stubGlobal("crossOriginIsolated", false);
+    const started = startAccepting();
+
+    await expect(started.runner.run("x")).rejects.toMatchObject({
+      reason: "unavailable",
+    });
+
+    expect(started.onRunAccepted).not.toHaveBeenCalled();
+  });
+
+  test("code가 문자열이 아닌 TypeError 거부에서는 콜백을 부르지 않는다", async () => {
+    const started = startAccepting();
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    await expect(
+      started.runner.run(1 as unknown as string),
+    ).rejects.toBeInstanceOf(TypeError);
+
+    expect(started.onRunAccepted).not.toHaveBeenCalled();
+  });
+
+  test("loading 중 수락된 run도 즉시 콜백을 부르고 ready 뒤 실행 시작에서는 다시 부르지 않는다", async () => {
+    const started = startAccepting();
+
+    const result = started.runner.run("late");
+
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+    expect(started.snapshots).toEqual([{ busy: true, status: "loading" }]);
+    started.workers[0]!.ready();
+    await until(() => started.workers[0]!.pending.length === 1);
+    started.workers[0]!.pending[0]!.resolve({ kind: "ok" });
+    await result;
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+  });
+
+  test("restarting 중 수락된 run도 즉시 콜백을 부르고 새 worker가 ready가 된 뒤에는 다시 부르지 않는다", async () => {
+    const started = startAccepting();
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+    started.runner.reset();
+    expect(started.runner.status).toBe("restarting");
+
+    const result = started.runner.run("late");
+
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+    expect(started.snapshots).toEqual([{ busy: true, status: "restarting" }]);
+    started.workers[1]!.ready();
+    await until(() => started.workers[1]!.pending.length === 1);
+    started.workers[1]!.pending[0]!.resolve({ kind: "ok" });
+    await result;
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+  });
+
+  test("콜백 안에서 run을 다시 부르면 busy로 거부되고 콜백은 한 번만 불린다", async () => {
+    let inner: Promise<RunResult> | undefined;
+    const started = startAccepting((runner) => {
+      inner = runner.run("inner");
+      inner.catch(() => {});
+    });
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    const outer = started.runner.run("outer");
+
+    await expect(inner).rejects.toMatchObject({ reason: "busy" });
+    await until(() => started.workers[0]!.pending.length === 1);
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+    expect(started.workers[0]!.pending.map((run) => run.code)).toEqual([
+      "outer",
+    ]);
+    started.workers[0]!.pending[0]!.resolve({ kind: "ok" });
+    await expect(outer).resolves.toStrictEqual({ kind: "ok" });
+  });
+
+  test("콜백 안에서 dispose하면 그 run은 disposed로 거부되고 worker에 runCode를 보내지 않는다", async () => {
+    const started = startAccepting((runner) => runner.dispose());
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    const result = started.runner.run("x");
+
+    await expect(result).rejects.toMatchObject({ reason: "disposed" });
+    await settle();
+    expect(started.workers[0]!.pending).toHaveLength(0);
+    expect(started.workers[0]!.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  test("콜백 안에서 reset하면 옛 worker에는 보내지 않고 새 worker가 ready가 되면 실행한다", async () => {
+    const started = startAccepting((runner, calls) => {
+      if (calls === 1) runner.reset();
+    });
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    const result = started.runner.run("x");
+
+    await until(() => started.workers.length === 2);
+    await settle();
+    expect(started.workers[0]!.pending).toHaveLength(0);
+    expect(started.workers[1]!.pending).toHaveLength(0);
+    expect(started.runner.status).toBe("restarting");
+    started.workers[1]!.ready();
+    await until(() => started.workers[1]!.pending.length === 1);
+    started.workers[1]!.pending[0]!.resolve({ kind: "ok" });
+    await expect(result).resolves.toStrictEqual({ kind: "ok" });
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(1);
+  });
+
+  test("콜백 안에서 stop하면 그 run은 unavailable로 거부되고 미전송이며 stop은 idle이다", async () => {
+    let stopped: Promise<string> | undefined;
+    const started = startAccepting((runner) => {
+      stopped = runner.stop();
+    });
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    const result = started.runner.run("x");
+
+    await expect(result).rejects.toMatchObject({ reason: "unavailable" });
+    await expect(stopped).resolves.toBe("idle");
+    await settle();
+    expect(started.workers[0]!.pending).toHaveLength(0);
+    expect(started.runner.busy).toBe(false);
+    expect(started.runner.status).toBe("ready");
+  });
+
+  test("콜백이 던지면 run은 그 오류로 reject되고 busy는 거짓이며 runCode는 가지 않고 다음 run을 받는다", async () => {
+    const failure = new Error("화면 준비 실패");
+    const started = startAccepting((_runner, calls) => {
+      if (calls === 1) throw failure;
+    });
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+
+    await expect(started.runner.run("first")).rejects.toBe(failure);
+
+    expect(started.runner.busy).toBe(false);
+    expect(started.runner.status).toBe("ready");
+    await settle();
+    expect(started.workers[0]!.pending).toHaveLength(0);
+    const second = started.runner.run("second");
+    await until(() => started.workers[0]!.pending.length === 1);
+    expect(started.workers[0]!.pending[0]!.code).toBe("second");
+    started.workers[0]!.pending[0]!.resolve({ kind: "ok" });
+    await expect(second).resolves.toStrictEqual({ kind: "ok" });
+    expect(started.onRunAccepted).toHaveBeenCalledTimes(2);
+  });
+
+  test("loading 중 수락 콜백이 던져도 슬롯을 풀어 ready 뒤에 그 run을 보내지 않는다", async () => {
+    const failure = new Error("화면 준비 실패");
+    const started = startAccepting(() => {
+      throw failure;
+    });
+
+    await expect(started.runner.run("late")).rejects.toBe(failure);
+
+    expect(started.runner.busy).toBe(false);
+    started.workers[0]!.ready();
+    await until(() => started.runner.status === "ready");
+    await settle();
+    expect(started.workers[0]!.pending).toHaveLength(0);
   });
 });
 
