@@ -27,6 +27,10 @@
       "types": "./dist/worker.d.mts",
       "default": "./dist/worker.mjs"
     },
+    "./test-utils": {
+      "development": "./src/test/fake-worker.ts",
+      "types": "./src/test/fake-worker.ts"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -39,6 +43,7 @@
         "types": "./dist/worker.d.mts",
         "default": "./dist/worker.mjs"
       },
+      "./test-utils": null,
       "./package.json": "./package.json"
     }
   },
