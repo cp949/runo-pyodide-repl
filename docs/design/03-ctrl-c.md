@@ -73,7 +73,7 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
    (REPL `createRepl`의 `startSession`과 실행 driver의 `createRunner` 모두 worker마다 새 interrupt buffer·송신기를 만든다. 옛 worker가
    `terminate()` 뒤에도 최대 약 2초 살아 같은 buffer의 눌림을 가로채는 것을 막기 위해서다, `14-runner.md` 14.3.5.)
 2. `frame.f_back`을 따라 `co_filename`이 콘솔의 `filename`(REPL은 `<console>`, 실행 driver는 `filename` 옵션 값 — 기본 `main.py`, `14-runner.md` 14.2.2)인 프레임이 **하나라도 있으면**
-   `signal.default_int_handler`로 `KeyboardInterrupt`를 올린다. 정상 반환 후 다른 경로로 올리면 안 된다:
+   `signal.default_int_handler`로 `KeyboardInterrupt`를 올린다(예외: `run_sync` 래퍼의 C 변환 구간, 아래 "깨우기 세부"). 정상 반환 후 다른 경로로 올리면 안 된다:
    `input()` 취소의 EINTR 경로에서 예외를 못 보면 CPython이 읽기를 다시 시도한다(PEP 475).
 3. 사용자 프레임이 없고 **사용자 실행 중**(= `runcode` 안, 시간 조건 없음)이면 `interrupt_idle()`로
    정지한 실행을 깨운다. 깨우기는 핸들러 자리에서 하지 않고 `loop.call_soon`으로 한 틱 미룬다(미룬 콜백은 그 사이
@@ -100,6 +100,20 @@ TS 쪽 표면은 `installSigintHandler(pyodide, pyconsole, deps, extraOwnCodes?)
   없을 때(Task 생성 전)만 `guard`와 시작 전(`CORO_CREATED`) awaitable 코루틴을 `close()`하고 다시 올린다 —
   버려진 코루틴의 `RuntimeWarning: coroutine ... was never awaited`가 트레이스백 앞에 찍히는 것을 막는다. Task를
   만든 뒤면 그 Task가 `guard`를 돌리므로 닫지 않는다.
+  - **C 변환 구간**: 래퍼는 원본 C `run_sync`를 부르는 동안 `converting` 표시를 세우고 `finally`에서 내린다. C `run_sync`는
+    대기 Task를 JS로 바꾸는 중(`python2js` → `pyproxy_getflags` → `type_getflags`, pyodide 314.0.7) `PyObject_IsSubclass`로
+    `collections.abc.Generator`·`AsyncGenerator`를 검사하고, 이것이 `ABCMeta.__subclasscheck__` Python 프레임을 연다.
+    그 프레임에서 처리된 눌림을 규칙 ①로 올리면 C 변환이 예외를 `ConversionError`(`__cause__` = `KeyboardInterrupt`)로
+    감싸고, 이어지는 `PyErr_Print()`가 `sys.excepthook` 출력을 콘솔 `sys.stderr`로 흘린다(TRP-021과 같은 경로). 사용자
+    `except KeyboardInterrupt:`도 이 `ConversionError`를 비켜 간다. 그래서 핸들러는 `converting`이 참이고 사슬에서
+    `<console>` 프레임보다 안쪽에서 래퍼 프레임(`run_sync.__code__`)을 만나면 순회를 멈추고 규칙 ③으로 넘긴다:
+    `call_soon(interrupt_deferred, active)` → 대기 Task 취소 → 래퍼가 `WOKEN`을 보고 사용자 스택에서 표준
+    `KeyboardInterrupt`를 올린다. 깨울 수 없는 순간이면 `pending`이고 재개하는 래퍼가 올린다. 눌림 처리는 한 틱 늦다.
+    표시와 사슬 검사가 둘 다 필요하다: 사슬만 보면 래퍼의 `ensure_future`(Task 생성 전 눌림, 규칙 ① 유지)도 미뤄지고,
+    표시만 보면 대기 중 콜백 사슬의 `<console>` 프레임에도 규칙 ①이 미뤄질 수 있다. 래퍼 프레임보다 안쪽에 사용자 프레임이
+    있으면(예: 사용자 ABC의 `__subclasshook__`) 규칙 ①이 그대로 올린다. 이 창은 자연 재현이 어려워
+    `sigint-handler-idle.test.ts`의 `abc.ABCMeta.__subclasscheck__` 교체 주입 시험으로 확인한다(`09-testing.md` 9.1).
+    `run_sync` 래퍼 밖 변환 지점은 같은 창이 있을 수 있으나 처리하지 않았다(`.scratch/sigint-test-isolation/issues/08-conversion-error-outside-run-sync-wrapper.md`, `deferred`).
 - `runcode` 래퍼(인스턴스 속성 교체): 실행 중인 콘솔 task를 `active`로 기록. top-level await 대기 중에는
   그 task를 취소하고 표지 예외 `IdleInterrupt`(`Exception` 계열 — webloop 재던짐 경로를 피함)로 끝낸다.
 - 취소는 `CORO_SUSPENDED` Task에만. 깨울 수 없는 순간(대기 코루틴 실행 중, 재개 직전)에는 `pending`

@@ -46,3 +46,4 @@ Status: deferred
 ## Comments
 
 - 2026-09-24 재분류: `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준"). 1회 관찰, 106회 반복에서 재현 0, 원시 stderr 없음. 재개 조건: `pnpm test`에서 같은 단언 실패가 다시 관찰되면 원시 stderr를 보존하고 `open`.
+- 2026-09-25 이슈 05 해결 결과(분류는 `deferred` 유지): 05의 `ConversionError` 모양은 stderr가 `ConversionError …\n`으로 끝나 `/KeyboardInterrupt\n$/`도 깨므로 이 이슈의 공통 원인 후보다. 다만 이 이슈의 원시 stderr가 없어 같은 모양인지 확인할 수 없어 근거가 부족하다. 재발하면 원시 stderr에 `ConversionError`·`__subclasscheck__`가 있는지 먼저 본다. 05는 [05](./05-sigint-idle-subclasscheck-conversion-error-flake.md) `## 해결` 참고.

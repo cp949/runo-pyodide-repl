@@ -50,7 +50,9 @@
   4건 + 가드),
   `worker/sigint-handler-sleep-slice.test.ts`(조각·폴링 횟수·무효 인자·가드 2종),
   `worker/sigint-handler-idle.test.ts`(정지한 대기 깨우기·TLA·`pending`·가드 3종. RD-009a가 더한 것:
-  `run_sync` 계열 대기에서 코루틴이 낸 예외의 나르기·프레임 보존),
+  `run_sync` 계열 대기에서 코루틴이 낸 예외의 나르기·프레임 보존. 결정적 주입 묶음은 `<test>` 파일명 래퍼로 1회 눌림을
+  넣고 주입 횟수를 단언하며, `run_sync` 래퍼의 JS 변환 중 눌림 4건(표준 트레이스백, 사용자 `except KeyboardInterrupt:`
+  포착, 긴 awaitable 취소, Task 생성 전 눌림)을 포함한다),
   `worker/sigint-handler-nojspi.test.ts`(JSPI 없는 경로 5건).
 - 공용 조립은 repl `src/test/sigint-setup.ts`의 `setupConsoleRunner(pyodide, options)` →
   `{ run, screen, buffer, pyconsole, presser, wakeAfter }`와 `teardownConsoleRunner`다. `wakeAfter(ms)`는 감시

@@ -121,6 +121,10 @@ flags | ast.PyCF_ONLY_AST, True)`로 AST를 얻는다(top-level `await`를 통�
   `cancel()` 안에서 끊기면 예외가 `pyodide.ffi.ConversionError`로 감싸이므로 `err.type`과 메시지의
   `/^KeyboardInterrupt\s*$/m`으로 판별한다. 취소 처리가 다시 끊기면 `cancel()`을 한 번 더 시도하고 그래도
   끊기면 출력만 낸다. `KeyboardInterrupt`가 아닌 오류는 그대로 던진다.
+  이 안전망은 사용자 코드 밖에서 새는 예외용이다. `runcode` 안에서 사용자 코드가 부른 `run_sync` 래퍼의 JS 변환 구간(대기
+  Task를 JS로 바꾸는 동안)에서 처리된 눌림은 `ConversionError`로 새지 않고 표준 `KeyboardInterrupt`가 된다: 핸들러가 그 구간의
+  규칙 ①을 미루고 미룬 깨우기로 보낸다(`03-ctrl-c.md` 2.4 "깨우기 세부"의 `run_sync` 래퍼 항목). `run_sync` 래퍼 밖의 일반
+  Python→JS 변환 지점(`js.fn(py_obj)` 등)은 처리하지 않았다(`.scratch/sigint-test-isolation/issues/08-conversion-error-outside-run-sync-wrapper.md`, `deferred`).
 
 ## 5.3 multiline 판정
 
