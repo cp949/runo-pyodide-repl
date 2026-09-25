@@ -138,7 +138,7 @@ export interface RunnerHandle {
   /**
    * 지금 `run()`을 부르면 `RunRejectedError("busy")`로 거부되는가: run이 실행 슬롯을 차지하고 있거나(로딩·재시작 대기 포함)
    * run 없는 배경 `input()` 대기(`waiting-input`)다. `status`만으로는 `loading`·`restarting` 대기 run과 같은 틱의 `reset()`
-   * 직후를 구분하지 못한다(실행창의 화면 준비가 거부 예측에 쓴다).
+   * 직후를 구분하지 못한다.
    */
   readonly busy: boolean;
 }

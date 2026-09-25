@@ -96,6 +96,10 @@ _Avoid_: 반환값, 종료 상태
 **실행 슬롯**:
 runner가 한 번에 하나만 허용하는 실행 자리. 로딩·재시작 대기 중인 run도 차지한다. 슬롯이 차 있거나 `waiting-input`이면 새 `run()`은 `busy`다.
 
+**수락(accept)**:
+`run()`이 실행 슬롯을 차지하기로 확정된 것. 거부(`busy`·`unavailable`·`disposed`·비문자열)의 반대다. 수락된 `run()`마다 `onRunAccepted`가 슬롯 점유 뒤·`runCode` 전송 앞에서 동기로 한 번 불린다. `loading`·`restarting` 대기 중 수락도 즉시 불리고, 대기가 끝나 `ready`에서 실행이 시작될 때는 다시 불리지 않는다. 소비자(terminal 실행창)는 이 시점에만 화면을 준비한다.
+_Avoid_: 시작(dispatch — `runCode`를 worker에 보내는 것. 대기 run은 수락과 시작 시점이 다르다), 승인
+
 **폴백(stop fallback)**:
 `stop()`이 interrupt를 보낸 뒤 `STOP_FALLBACK_MS`(1000ms) 안에 `run()`이 끝나지 않으면 worker를 terminate하고 새로 만드는 것. `stop()`은 `"restarted"`, 그 `run()`은 `{ kind: "restarted" }`. 타이머는 `stop()` 호출 시각부터다.
 _Avoid_: 강제 종료, kill

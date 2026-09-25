@@ -216,7 +216,7 @@ type InputProvider = (
 
 - `clearOnRun: true`이면 화면과 스크롤백을 지우고(`\x1b[H\x1b[2J\x1b[3J`) 꼬리를 비운다.
 - 아니면(기본) 커서가 행 머리가 아닐 때(`terminal.buffer.active.cursorX !== 0`) `\r\n` 한 번을 쓰고 꼬리를 비운다(RD-010 세션 리셋의 커서 규칙과 같다, `08-session.md` 8.1 2번). 이전 run이 `print("a", end="")`로 끝났어도 새 실행은 새 줄에서 시작한다.
-- 거부될 `run()`은 화면을 건드리지 않는다: 실행 중인 프로그램의 출력 한가운데서 화면이 지워지면 안 된다. 거부 여부는 core `run()`의 판정과 같은 재료로 그 시점에 예측한다: `disposed`·비문자열·상태 `not-isolated`·`load-failed`·`crashed`·core `busy`(14.3). 결과 Promise 정착 뒤 풀리는 플래그로 예측하면 `reset()` 직후 같은 틱의 `run()`(받아들여지는데 화면을 준비하지 않음)과 대기 run이 있는 `onStatus("ready")` 콜백 안의 `run()`(거부되는데 화면을 준비함)에서 낡는다(`docs/traps/TRP-047`).
+- 거부될 `run()`은 화면을 건드리지 않는다: 실행 중인 프로그램의 출력 한가운데서 화면이 지워지면 안 된다. core가 `run()`을 받아들인 순간을 `onRunAccepted`로 알리고(14.3) 실행창은 그 콜백에서만 화면을 준비한다. 실행창은 거부 조건(`disposed`·비문자열·`not-isolated`·`load-failed`·`crashed`·`busy`)을 다시 판정하지 않는다. `reset()` 직후 같은 틱의 `run()`과 대기 run이 있는 `onStatus("ready")` 콜백 안의 `run()`도 별도 예외 없이 core의 수락 판정을 따른다. 결과 Promise 정착 뒤 풀리는 플래그로 거부를 예측하면 이 두 경우에서 낡는다(`docs/traps/TRP-047`).
 - `clear()`: 화면과 스크롤백을 지우고 꼬리를 리셋한다. 입력 읽기가 열려 있는 동안과 `dispose()` 뒤에는 무동작이다(활성 읽기의 앵커 행이 어긋나 입력줄이 사라진다. 벤더 Ctrl+L은 읽기 상태를 다시 잡지만 공개 API가 아니다). 사용자가 입력 대기 중 Clear를 눌러도 반응이 없다.
 - `reset()`은 화면에 아무것도 내지 않는다(REPL의 `RESET_NOTICE`가 없다). 앱이 `onStatus("restarting")`으로 표시한다.
 
@@ -232,7 +232,7 @@ runner를 먼저 끝낸다(열린 읽기의 `signal`이 abort돼 `cancelRead()`�
 
 - `apps/demo`의 `?view=runner`가 `RunnerView`를 렌더링한다(쿼리 없으면 REPL). plain 요소: `textarea`(`data-testid="code"`), 버튼 `run`·`stop`·`reset`·`clear`, `status`, 마지막 결과 `result`(JSON 텍스트, 거부는 `{"rejected":"<reason>"}`), 선택 복사 결과 `copy-result`, `terminal`. 새 실행을 시작하면 이전 결과를 지운다. 페이지당 xterm은 1개다(`lib.mjs` 셀렉터 `.xterm-rows > div`·`[data-testid="status"]`가 그대로 통한다). `createTerminalRunner`는 effect 안에서 만들고 cleanup에서 `dispose()`한다(StrictMode 이중 마운트에서 worker가 남지 않는다). RD-024부터 이 수명은 `<PythonRunner>` 컴포넌트가 맡고 `RunnerView`는 handle(`run`·`stop`·`reset`·`clear`·`focus`)만 부른다.
 - 브라우저: `pnpm --filter demo e2e:runner-check`(normal 고정, 초기 3 + R01~R13 = 16셀), 비격리는 `pnpm --filter demo exec node e2e/checks/runner-check.mjs not-isolated http://localhost:4174`(N01~N05, 5셀). 기대 개수와 판정은 `apps/demo/e2e/BASELINE.md`. 실행창 화면에서 결과 칸(React 상태)은 xterm 화면 행보다 먼저 갱신될 수 있고 `result`는 마지막 값만 갖는다(`docs/traps/TRP-048`·`TRP-050`).
-- node 시험: core `worker/run-driver-pyodide.test.ts`(실제 pyodide, 가설 8항목 + 분류·stdin·재진입), `run-driver-classify.test.ts`(실제 pyodide + 가짜 콘솔, 분기 전수), `run-driver.test.ts`(가짜 pyodide, 옵션·세션·export), `session/runner.test.ts`(가짜 worker·가짜 타이머), `session/runner-pyodide.test.ts`(실제 pyodide worker 스레드, `input()` 왕복·`stop()`·폴백·`reset()`·옛 worker 지연 종료 시뮬레이션). terminal `terminal-runner.test.ts`(jsdom + 가짜 core). 벤더 `type-ahead.test.ts`(`typeAhead` 옵션).
+- node 시험: core `worker/run-driver-pyodide.test.ts`(실제 pyodide, 가설 8항목 + 분류·stdin·재진입), `run-driver-classify.test.ts`(실제 pyodide + 가짜 콘솔, 분기 전수), `run-driver.test.ts`(가짜 pyodide, 옵션·세션·export), `session/runner.test.ts`(가짜 worker·가짜 타이머), `session/runner-pyodide.test.ts`(실제 pyodide worker 스레드, `input()` 왕복·`stop()`·폴백·`reset()`·옛 worker 지연 종료 시뮬레이션). terminal `terminal-runner.test.ts`(jsdom + 가짜 core), `terminal-runner-screen.test.ts`(jsdom + 실제 core `createRunner` + 공용 가짜 worker `@cp949/runo-pyodide-core/test-utils`, 14.5.4 화면 준비 규칙 14건). 벤더 `type-ahead.test.ts`(`typeAhead` 옵션).
 - 경계: terminal `package-boundary.test.ts`, `pnpm check-dist`(terminal 포함), `pnpm smoke:pack`(terminal tarball, `09-testing.md` 9.8).
 
 ## 14.7 등록한 편차와 인접 규칙
