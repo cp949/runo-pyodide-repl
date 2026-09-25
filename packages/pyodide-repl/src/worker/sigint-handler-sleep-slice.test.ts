@@ -27,6 +27,16 @@ import {
   type ReportDegraded,
 } from "../test/core-internals";
 
+/**
+ * 눌림 뒤 `KeyboardInterrupt`까지의 상한(ms). 응답성이 요구 사항 자체라 상한 판정을 쓴다
+ * (`09-testing.md` 9.7 예외 2, `03-ctrl-c.md` 2.4의 20ms 조각). 조각이 걸리지 않으면 `time.sleep(5)`는
+ * 5초, `time.sleep(2**31)`은 사실상 무한이므로 1초면 결함과 정상을 가른다. 값 근거는 같은 장비 실측이다:
+ * 파일 단독 42.8~56.9ms(n=25), 패키지 전체 병렬 63.5~92.1ms(n=15), 루트 전체 실행에서 133.2ms
+ * (옛 100ms 상한의 거짓 실패, `.scratch/sigint-test-isolation/issues/04-sleep-slice-2pow31-timing-flake.md`).
+ * 같은 이유로 `run-driver-pyodide.test.ts`도 1초를 쓴다.
+ */
+const PRESS_LIMIT_MS = 1000;
+
 let pyodide: PyodideInterface;
 
 beforeAll(async () => {
@@ -94,13 +104,13 @@ async function pressDuring(
 const lastLine = (stderr: string) => stderr.trimEnd().split("\n").at(-1);
 
 describe("time.sleep 조각 폴링", () => {
-  it("time.sleep(5) 도중의 눌림이 100ms 안에 KeyboardInterrupt로 끊는다", async () => {
+  it("time.sleep(5) 도중의 눌림이 1초 안에 KeyboardInterrupt로 끊는다", async () => {
     const runner = setup();
 
     const afterPressMs = await pressDuring(runner, "time.sleep(5)", 300);
 
     expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
-    expect(afterPressMs).toBeLessThan(100);
+    expect(afterPressMs).toBeLessThan(PRESS_LIMIT_MS);
   }, 20_000);
 
   it("time.sleep(0.1)은 20ms 조각마다 checkInterrupt를 부른다", async () => {
@@ -144,7 +154,7 @@ describe("time.sleep 조각 폴링", () => {
     expect(await run("press(); time.sleep(0.01)")).toEqual(READY);
 
     expect(screen.stderr).toBe(CONSOLE_TRACEBACK);
-    expect(performance.now() - startedAt).toBeLessThan(200);
+    expect(performance.now() - startedAt).toBeLessThan(PRESS_LIMIT_MS);
   });
 });
 
@@ -246,7 +256,7 @@ describe("time.sleep 인자와 의미", () => {
     const afterPressMs = await pressDuring(runner, "time.sleep(2**31)", 200);
 
     expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
-    expect(afterPressMs).toBeLessThan(100);
+    expect(afterPressMs).toBeLessThan(PRESS_LIMIT_MS);
   }, 20_000);
 
   it("__index__ 객체도 조각돼 눌림에 끊긴다", async () => {
@@ -259,7 +269,7 @@ describe("time.sleep 인자와 의미", () => {
     const afterPressMs = await pressDuring(runner, "time.sleep(I())", 200);
 
     expect(runner.screen.stderr).toBe(CONSOLE_TRACEBACK);
-    expect(afterPressMs).toBeLessThan(100);
+    expect(afterPressMs).toBeLessThan(PRESS_LIMIT_MS);
   }, 20_000);
 });
 

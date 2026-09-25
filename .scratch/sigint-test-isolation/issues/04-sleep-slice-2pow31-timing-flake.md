@@ -1,6 +1,6 @@
 # 04 `sigint-handler-sleep-slice.test.ts`의 `time.sleep(2**31)도 조각돼 눌림에 끊긴다`가 병렬 실행에서 1회 실패했다
 
-Status: deferred
+Status: done
 
 ## 현상
 
@@ -8,10 +8,48 @@ Status: deferred
 `time.sleep(2**31)도 조각돼 눌림에 끊긴다`가 `expected 104.52 to be less than 100`으로 1회 실패했다(눌림 뒤 복귀 시간의 100ms 판정에
 104.5ms). 같은 파일 단독 3회는 26/26 통과했고 이어서 돌린 `pnpm test` 전체는 1063/1063 통과했다.
 
-## 재개 조건
+## 해결 (2026-09-25)
 
-- 같은 파일을 단독으로 N=10 돌려 1회 이상 재현되면 `open`으로 바꾸고 재현율·부하 조건을 `## Comments`에 남긴다.
-- 그 전에는 원인을 조사하지 않는다(1회 관찰·원인 불명, `docs/agents/issue-tracker.md` "등록·분류 기준").
+원인은 **절대 ms 상한이 동시 실행 부하의 정상 지연을 흡수하지 못한 것**이다. 제품 결함이 아니다 — 실패한 실행에서도 같은 시험의
+기능 단언(`screen.stderr` = `KeyboardInterrupt` 트레이스백)은 통과했고 시간 단언만 깨졌다.
+
+같은 장비 실측(`_works/20260925-35-l0-time-limits/verify/measure.tsv`, 임시 계측을 넣어 `afterPressMs`를 모으고 원복했다):
+
+| 조건                                        | n   | `afterPressMs`    | 옛 판정선 100ms 대비 |
+| ------------------------------------------- | --- | ----------------- | -------------------- |
+| 파일 단독(`vitest run <file>`)              | 25  | 42.8 ~ 56.9       | 43~57%               |
+| 패키지 전체 병렬(34파일)                    | 15  | 63.5 ~ 92.1       | 63~92%               |
+| 루트 `pnpm test --force --concurrency=1`    | 1   | **133.2 → 실패**  | 133%                 |
+
+- CPU 포화는 원인이 아니다: busy 6프로세스(load 2.5)로 단독 N=10을 돌려 20/20 통과했다(`phase-b-summary.txt`).
+  실패를 만드는 것은 동시에 살아 있는 pyodide 인스턴스 수다(패키지 단독 실행만으로 이미 판정선의 92%).
+- 재현율: 루트 전체 1/1(`m-root-1.log`, `expected 133.227264 to be less than 100`). 단독 0/10, CPU 부하 0/10.
+
+수정: 응답성 상한을 1초로 올리고 상수·근거 주석으로 고정했다(`09-testing.md` 9.7 예외 2, 선례는
+`run-driver-pyodide.test.ts`의 1초 판정과 `sigint-handler-idle.test.ts`의 `WAKE_LIMIT_MS`).
+
+- `sigint-handler-sleep-slice.test.ts`: `PRESS_LIMIT_MS = 1000` 4곳(옛 100ms 3곳·200ms 1곳). 시험 제목의 `100ms`도 `1초`로 고쳤다.
+- `boot.test.ts`: `WATCH_LIMIT_MS = 1000` 2곳(옛 200ms·100ms). 제목 2개도 같이 고쳤다.
+- 손대지 않은 것: `run-source.test.ts:250`(1100ms), `run-driver-pyodide.test.ts:315`(1000ms), `sigint-handler-idle.test.ts`
+  (`200·300 + WAKE_LIMIT_MS 1000`) — 이미 여유가 크고 실패 관찰이 없다.
+
+검출력 확인(변이 검사, 상한을 올려도 회귀를 잡는지):
+
+- M1 `SLEEP_SLICE = 3600.0`(폴링 제거): 시험이 멈춰 10분 안에 끝나지 않았다 → 멈춤 변이로 killed 판정하고 원복했다.
+  조각 없는 `time.sleep(2**31)`은 워커를 동기 블로킹해 vitest 타임아웃도 듣지 않는다.
+- M2 `SLEEP_SLICE = 1.5`(폴링은 살아 있고 느려짐): 4건 실패, 그중 3건을 **새 1000ms 상한이 잡았다**
+  (`expected 1207.48/1302.57/1302.31 to be less than 1000`). killed.
+- M3 `interrupt-watch.ts`의 `tickMs = 1500`: 3건 실패, 그중 2건을 새 상한이 잡았다
+  (`expected 1397.35/1517.43 to be less than 1000`). killed.
+
+검증: `pnpm check-types`·`pnpm lint` 통과, 루트 `pnpm test --force --concurrency=1` 21/21 태스크 통과
+(`verify.log`, 직전 같은 명령 1회차는 이 시험에서 실패했다).
+
+## 옛 재개 조건(충족하지 않은 채로 남긴다)
+
+- "같은 파일을 단독으로 N=10 돌려 1회 이상 재현" → 단독 0/10, CPU 부하 0/10으로 **미충족**이다. 대신
+  `docs/agents/issue-tracker.md` `open` 기준 2("결함 없는 코드에서 판정이 실패한다 — 거짓 실패 재현")를 루트 전체 실행 1/1로
+  충족해 승격·수정했다(사용자 확정 2026-09-25).
 
 ## 참고
 

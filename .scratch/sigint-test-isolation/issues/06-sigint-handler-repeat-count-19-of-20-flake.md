@@ -21,3 +21,7 @@ RD-023 브랜치는 `packages/pyodide-repl`을 바꾸지 않았다. 세 관찰 �
 
 - 2026-09-25 등록 시점 분류: 원인 불명 간헐 실패 → `deferred`. 같은 폴더 04·05(병렬·`--concurrency=1` 시간 판정·SIGINT 위치 계열)와 같은 실행에서 함께 관찰됐다.
 - 2026-09-25 관찰(RD-026 DELTA-05 L0, `pnpm test --force --concurrency=1`): `src/worker/sigint-handler.test.ts > 눌림 스레드 > KeyboardInterrupt를 잡고 세는 루프에 25ms 간격 20회 → 정확히 20(누락·이중 0)`이 `expected '19\n' to be '20\n'`으로 1회 실패(로그 `_works/20260925-34-rd-026-redraw-window/verify/delta05-l0.log`, repl 1116/1117). 같은 파일 단독 재실행 3회 모두 17/17 통과(`delta05-l0-flake-rerun.log`). 이번 변경(벤더 `undrawnAbovePrefix`·reset·abort 접두 복원)은 이 시험 경로와 무관하다. `deferred` 유지.
+- 2026-09-25 재현 시도(이슈 04 수정 중, 분류는 `deferred` 유지): 이 파일 단독 N=10(20/20 통과)과 CPU 부하(busy 6프로세스,
+  load 2.5) 단독 N=10(20/20 통과) 모두 **재현 0**이다. 같은 실행 묶음에서 루트 전체 실행은 이슈 04(시간 상한)만 재현했고 이
+  개수 누락은 나오지 않았다. 재개 조건은 여전히 미충족이다. 로그: `_works/20260925-35-l0-time-limits/verify/phase-a-summary.txt`·
+  `phase-b-summary.txt`. 이슈 04는 시간 판정이 원인이었으나 이 이슈는 개수(`19` vs `20`) 문제라 그 수정으로 해소되지 않는다.

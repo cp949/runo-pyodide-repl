@@ -23,6 +23,15 @@ import {
 } from "@cp949/runo-pyodide-core/worker";
 import { bootReplWorker } from "./boot";
 
+/**
+ * 감시 타이머가 눌림을 깨우거나 버릴 때까지의 상한(ms). 응답성이 요구 사항이라 상한 판정을 쓴다
+ * (`09-testing.md` 9.7 예외 2). 타이머 틱은 20ms(`interrupt-watch.ts`)이고, 깨우지 못하면 대기 시간
+ * (`asyncio.sleep(5)`)을 다 채우거나 ack가 영영 오지 않으므로 1초면 결함과 정상을 가른다. 옛 값
+ * (200ms·100ms)은 동시 실행 부하에서 거짓 실패를 냈다
+ * (`.scratch/sigint-test-isolation/issues/04-sleep-slice-2pow31-timing-flake.md`의 실측).
+ */
+const WATCH_LIMIT_MS = 1000;
+
 let pyodide: PyodideInterface;
 
 beforeAll(async () => {
@@ -586,7 +595,7 @@ describe("bootReplWorker", () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(timerId);
   }, 30_000);
 
-  test("정지한 실행(asyncio.run 대기) 중 눌림은 감시 타이머가 200ms 안에 깨운다", async () => {
+  test("정지한 실행(asyncio.run 대기) 중 눌림은 감시 타이머가 1초 안에 깨운다", async () => {
     let pressedAt: number | undefined;
     const { frame, events, waitFor } = createMainSide([
       "import asyncio",
@@ -608,7 +617,7 @@ describe("bootReplWorker", () => {
     const elapsedMs = performance.now() - (pressedAt as number);
     await waitFor(() => events.some((e) => e[0] === "sessionTerminated"));
 
-    expect(elapsedMs).toBeLessThan(200);
+    expect(elapsedMs).toBeLessThan(WATCH_LIMIT_MS);
     // 우리 프레임(핸들러·run_sync 래퍼)도 webloop 프레임도 남지 않는다(03-ctrl-c.md 2.4 깨우기 세부).
     expect(events.find((e) => e[0] === "writeError")).toEqual([
       "writeError",
@@ -618,7 +627,7 @@ describe("bootReplWorker", () => {
     expect([...frame.interruptBuffer]).toEqual([0, 1, 1, 0]);
   }, 30_000);
 
-  test("프롬프트가 열려 있는 동안 남은 SIGINT는 감시 타이머가 100ms 안에 버리고, 다음 실행에는 새지 않는다", async () => {
+  test("프롬프트가 열려 있는 동안 남은 SIGINT는 감시 타이머가 1초 안에 버리고, 다음 실행에는 새지 않는다", async () => {
     let pressedAt: number | undefined;
     let resolveNext: ((line: string) => void) | undefined;
     const { frame, events, waitFor } = createMainSide([
@@ -636,7 +645,7 @@ describe("bootReplWorker", () => {
     const booted = bootReplWorker(frame, { loadPyodide: () => loadPyodide() });
     await waitFor(() => frame.interruptBuffer[ACK] === 1);
     const elapsedMs = performance.now() - (pressedAt as number);
-    expect(elapsedMs).toBeLessThan(100);
+    expect(elapsedMs).toBeLessThan(WATCH_LIMIT_MS);
     expect(frame.interruptBuffer[SIGNAL]).toBe(0);
 
     resolveNext?.("1 + 1");
