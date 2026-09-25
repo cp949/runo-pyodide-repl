@@ -4,6 +4,7 @@
  * `createTerminalRunnerWith`로 주입한다(공개 옵션에는 시험 전용 필드가 없다).
  * 가짜 core는 실제 `createRunner`의 계약 중 실행창이 기대는 부분만 흉내낸다: 상태 알림, `run` 슬롯(`busy`),
  * `inputProvider(prompt, signal)` 호출과 signal abort(`interrupt`·`stop`·`reset`·`dispose`), 결과·거부 그대로 전달.
+ * `run()` 시작 화면 준비 시험은 실제 core가 필요해 `terminal-runner-screen.test.ts`로 옮겼다(run-accepted-hook DELTA-03).
  * 실제 core와의 결합은 마지막 절이 비격리(jsdom은 `crossOriginIsolated`가 없다) 경로로 본다. 실제 pyodide 왕복은 브라우저 L1이 본다.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -79,6 +80,8 @@ function createFakeCore(initial: RunnerStatus = "ready") {
           return;
         }
         activeRun = { resolve, reject };
+        // 실제 core처럼 슬롯을 잡은 뒤·보내기 앞에서 수락을 알린다(자체 거부 분기 뒤라 거부된 run에는 불리지 않는다).
+        options.onRunAccepted?.();
         if (status === "ready") setStatus("running");
       });
     },
@@ -407,200 +410,6 @@ describe("Ctrl+C: 상태별 분기 4종", () => {
 
     expect(core.calls.interrupt).toBe(0);
     expect(screen()).toBe("");
-  });
-});
-
-describe("run 시작 시 화면 준비: 커서 줄바꿈·clearOnRun", () => {
-  test("커서가 행 머리가 아니면 \\r\\n을 한 번 쓴다", () => {
-    const { fake, handle } = setup();
-    fake.screen.cursorX = 3;
-
-    void handle.run("code");
-
-    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(1);
-  });
-
-  test("커서가 행 머리이면 줄바꿈을 쓰지 않는다", () => {
-    const { fake, handle } = setup();
-    fake.screen.cursorX = 0;
-
-    void handle.run("code");
-
-    expect(fake.written).toEqual([]);
-  });
-
-  test("clearOnRun이 기본이면 화면을 지우지 않는다", () => {
-    const { fake, handle, screen } = setup();
-    fake.screen.cursorX = 3;
-
-    void handle.run("code");
-
-    expect(screen()).not.toContain("\x1b[2J");
-  });
-
-  test("clearOnRun이면 화면을 지우고 줄바꿈은 쓰지 않는다", () => {
-    const { fake, handle, screen } = setup({ runner: { clearOnRun: true } });
-    fake.screen.cursorX = 3;
-
-    void handle.run("code");
-
-    expect(screen()).toContain("\x1b[2J");
-    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(0);
-  });
-
-  test("clearOnRun이 참인 값만 켠다(=== true)", () => {
-    const { fake, handle, screen } = setup({
-      runner: { clearOnRun: "yes" as unknown as boolean },
-    });
-    fake.screen.cursorX = 3;
-
-    void handle.run("code");
-
-    expect(screen()).not.toContain("\x1b[2J");
-  });
-
-  test("거부되는 run(busy)은 화면을 건드리지 않는다", async () => {
-    const { fake, handle } = setup({ runner: { clearOnRun: true } });
-    void handle.run("first");
-    fake.written.length = 0;
-    fake.screen.cursorX = 3;
-
-    await expect(handle.run("second")).rejects.toMatchObject({
-      reason: "busy",
-    });
-
-    expect(fake.written).toEqual([]);
-  });
-
-  test("로딩 대기 중인 run이 슬롯을 잡고 있을 때 두 번째 run은 busy로 거부되고 화면을 건드리지 않는다", async () => {
-    const { fake, core, handle } = setup({
-      initial: "loading",
-      runner: { clearOnRun: true },
-    });
-    void handle.run("first"); // ready가 될 때까지 대기한다(가짜 core도 슬롯을 잡는다)
-    fake.written.length = 0;
-    fake.screen.cursorX = 3;
-
-    await expect(handle.run("second")).rejects.toMatchObject({
-      reason: "busy",
-    });
-
-    expect(fake.written).toEqual([]);
-    expect(core.calls.run).toEqual(["first", "second"]);
-  });
-
-  test("끝난 run 뒤 재시작 대기 중에 부른 run은 슬롯이 비어 있으므로 화면을 준비한다", async () => {
-    const { fake, core, handle } = setup();
-    const first = handle.run("first");
-    core.finishRun();
-    await first;
-    core.setStatus("restarting");
-    fake.screen.cursorX = 3;
-
-    void handle.run("second"); // 새 worker가 준비되면 실행된다(가짜 core도 슬롯을 잡는다)
-
-    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(1);
-  });
-
-  test("실행 중 reset 직후 같은 틱에 부른 run은 받아들여지므로 화면을 준비한다", () => {
-    const { fake, handle } = setup();
-    void handle.run("first");
-    handle.reset();
-    fake.written.length = 0;
-    fake.screen.cursorX = 3;
-
-    void handle.run("second"); // 옛 run의 결과 Promise는 아직 정착 콜백 전이다
-
-    expect(fake.written.filter((text) => text === "\r\n")).toHaveLength(1);
-  });
-
-  test("reset 직후 받아들여진 run이 재시작을 기다리는 동안 부른 run은 busy로 거부되고 화면을 건드리지 않는다", async () => {
-    const { fake, handle } = setup({ runner: { clearOnRun: true } });
-    void handle.run("first");
-    handle.reset();
-    void handle.run("second").catch(() => {});
-    await tick(); // 옛 run의 정착 콜백까지 돈다
-    fake.written.length = 0;
-    fake.screen.cursorX = 3;
-
-    await expect(handle.run("third")).rejects.toMatchObject({ reason: "busy" });
-
-    expect(fake.written).toEqual([]);
-  });
-
-  test("대기 run이 있는 onStatus(ready) 콜백 안에서 부른 run은 busy로 거부되고 화면을 건드리지 않는다", async () => {
-    let inner: Promise<unknown> | undefined;
-    // 첫 상태(loading)는 `setup()`이 반환하기 전에 오지만 ready가 아니라 `started`를 읽지 않는다.
-    const started: ReturnType<typeof setup> = setup({
-      initial: "loading",
-      runner: {
-        clearOnRun: true,
-        onStatus: (status) => {
-          if (status === "ready" && inner === undefined) {
-            inner = started.handle.run("inner");
-            inner.catch(() => {});
-          }
-        },
-      },
-    });
-    const { fake, core, handle } = started;
-    void handle.run("first");
-    fake.written.length = 0;
-    fake.screen.cursorX = 3;
-
-    core.becomeReady();
-
-    await expect(inner).rejects.toMatchObject({ reason: "busy" });
-    expect(fake.written).toEqual([]);
-  });
-
-  test("worker가 없는 상태(unavailable)의 run도 화면을 건드리지 않는다", async () => {
-    const { fake, core, handle } = setup({ runner: { clearOnRun: true } });
-    core.setStatus("crashed");
-    fake.screen.cursorX = 3;
-
-    await expect(handle.run("x")).rejects.toMatchObject({
-      reason: "unavailable",
-    });
-
-    expect(fake.written).toEqual([]);
-  });
-
-  test("실행 시작에 꼬리를 비워 이전 실행의 미종결 줄이 다음 input() 프롬프트가 되지 않는다", async () => {
-    const { fake, core, handle, startInput } = setup();
-    void handle.run("first");
-    core.output({ stream: "stdout", text: "a" });
-    core.finishRun();
-    fake.screen.cursorX = 1;
-    const before = fake.written.length;
-
-    void handle.run("second");
-    const { result } = await startInput();
-    fake.type("z\r");
-
-    await expect(result).resolves.toBe("z");
-    // 프롬프트는 빈 꼬리라 입력줄 재그리기가 `a`를 다시 그리지 않는다(`az`가 아니라 `z`).
-    const drawn = fake.written.slice(before);
-    expect(drawn).toContain("z");
-    expect(drawn.join("")).not.toContain("a");
-  });
-
-  test("run의 결과와 거부를 core 그대로 돌려준다", async () => {
-    const { core, handle } = setup();
-    const running = handle.run("code");
-    core.finishRun({ kind: "exit", code: 3 });
-    await expect(running).resolves.toEqual({ kind: "exit", code: 3 });
-
-    const restarted = handle.run("code");
-    core.handle.reset();
-    await expect(restarted).resolves.toEqual({ kind: "restarted" });
-
-    const disposed = handle.run("code");
-    core.handle.dispose();
-    await expect(disposed).rejects.toMatchObject({
-      name: "RunRejectedError",
-      reason: "disposed",
-    });
   });
 });
 

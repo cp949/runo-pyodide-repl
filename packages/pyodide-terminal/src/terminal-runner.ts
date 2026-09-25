@@ -177,7 +177,7 @@ export function createTerminalRunnerWith(
     sinks.resetTail();
   };
 
-  /** `run()`이 시작될 때 화면을 준비한다. 새 실행의 꼬리는 비어 있다(core도 실행 시작에 꼬리를 비운다). */
+  /** core가 `run()`을 받아들일 때(`onRunAccepted`) 화면을 준비한다. 새 실행의 꼬리는 비어 있다(core도 실행 시작에 꼬리를 비운다). */
   const prepareScreen = () => {
     if (options.clearOnRun === true) {
       clearScreen();
@@ -221,6 +221,9 @@ export function createTerminalRunnerWith(
         options.onStatus?.(status);
       },
       onCrash: options.onCrash,
+      // core가 `run()`을 받아들인 순간에만 화면을 준비한다. 거부(`busy`·`unavailable`·`disposed`·비문자열)에서는 불리지 않는다.
+      // `disposed` 방어가 없어도 된다: core는 `dispose()` 뒤 `run()`을 콜백 전에 거부하고 terminal `dispose()`는 core를 먼저 끝낸다.
+      onRunAccepted: prepareScreen,
       onLoadFailed: (message) => {
         sinks.writeError(`pyodide 로드 실패: ${message}`);
       },
@@ -234,27 +237,8 @@ export function createTerminalRunnerWith(
   }
   const core = runner;
 
-  /**
-   * core가 이 `run()`을 코드 실행 없이 거부할 것이 확실한가(그렇다면 화면을 준비하지 않는다). core `run()`의 거부 판정과 같은
-   * 재료(`status`·`busy`)를 그 시점에 읽는다. 결과 Promise 정착으로 풀리는 플래그는 `reset()` 직후 같은 틱이나 `ready` 콜백
-   * 안의 재호출에서 낡는다(TRP-047).
-   */
-  const willBeRejected = (code: unknown): boolean => {
-    if (disposed || typeof code !== "string") return true;
-    const status = core.status;
-    return (
-      status === "not-isolated" ||
-      status === "load-failed" ||
-      status === "crashed" ||
-      core.busy
-    );
-  };
-
   return {
-    run(code) {
-      if (!willBeRejected(code)) prepareScreen();
-      return core.run(code);
-    },
+    run: (code) => core.run(code),
     stop: () => core.stop(),
     reset: () => core.reset(),
     clear() {
