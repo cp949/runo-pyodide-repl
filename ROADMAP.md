@@ -817,7 +817,11 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 
 시나리오: 실행창에서 `from runo.browser import document`로 canvas에 그리고, 같은 코드의 `input()`과 Ctrl+C가 실행창과 똑같이 동작한다.
 
-완료 기준: worker 첫 import 규칙 위반(부트스트랩 전 core 메시지 수신) 시 명시 오류. 공존 스파이크 S1~S7을 저장소 시험으로 재현(Chromium). 착수 조건(Chromium 한정): `native: false` 환경 공존 실측(S1·S3·S4·S6), terminate 후 재생성 20회 누수 확인, 전체 SIGINT 핸들러를 설치한 core에서 `reflected_ffi_timeout`·`runner.stop()` 폴백으로 동기 호출 중 중단(S5) 완화 가능성 판단 — 결과가 공존 불가면 설계를 다시 한다. Firefox 공존 실측은 착수 조건이 아니다(2026-09-25 사용자 결정, Firefox는 나중에 지원. 아래 "보류"). 출력(비동기)·DOM(동기) 순서 역전은 허용하고 문서화한다(스파이크 500쌍 역전 0).
+완료 기준: worker 첫 import 규칙 위반(부트스트랩 전 core 메시지 수신) 시 명시 오류. 공존 스파이크 S1~S7을 저장소 시험으로 재현(Chromium). 동기 호출 중 Ctrl+C: `runner.interrupt()`는 호출이 반환된 뒤 다음 줄에서 `KeyboardInterrupt`를 내므로(결말이 호출 길이에 종속) 문서화하고 시험으로 고정한다. 즉시 끝내는 경로는 `runner.stop()` 폴백(결말 약 1.0초, Python 상태 유실)뿐이다. `native: false`(서비스워커 없음)에서 동기 DOM API는 쓸 수 없으므로 지원 방침(명시 오류로 조기 실패 / 서비스워커 경로 / `await` 전용 API)을 계획에서 정하고 그대로 시험한다. 출력(비동기)·DOM(동기) 순서 역전은 허용하고 문서화한다(`native: true`는 500쌍 역전 0. `native: false`는 coincident 채널 대 core 채널 도착 순서가 500쌍 중 35건 역전되며 이때 DOM 호출은 동기가 아니다). Firefox 공존 실측은 착수 조건이 아니다(2026-09-25 사용자 결정, Firefox는 나중에 지원. 아래 "보류").
+
+착수 조건 스파이크(Chromium 한정, 2026-09-25 측정 완료): 판정 `제한 있는 지원`, Firefox 미검증. `공존 불가`가 아니므로 설계 재검토 조건은 발동하지 않았다. `native: false`에서 S1·S3·S4·S6 통과(S6 역전 35/500쌍). 재생성 20회 누수 없음(기울기 6,850B/회, 20회째 새 세션 정상, worker 누적 없음. 단 유휴가 아닐 때 terminate한 옛 worker는 약 2초 남는다: core 단독에서도 같다, `docs/traps/TRP-049`). S5는 `interrupt()`가 호출 반환 뒤에야 끝나고(호출 길이 8초, 40/40회 결말이 호출 반환 뒤, 중단 요청 뒤 중앙 약 7.5초), `reflected_ffi_timeout`은 동기 호출 대기 상한이 아니라 원격 값 캐시 수명이라 완화책이 아니며(`docs/traps/TRP-067`), `runner.stop()` 폴백만 결말 약 1.0초·새 `ready` 약 1.8초다(20/20, 상태 유실).
+
+계획 입력: (1) core `createConsole`이 동기라 `plugins`의 비동기 준비를 기다리는 지점(예: `loadPyodide` 뒤·`createConsole` 앞, 또는 `ready` 알림 전)이 필요하다. (2) `runWorker`를 늦게(모듈 본문 동기 구간 밖에서) 부르면 init 프레임을 잃고 진단 없이 `loading`에 머문다. 리스너 등록은 모듈 본문 동기로 두고 플러그인 준비 대기는 그 뒤에 둔다(위 "첫 import 규칙 위반 시 명시 오류"의 대상). (3) 재시작 직후 약 2초 동안 옛 worker와 새 worker가 동시에 존재한다: dom-bridge가 배타 자원·`worker.proxy` 핸들러 이름·`MessageChannel`을 재사용한다면 2개 worker 동시 존재를 전제로 설계한다. (4) `native: false` 방침: 위 세 후보 중 선택(Firefox 지원 시점에 다시 본다). (5) 저장소 시험에서 busy 상태 리셋 뒤 worker 수를 세려면 옛 targetId 소멸 조건 대기를 쓴다(고정 대기 금지, `docs/design/09-testing.md` 9.7). (6) 첫 DELTA 후보는 `.scratch/react-package-followups/issues/05-*.md`(tarball `exports.development`)다.
 
 ### RD-024 — `pyodide-react`와 demo 이전
 
@@ -868,14 +872,15 @@ RD-018·019가 `apps/demo/e2e/pty/`에 rd-008·015·016·019 기준 데이터와
 
 이전 구현에서 보류·미착수였던 항목. 시나리오와 완료 기준이 갖춰지면 위 규칙으로 등록한다.
 
-| 항목                                   | 이전       | 사유                                                                                                                                                                 |
-| -------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `input()` 안 Tab 완성                  | RD-016b    | `input()`은 메일박스 대기라 worker가 멈춰 있어 worker 완성이 불가. main 쪽 완성이나 별도 배선이 필요                                                                 |
-| `time.sleep` 대기 중 워커 CPU 점유     | RD-012j    | 정확성 영향 없음. 재측정 비용이 이득보다 큼                                                                                                                          |
-| 후보 선택 UI(popover)                  | RD-016d    | 3.14 동등 밖 UI 기능                                                                                                                                                 |
-| "Python 정지" 플래그(송신기 잔류 제거) | RD-012h(a) | 정확성 영향 없음                                                                                                                                                     |
-| Ctrl+D(빈 줄 EOF)                      | 없음       | 이전 구현 미구현. 시나리오 정하면 등록                                                                                                                               |
-| Firefox에서 dom-bridge 공존 실측       | RD-023     | 2026-09-25 착수 조건에서 이관. coincident가 Firefox에서 worker 전역 `postMessage` 우회 경로를 쓴다(S1·S6 경로가 달라진다). Chromium 판정 뒤 Firefox 지원 시점에 등록 |
+| 항목                                                       | 이전       | 사유                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `input()` 안 Tab 완성                                      | RD-016b    | `input()`은 메일박스 대기라 worker가 멈춰 있어 worker 완성이 불가. main 쪽 완성이나 별도 배선이 필요                                                                                                                                                                                                |
+| `time.sleep` 대기 중 워커 CPU 점유                         | RD-012j    | 정확성 영향 없음. 재측정 비용이 이득보다 큼                                                                                                                                                                                                                                                         |
+| 후보 선택 UI(popover)                                      | RD-016d    | 3.14 동등 밖 UI 기능                                                                                                                                                                                                                                                                                |
+| "Python 정지" 플래그(송신기 잔류 제거)                     | RD-012h(a) | 정확성 영향 없음                                                                                                                                                                                                                                                                                    |
+| Ctrl+D(빈 줄 EOF)                                          | 없음       | 이전 구현 미구현. 시나리오 정하면 등록                                                                                                                                                                                                                                                              |
+| Firefox에서 dom-bridge 공존 실측                           | RD-023     | 2026-09-25 착수 조건에서 이관. coincident가 Firefox에서 worker 전역 `postMessage` 우회 경로를 쓴다(S1·S6 경로가 달라진다). Chromium 판정은 끝났다(`제한 있는 지원`). Chromium에서 `native: false`를 강제한 대리 측정(서비스워커 없음)은 끝났으나 실제 Firefox 값이 아니다. Firefox 지원 시점에 등록 |
+| `native: false` + 서비스워커(sabayon) 경로의 동기 DOM 호출 | RD-023     | 2026-09-25 스파이크는 서비스워커 없는 조건만 측정했다(동기 호출이 Promise가 된다). `native: false` 지원 방침에 따라 필요하면 그때 등록                                                                                                                                                              |
 
 ## 범위 밖
 
