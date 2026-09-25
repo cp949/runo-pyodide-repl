@@ -19,6 +19,8 @@ import { runDriver, runWorker } from "@cp949/runo-pyodide-core/worker";
 runWorker({ driver: runDriver });
 ```
 
+`core/worker`는 정적 import한다(모듈이 평가될 때 init 프레임 수신기가 걸려, `runWorker`를 늦게 불러도 버퍼의 프레임으로 부팅한다). `runWorker({ driver, plugins })`의 `plugins`(`WorkerPlugin { name, prepare({ pyodide }) }`)는 `loadPyodide` 뒤·콘솔 생성 앞에서 배열 순서로 준비된다. 실패는 `load-failed`(문구 `Error: plugin "<name>": <원인>`)다. 예: `@cp949/runo-pyodide-dom-bridge`(coincident로 `runo.browser`를 노출, dom-bridge `./worker`가 worker 파일의 첫 정적 import).
+
 ```ts
 import { createRunner, RunRejectedError } from "@cp949/runo-pyodide-core";
 

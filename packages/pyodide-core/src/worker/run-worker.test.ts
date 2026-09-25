@@ -2,7 +2,7 @@
  * worker 진입점 `runWorker({ driver })` 시험.
  * main이 worker 생성 직후 보내는 첫 메시지(초기화 프레임)를 검증해 부팅 시퀀스(`bootWorker`)를 시작하는지 확인한다.
  * 부팅 시퀀스 자체(pyodide 로드·ready·배너)는 repl `worker/boot.test.ts`가 보므로 여기서는 mock으로 막는다.
- * 프레임을 놓치지 않으려면 호출 즉시(첫 await 이전) 리스너가 걸려 있어야 한다(01-protocols.md 4절).
+ * 프레임을 놓치지 않도록 리스너는 core `./worker` 모듈 평가 시점에 걸리고, `runWorker` 호출 시점은 자유다(01-protocols.md 4절).
  * 리스너는 init 프레임만 소비한다: 배열 메시지나 kind가 다른 객체가 먼저 와도 뒤의 init을 받는다(RD-020 Q11).
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";

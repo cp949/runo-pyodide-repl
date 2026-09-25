@@ -6,7 +6,7 @@
 - 프롬프트 대기 중 worker 이벤트 루프는 살아 있다(asyncio 콜백이 돈다). 이 점은 `python`이 아니라 `python -m asyncio` 쪽에 정렬한 의도적 선택이다([ADR-0005](../adr/0005-input-stays-blocking-prompt-stays-async.md)).
 - `input()`·`sys.stdin` 읽기만 worker를 멈추는 동기 대기다. pyodide `setStdin` 콜백이 문자열 동기 반환을 요구하고, CPython 의미(대기 중 다른 콜백이 돌지 않음)를 지키기 위해서다.
 - 실행 환경은 **cross-origin isolated** 페이지다(`SharedArrayBuffer` 필요, [ADR-0004](../adr/0004-cross-origin-isolation-required.md)). 격리되지 않은 페이지에서는 초기화 프레임이 요구하는 `SharedArrayBuffer` 뷰를 만들 수 없으므로 시작 시 감지해 worker 없이 터미널에 경고만 낸다(세션이 없다). Service Worker 우회는 범위 밖이다.
-- 이전 구현(`/work/cp949/pyodide-samples/apps/repl`)이 쓰던 coincident 동기 브리지는 쓰지 않는다([ADR-0001](../adr/0001-no-sync-bridge-library.md)). 그 위의 기능 규칙은 그대로 계승한다(`02`~`08`).
+- 이전 구현(`/work/cp949/pyodide-samples/apps/repl`)이 쓰던 coincident 동기 브리지는 쓰지 않는다([ADR-0001](../adr/0001-no-sync-bridge-library.md)). 예외는 worker Python의 DOM 접근 전용 플러그인 `pyodide-dom-bridge`뿐이고 `input()`·출력·중단은 그 경우에도 core 채널로 간다([ADR-0006](../adr/0006-pyodide-core-and-plugin-packages.md), `16-dom-bridge.md`). 그 위의 기능 규칙은 그대로 계승한다(`02`~`08`).
 
 ## 2. 프로세스 모델과 채널
 
@@ -45,10 +45,10 @@
 0. `crossOriginIsolated`가 거짓이면 main은 worker를 만들지 않는다. 안내 줄(`writeNotice`, `05-output.md` 4.1)로 경고만 내고 `onStatus('not-isolated')`를 부른 뒤 끝난다(ADR-0004). 아래 1~5는 격리된 페이지의 절차다.
 1. main이 `Terminal`·`Readline`을 만든다(세션과 무관하게 마운트당 1회).
 2. main이 `MessageChannel`, interrupt buffer, stdin 메일박스를 만들고 worker를 생성한다(`createWorker()` 팩토리).
-3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `driver` 필드(driver 옵션, core는 모양을 모른다. REPL은 `{ topLevelAwait }`, 실행 driver는 `{ filename, topLevelAwait }`, `14-runner.md` 14.2.3), pyodide `indexURL`. worker 스크립트는 모듈 본문에서 동기로(첫 `await` 이전) core `runWorker`를 불러 `message` 리스너를 건다. 리스너는 `kind: "init"`인 객체만 소비하고 배열 같은 다른 메시지는 넘긴다(`01-protocols.md` 4절). 프레임은 하나뿐이다.
+3. main이 **초기화 프레임 하나**를 `worker.postMessage`로 보낸다: RPC 포트(transfer), interrupt buffer, 메일박스 두 뷰, `driver` 필드(driver 옵션, core는 모양을 모른다. REPL은 `{ topLevelAwait }`, 실행 driver는 `{ filename, topLevelAwait }`, `14-runner.md` 14.2.3), pyodide `indexURL`. worker 스크립트는 `core/worker`를 정적 import하고(모듈이 평가될 때 `message` 리스너가 걸려 프레임을 버퍼에 둔다), `runWorker` 호출 시점은 자유다(늦게 불러도 버퍼에서 부팅한다). dom-bridge를 쓰면 dom-bridge `./worker`가 첫 정적 import여야 한다(`16-dom-bridge.md` 16.3). 리스너는 `kind: "init"`인 객체만 소비하고 배열 같은 다른 메시지는 넘긴다(`01-protocols.md` 4절). 프레임은 하나뿐이다.
 4. worker가 driver 옵션을 검증(`WorkerDriver.parseOptions(frame.driver)`)하고 pyodide를 로드하고 콘솔을 만든 뒤 `ready` 알림(또는 `loadFailed`)을 보낸다. 로드 실패는 worker를 죽이지 않는다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 거부되고 `console.error`만 남는다(`loadFailed`를 보낼 RPC가 아직 없다).
-5. worker(core `bootWorker`)의 순서는 `WorkerDriver.parseOptions` → `createSession` → RPC 생성(core 핸들러 + driver 핸들러 합성) → `loadPyodide` → interrupt 공개 API 확인 → `driver.createConsole` → `driver.probe` → `suppressWebLoopReraise` → `connectInterrupts`(SIGINT 핸들러 설치 → interrupt buffer 연결) → `setStdin` → `ready` 알림 → 감시 타이머 시작 → `driver.run`(REPL: 배너 출력 → 제출 러너 생성 → REPL 루프 진입)이다(`03-ctrl-c.md` 2.6 순서).
-   `loadPyodide` 직후 interrupt 공개 API(`setInterruptBuffer`·`checkInterrupt`)가 함수인지 확인하고, 하나라도 아니면 콘솔을 만들기 전에 던져 `loadFailed`로 시작을 거부한다(Ctrl+C가 성립하지 않는다, `13-version-upgrade.md` 13.6). `driver.createConsole` 직후 `driver.probe?.({ pyodide, pyconsole })`(선택, REPL 비공개 API 지점 2개의 저하 식별자 배열, 던지면 `loadFailed`)를 부르고, 이어서 `suppressWebLoopReraise(pyodide, { report })`(WebLoop의 `KeyboardInterrupt`·`SystemExit` 재보고 억제, `03-ctrl-c.md` 2.8)를 한 번 부르고, 이어서 `connectInterrupts(pyodide, pyconsole, frame.interruptBuffer, { ack, seq, discard, report })`(조각 교체 → 핸들러 설치 → 폐기 → 연결, 반환값은 `InterruptIdle`)를 부른 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). `report`는 부팅 중 만든 저하 수집기(`worker/compat.ts` `createDegradedCollector`)의 `report(id, detail)`이고, 수집 결과(`probe` 반환 + core 지점 4개)가 `ready` 페이로드 `{ pyodideVersion, versionMismatch, degraded, details? }`로 나간다(`01-protocols.md` 1.2). worker는 경고를 내지 않고 main 세션이 문제가 있을 때만 `console.warn`을 1회 낸다. `ready` 알림까지 전부 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머(`startInterruptWatch`)는 `ready` 뒤·`driver.run` 직전에 켠다(배너·러너 생성보다 앞이지만 그 사이에 `await`가 없다). `driver.run`이 끝나면 `finally`에서 `stopWatch()`, 부팅 전체의 `finally`에서 `interruptIdle.destroy()`로 정리한다.
+5. worker(core `bootWorker`)의 순서는 `WorkerDriver.parseOptions` → `createSession` → RPC 생성(core 핸들러 + driver 핸들러 합성) → `loadPyodide` → interrupt 공개 API 확인 → `plugins`(`WorkerPlugin.prepare`, 있을 때만, 배열 순서로 하나씩 await, `16-dom-bridge.md` 16.4) → `driver.createConsole` → `driver.probe` → `suppressWebLoopReraise` → `connectInterrupts`(SIGINT 핸들러 설치 → interrupt buffer 연결) → `setStdin` → `ready` 알림 → 감시 타이머 시작 → `driver.run`(REPL: 배너 출력 → 제출 러너 생성 → REPL 루프 진입)이다(`03-ctrl-c.md` 2.6 순서).
+   `loadPyodide` 직후 interrupt 공개 API(`setInterruptBuffer`·`checkInterrupt`)가 함수인지 확인하고, 하나라도 아니면 콘솔을 만들기 전에 던져 `loadFailed`로 시작을 거부한다(Ctrl+C가 성립하지 않는다, `13-version-upgrade.md` 13.6). interrupt API 확인 뒤·`driver.createConsole` 앞에서 `plugins`(선택, RD-023)의 `prepare`를 배열 순서로 하나씩 await한다. 던지거나 reject하면 `loadFailed`이고 페이로드는 `Error: plugin "<name>": <원인>`이다(다른 `loadFailed`처럼 `String(error)`, 이때 `createConsole`은 불리지 않는다). 규칙은 `16-dom-bridge.md` 16.4. `driver.createConsole` 직후 `driver.probe?.({ pyodide, pyconsole })`(선택, REPL 비공개 API 지점 2개의 저하 식별자 배열, 던지면 `loadFailed`)를 부르고, 이어서 `suppressWebLoopReraise(pyodide, { report })`(WebLoop의 `KeyboardInterrupt`·`SystemExit` 재보고 억제, `03-ctrl-c.md` 2.8)를 한 번 부르고, 이어서 `connectInterrupts(pyodide, pyconsole, frame.interruptBuffer, { ack, seq, discard, report })`(조각 교체 → 핸들러 설치 → 폐기 → 연결, 반환값은 `InterruptIdle`)를 부른 뒤 `pyodide.setStdin({ stdin: createStdinCallback({ requestInput, wait, signalInterrupt, checkInterrupt }) })`를 건다(`requestInput` = `rpc.notify("readInput", …)`, `wait` = `createMailboxReader(...).wait`). `report`는 부팅 중 만든 저하 수집기(`worker/compat.ts` `createDegradedCollector`)의 `report(id, detail)`이고, 수집 결과(`probe` 반환 + core 지점 4개)가 `ready` 페이로드 `{ pyodideVersion, versionMismatch, degraded, details? }`로 나간다(`01-protocols.md` 1.2). worker는 경고를 내지 않고 main 세션이 문제가 있을 때만 `console.warn`을 1회 낸다. `ready` 알림까지 전부 `try` 블록 안이라 던지면 `loadFailed`로 간다. 감시 타이머(`startInterruptWatch`)는 `ready` 뒤·`driver.run` 직전에 켠다(배너·러너 생성보다 앞이지만 그 사이에 `await`가 없다). `driver.run`이 끝나면 `finally`에서 `stopWatch()`, 부팅 전체의 `finally`에서 `interruptIdle.destroy()`로 정리한다.
 
 ### 3.2 REPL 루프(worker)
 
@@ -102,12 +102,13 @@ packages/
   pyodide-terminal/      @cp949/runo-pyodide-terminal — xterm 실행창 `createTerminalRunner`(RD-022) + repl과 공유하는 부품 5종(`./internal`). coincident 비의존. private, ADR-0006
   pyodide-repl/          @cp949/runo-pyodide-repl — REPL driver + REPL 프런트(main 쪽 + worker 쪽 + Python 스크립트). 프레임워크 무관, 공개 API 유지
   pyodide-react/         @cp949/runo-pyodide-react — `<PythonRunner>`·`<PythonRepl>`·`usePythonRunner`(RD-024). core·terminal·repl을 React 수명에 붙인다(xterm 생성·`FitAddon`·dispose 순서·StrictMode). coincident 비의존. private, ADR-0006, `15-react.md`
+  pyodide-dom-bridge/    @cp949/runo-pyodide-dom-bridge — worker Python이 main의 `window`·`document`를 동기 프록시로 쓰는 플러그인(`runo.browser`, RD-023). coincident `4.1.1`·reflected-ffi `0.7.2` 고정, 저장소에서 coincident에 의존하는 유일한 패키지. private, ADR-0006, `16-dom-bridge.md`
   pyodide-testkit/       @repo/pyodide-testkit — 시험 전용 도우미(worker_threads 하니스·가짜 터미널·패키지 경계 도우미). private, 빌드·pack 없음
 apps/
-  demo/                  Vite + React 19 데모 셸. repl(`?view` 없음)과 terminal 실행창(`?view=runner`)을 `@cp949/runo-pyodide-react`의 `<PythonRepl>`·`<PythonRunner>`로 소비한다(RD-024). core는 `runner.worker.ts`가 `./worker`(`runWorker`·`runDriver`)만, repl은 `repl.worker.ts`가 `./worker`(`runReplWorker`)만 직접 import한다. UI 상태(Chip·버튼·스위치)만 가진다.
+  demo/                  Vite + React 19 데모 셸. repl(`?view` 없음)과 terminal 실행창(`?view=runner`)을 `@cp949/runo-pyodide-react`의 `<PythonRepl>`·`<PythonRunner>`로 소비한다(RD-024). core는 `runner.worker.ts`가 `./worker`(`runWorker`·`runDriver`)만, repl은 `repl.worker.ts`가 `./worker`(`runReplWorker`)만 직접 import한다. `?view=dom-bridge`(RD-023)는 `<PythonRunner>`에 dom-bridge worker(`dom-bridge.worker.ts` 등)를 주입하는 화면이고 이 화면만 dom-bridge(coincident)를 지연 import한다. UI 상태(Chip·버튼·스위치)만 가진다.
 ```
 
-의존 방향: `pyodide-react → pyodide-repl`, `pyodide-react → pyodide-terminal`, `pyodide-react → pyodide-core`, `pyodide-repl → pyodide-terminal`, `pyodide-repl → pyodide-core`, `pyodide-repl → xterm-readline`, `pyodide-terminal → pyodide-core`, `pyodide-terminal → xterm-readline`, `pyodide-core → (작업공간 의존 없음)`, `pyodide-testkit → (없음)`. terminal은 repl에 의존하지 않는다(단방향, terminal 경계 시험이 강제). react는 다른 패키지가 의존하지 않는 끝점이다(demo만 소비한다). `pyodide-core`·`pyodide-terminal`·`pyodide-repl`·`pyodide-react`의 devDependencies에 `@repo/pyodide-testkit`이 있다(시험 전용). core는 coincident(`reflected-ffi` 포함)와 `@cp949/runo-xterm-readline`에 의존하지 않고 terminal·repl·react는 coincident에 의존하지 않는다. 모두 시험·스크립트로 강제한다(`09-testing.md` 9.8). repl이 terminal의 `./internal`(sinks·rewind-tail·stdin-reader·notice·selection-copy)을 쓰는 것은 두 패키지가 lockstep으로 함께 바뀌는 조건의 공유이고 안정성을 보장하지 않는다(ADR-0006 갱신). `pyodide-react`는 RD-024에서 추가됐고(ADR-0006 갱신, 4.5), 향후 패키지 `pyodide-dom-bridge`는 [ADR-0006](../adr/0006-pyodide-core-and-plugin-packages.md)이 정하고 RD-023에서 추가된다.
+의존 방향: `pyodide-react → pyodide-repl`, `pyodide-react → pyodide-terminal`, `pyodide-react → pyodide-core`, `pyodide-repl → pyodide-terminal`, `pyodide-repl → pyodide-core`, `pyodide-repl → xterm-readline`, `pyodide-terminal → pyodide-core`, `pyodide-terminal → xterm-readline`, `pyodide-core → (작업공간 의존 없음)`, `pyodide-dom-bridge → pyodide-core`(peer, `WorkerPlugin` 타입만 쓰고 런타임 import 없음), `pyodide-testkit → (없음)`. terminal은 repl에 의존하지 않는다(단방향, terminal 경계 시험이 강제). react는 다른 패키지가 의존하지 않는 끝점이다(demo만 소비한다). dom-bridge도 다른 패키지가 의존하지 않고 demo(`?view=dom-bridge`)만 소비한다. `pyodide-core`·`pyodide-terminal`·`pyodide-repl`·`pyodide-react`·`pyodide-dom-bridge`의 devDependencies에 `@repo/pyodide-testkit`이 있다(시험 전용). core는 coincident(`reflected-ffi` 포함)와 `@cp949/runo-xterm-readline`에 의존하지 않고 terminal·repl·react는 coincident에 의존하지 않는다(coincident는 dom-bridge에만 있다). 모두 시험·스크립트로 강제하고 dom-bridge는 `scripts/check-dist.mjs --allow-sync-bridge`·`smoke:pack` 별도 소비자로 예외를 둔다(`09-testing.md` 9.8). repl이 terminal의 `./internal`(sinks·rewind-tail·stdin-reader·notice·selection-copy)을 쓰는 것은 두 패키지가 lockstep으로 함께 바뀌는 조건의 공유이고 안정성을 보장하지 않는다(ADR-0006 갱신). `pyodide-react`는 RD-024에서 추가됐고(ADR-0006 갱신, 4.5), `pyodide-dom-bridge`는 [ADR-0006](../adr/0006-pyodide-core-and-plugin-packages.md)이 정하고 RD-023에서 추가됐다(ADR-0006 갱신, 4.6).
 
 ### 4.1 `@cp949/runo-pyodide-repl` export
 
@@ -153,7 +154,7 @@ main의 `readLine` 핸들러는 `createReplReader`로 꼬리 + 프롬프트를 �
 
 #### core export(`@cp949/runo-pyodide-core`, 내부 계약)
 
-core는 `private`이고 이 인터페이스는 공개 API로 확정하지 않았다. REPL과 실행 driver(RD-022)가 실제로 쓰는 것만 낸다(`plugins`는 RD-023). 진입점이 둘이라 worker 번들이 main 전용 코드(송신기·메일박스 writer)를 끌어오지 않는다.
+core는 `private`이고 이 인터페이스는 공개 API로 확정하지 않았다. REPL과 실행 driver(RD-022)가 실제로 쓰는 것만 낸다(`plugins`는 RD-023, `WorkerPlugin`). 진입점이 둘이라 worker 번들이 main 전용 코드(송신기·메일박스 writer)를 끌어오지 않는다.
 
 ```ts
 // main 쪽: '@cp949/runo-pyodide-core'
@@ -186,7 +187,11 @@ export class RunRejectedError extends Error {
 // 타입 RunnerOptions·RunnerHandle·RunnerStatus·RunResult·RunOutcome·StopResult·RunRejectedReason·InputProvider
 
 // worker 쪽: '@cp949/runo-pyodide-core/worker'
-export function runWorker(options: { driver: WorkerDriver }): void;
+export function runWorker(options: {
+  driver: WorkerDriver;
+  plugins?: readonly WorkerPlugin[]; // RD-023: loadPyodide·interrupt API 확인 뒤, createConsole 앞에서 배열 순서로 prepare를 await
+}): void;
+// 타입 WorkerPlugin { name, prepare({ pyodide }) }·PluginContext (`16-dom-bridge.md` 16.4)
 // 실행 driver(RD-022): runDriver(WorkerDriver<RunDriverOptions>), 타입 RunDriverOptions·RunOutcome
 // 그 밖에: bootWorker, parseInitFrame, InitFrame, createRpc, composeRpcHandlers, createMailboxReader,
 // acknowledgeInterrupt·consumeInterrupt·discardPendingInterrupt·hasPendingInterrupt·readRequestSeq·signalInterrupt,
@@ -337,15 +342,15 @@ RD-005 시점에는 `onStatus`만 있었고 `terminated`도 `<p data-testid="ter
 
 RD-001에서 클린 체크아웃(`dist` 없음)으로 재현한 결과다.
 
-- 패키지 `exports`의 조건 순서는 `development`(`./src/*.ts`) → `types`(`./dist/*.d.mts`) → `default`(`./dist/*.mjs`)다. Vite는 dev에서 `development`를, build·preview에서 `default`를 고른다(`dist` 없이 `vite build`만 돌리면 실패해서 확인). 새 패키지나 서브패스를 추가하면 `development` 항목도 함께 둔다. 빠지면 `pnpm dev`에서 vite가 `dist`보다 먼저 떠서 `Failed to resolve import ...`(500)를 내고, 실패한 해석을 캐시해 `dist`가 생겨도 vite를 재시작하기 전까지 복구되지 않는다. worker 오류는 브라우저 콘솔에만 남는다.
+- 패키지 `exports`의 조건 순서는 `development`(`./src/*.ts`) → `types`(`./dist/*.d.mts`) → `default`(`./dist/*.mjs`)다. tarball에는 `src/`가 없으므로 6개 패키지 모두 `package.json`의 `publishConfig.exports`에 `development`를 뺀 `exports`를 두고 `pnpm pack`이 이것을 tarball의 `exports`로 쓴다(빠지면 Vite dev가 없는 `./src/*.ts`로 해석해 `null`을 돌려준다, `smoke:pack`이 검사, `09-testing.md` 9.8.3). 진입점을 추가하면 `exports`와 `publishConfig.exports`를 함께 고친다. Vite는 dev에서 `development`를, build·preview에서 `default`를 고른다(`dist` 없이 `vite build`만 돌리면 실패해서 확인). 새 패키지나 서브패스를 추가하면 `development` 항목도 함께 둔다. 빠지면 `pnpm dev`에서 vite가 `dist`보다 먼저 떠서 `Failed to resolve import ...`(500)를 내고, 실패한 해석을 캐시해 `dist`가 생겨도 vite를 재시작하기 전까지 복구되지 않는다. worker 오류는 브라우저 콘솔에만 남는다.
 - 루트 `pnpm dev`는 `apps/demo`만 띄운다(`turbo run dev --filter=demo`). 패키지의 `dev`(`tsdown --watch`)는 `dist`를 지우고 다시 써서 `build`와 경합하므로 필요할 때 `pnpm --filter <패키지> dev`로 따로 실행한다.
 - `check-types`는 `^build`에 의존한다. 앱이 패키지 타입을 `dist/*.d.mts`에서 읽으므로 d.ts가 먼저 있어야 한다. 이전 값(`^check-types`)은 클린 상태에서 `TS2307: Cannot find module '@cp949/runo-pyodide-repl/worker'`로 실패했다. `customConditions`로 소스를 읽게 하면 앱의 컴파일러 옵션(`noUncheckedIndexedAccess`)이 벤더링한 xterm-readline 소스를 검사하므로 쓰지 않는다.
 - `pnpm preview`는 `build`에 의존한다.
-- 패키지 의존 순서(RD-020, RD-022, RD-024): `pyodide-repl`이 `pyodide-core`·`pyodide-terminal`에, terminal이 core·xterm-readline에, `pyodide-react`가 core·terminal·repl에 `workspace:*`로 의존하므로 turbo `^build`가 core → terminal → repl → react 순으로 빌드한다. repl의 `check-types`·`test`도 core `dist`(`./dist/*.d.mts`·`./dist/*.mjs`)를 읽는다(vitest·tsc에는 `development` 조건이 없다). demo는 dev에서 `development` 조건으로 core 소스를 직접 읽고 build·preview에서는 repl `dist`가 core를 외부 import로 남기므로 vite 워커 번들링이 `node_modules`의 core를 해석한다.
+- 패키지 의존 순서(RD-020, RD-022, RD-024, RD-023): `pyodide-repl`이 `pyodide-core`·`pyodide-terminal`에, terminal이 core·xterm-readline에, `pyodide-react`가 core·terminal·repl에 `workspace:*`로 의존하므로 turbo `^build`가 core → terminal → repl → react 순으로 빌드한다. `pyodide-dom-bridge`는 core를 peer(+devDependency `workspace:*`)로 두므로 core 뒤에 빌드되고 다른 패키지 빌드와 무관하다(demo는 이들 전부에 의존한다). repl의 `check-types`·`test`도 core `dist`(`./dist/*.d.mts`·`./dist/*.mjs`)를 읽는다(vitest·tsc에는 `development` 조건이 없다). demo는 dev에서 `development` 조건으로 core 소스를 직접 읽고 build·preview에서는 repl `dist`가 core를 외부 import로 남기므로 vite 워커 번들링이 `node_modules`의 core를 해석한다.
 - `pyodide-testkit`은 빌드하지 않는다. `exports`가 `./src/*.ts`(`./thread`·`./fake-terminal`·`./vt-screen`·`./package-boundary`)와 `./ts-resolve-hook.mjs`를 직접 가리키고 소비자가 vitest·tsc뿐이다. `private`이고 pack 대상이 아니다.
-- `check-dist` 태스크(RD-020, RD-021, RD-022, RD-024): `dependsOn: ["build"]`, `cache: false`. xterm-readline·core·terminal·repl·react의 `dist`에 `coincident`·`reflected-ffi` 문자열이 없는지, `.mjs`에 `pyodide` 런타임 import(`from "pyodide`·`import("pyodide`)가 없는지 검사한다(`scripts/check-dist.mjs`). 루트 `pnpm test`는 `turbo run test check-dist`라 시험과 함께 돌고 `pnpm check-dist`로 단독 실행할 수 있다. turbo `test`가 자기 패키지 `build`에 의존하지 않아 `dist` 검사를 시험 안에 둘 수 없다(`09-testing.md` 9.8.2).
+- `check-dist` 태스크(RD-020, RD-021, RD-022, RD-024, RD-023): `dependsOn: ["build"]`, `cache: false`. xterm-readline·core·terminal·repl·react의 `dist`에 `coincident`·`reflected-ffi` 문자열이 없는지, `.mjs`에 `pyodide` 런타임 import(`from "pyodide`·`import("pyodide`)가 없는지 검사한다(`scripts/check-dist.mjs`). dom-bridge의 `check-dist`만 `--allow-sync-bridge`로 coincident 문자열 금지 대신 CSP 정적 규칙과 관찰기 import 순서를 검사한다(`16-dom-bridge.md` 16.12). 루트 `pnpm test`는 `turbo run test check-dist`라 시험과 함께 돌고 `pnpm check-dist`로 단독 실행할 수 있다. turbo `test`가 자기 패키지 `build`에 의존하지 않아 `dist` 검사를 시험 안에 둘 수 없다(`09-testing.md` 9.8.2).
 - core는 `pyodide`를 `devDependencies`(`"catalog:"`, 원천은 `pnpm-workspace.yaml` catalog, ADR-0007)로 두고 optional peer(`^314.0.7`)로도 선언한다. `tsdown.config.ts`의 `deps.neverBundle`(`pyodide`, `pyodide/*`에서 `pyodide/package.json` 제외)로 `.d.mts`에 pyodide 타입을 인라인하지 않고, `deps.alwaysBundle: ["pyodide/package.json"]`로 `PYODIDE_VERSION`용 `version` 문자열만 `dist`에 인라인한다(런타임 `pyodide` import 없음). core `./worker` 타입을 쓰는 소비자는 `pyodide`(+`@types/node`·`@types/emscripten`)를 설치해야 한다(`packages/pyodide-core/README.md`, `packages/pyodide-core/CONTEXT.md`, `09-testing.md` 9.8.3, `13-version-upgrade.md` 13.7). repl만 쓰는 소비자는 영향이 없다.
-- tarball 스모크: 루트 `pnpm smoke:pack`(`pnpm build && node scripts/pack-smoke.mjs`)이 xterm-readline·core·terminal·repl·react를 pack해 저장소 밖에 설치·`import`·`tsc`로 확인한다. 기본 파이프라인에는 넣지 않는다(`09-testing.md` 9.8.3).
+- tarball 스모크: 루트 `pnpm smoke:pack`(`pnpm build && node scripts/pack-smoke.mjs`)이 xterm-readline·core·terminal·repl·react·dom-bridge를 pack해 저장소 밖에 설치·`import`·`tsc`·Vite 해석으로 확인한다(주 소비자는 dom-bridge를 뺀 5개, dom-bridge는 core와 별도 소비자). 기본 파이프라인에는 넣지 않는다(`09-testing.md` 9.8.3).
 
 ### 4.5 `@cp949/runo-pyodide-react` export
 
@@ -364,6 +369,22 @@ export { RunRejectedError }; // core의 것을 다시 내보낸다(같은 클래
 ```
 
 props·handle·수명·fit·StrictMode 규칙은 `15-react.md`. peer는 `react`·`react-dom`(`^19.0.0`)·`@xterm/xterm`(`^6.0.0`)이고 `xterm.css`는 소비자가 import한다.
+
+### 4.6 `@cp949/runo-pyodide-dom-bridge` export
+
+```ts
+// main: '@cp949/runo-pyodide-dom-bridge'   (RD-023, private)
+export function createBridgeMain(): BridgeMain; // { Worker, native }, coincident main을 옵션 없이 한 번만 부른다
+export function isDomBridgeSupported(): boolean; // crossOriginIsolated + growable SharedArrayBuffer
+// 타입 BridgeMain·BridgeMainWorker
+
+// worker: '@cp949/runo-pyodide-dom-bridge/worker'   (worker 파일의 첫 정적 import)
+export function domBridge(): WorkerPlugin; // name: "dom-bridge"
+export function bridge(): Promise<WorkerBridge>; // { proxy, window, native }, worker당 coincident() 1회
+// 타입 WorkerBridge
+```
+
+규칙(첫 정적 import·`plugins`·`runo.browser`·`native: false`·S5·순서 보장 없음·CSP)은 `16-dom-bridge.md`다. REPL과의 조합은 지원하지 않는다.
 
 ## 5. 이전 구현 대비 무엇이 사라지고 무엇이 남는가
 

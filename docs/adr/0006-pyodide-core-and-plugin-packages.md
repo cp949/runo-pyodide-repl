@@ -16,10 +16,10 @@ REPL 외에 두 소비자가 생겼다. (1) host(`example.com`)의 monaco에서 
 - core는 한 벌이다. coincident는 core의 변형이 아니라 DOM 접근 전용 플러그인이며, `input()`·출력·중단은 coincident를 거치지 않고 core 채널로 간다. core·repl·terminal·react는 coincident에 의존하지 않는다(시험으로 강제).
 - REPL + dom-bridge 조합은 지원하지 않는다(문서화만). REPL은 프롬프트 대기 중 main→worker 요청(Tab 완성)이 필요한데 coincident 동기 대기가 그것을 막는다(이전 구현 TRP-005, [ADR-0001](./0001-no-sync-bridge-library.md)).
 - 입력 UI seam은 main 쪽 `InputProvider(prompt, signal) => Promise<string | null>`이다. `prompt`는 pyodide가 이미 stdout에 쓴 미종결 꼬리(참고값)다.
-- worker 파일은 앱이 조립한다(`runWorker({ driver, plugins })`, `createWorker` 주입 유지). dom-bridge를 쓰면 worker 첫 import가 `coincident/window/worker`여야 하고, core init 리스너는 모듈 본문에서 동기 등록하며 `kind: "init"` 객체만 받는다(첫 메시지를 무조건 소비하지 않는다).
+- worker 파일은 앱이 조립한다(`runWorker({ driver, plugins })`, `createWorker` 주입 유지). `core/worker`는 정적 import하고 `runWorker` 호출 시점은 자유다(core가 모듈 평가 시점에 init 프레임을 버퍼링하므로 늦게 불러도 부팅한다). dom-bridge를 쓰면 dom-bridge `./worker`가 worker 파일의 첫 정적 import여야 한다(coincident가 `coincident/window/worker` 평가 때 부트스트랩 리스너를 한 번만 걸기 때문). core init 리스너는 `kind: "init"` 객체만 받는다(첫 메시지를 무조건 소비하지 않는다).
 - 배포는 당분간 `pnpm pack` tarball이다. npm 공개 배포는 하지 않는다(`ROADMAP.md` 범위 밖 항목 유지).
 
-근거: 2026-09-24 공존 스파이크(Chromium, `_tmp/spike-coincident-core/RESULT.md`, 저장소 밖 기록)에서 같은 worker의 coincident 부트스트랩과 core 초기화·메일박스 `input()`·interrupt Ctrl+C·DOM 프록시가 공존했다. 조건은 core init 리스너의 동기 등록이다(매크로태스크 뒤 등록은 프레임 소실).
+근거: 2026-09-24 공존 스파이크(Chromium, `_tmp/spike-coincident-core/RESULT.md`, 저장소 밖 기록)에서 같은 worker의 coincident 부트스트랩과 core 초기화·메일박스 `input()`·interrupt Ctrl+C·DOM 프록시가 공존했다. 조건은 core init 리스너의 동기 등록이다(매크로태스크 뒤 등록은 프레임 소실). RD-023이 이 조건을 core의 모듈 평가 시점 버퍼링으로 바꿨다(아래 "갱신(RD-023)").
 
 ## Considered Options
 
@@ -30,7 +30,7 @@ REPL 외에 두 소비자가 생겼다. (1) host(`example.com`)의 monaco에서 
 
 ## Consequences
 
-RD-020(core 추출)은 완료된 RD 17건의 코드를 옮기므로 전체 기준선(`e2e:baseline`)으로 판정한다. coincident 동기 호출 중에는 Ctrl+C가 닿지 않는다(호출 반환 직후 `KeyboardInterrupt`, 대기 중 `Atomics.pause` busy-wait) — 끝나지 않는 main 함수는 terminate 폴백뿐이다. Firefox·`native: false` 환경의 공존은 미실측이며 RD-023 착수 조건이다.
+RD-020(core 추출)은 완료된 RD 17건의 코드를 옮기므로 전체 기준선(`e2e:baseline`)으로 판정한다. coincident 동기 호출 중에는 Ctrl+C가 닿지 않는다(호출 반환 직후 `KeyboardInterrupt`, 대기 중 `Atomics.pause` busy-wait) — 끝나지 않는 main 함수는 terminate 폴백뿐이다. Firefox·`native: false`(서비스워커 없음)는 착수 조건이 아니다. Chromium 스파이크 판정은 `제한 있는 지원`이고 Firefox 공존 실측과 서비스워커 경로는 `ROADMAP.md` "보류" 표에 있다(아래 "갱신(RD-023)").
 
 ## 갱신(RD-022, 2026-09-24)
 
@@ -56,3 +56,18 @@ RD-024가 `pyodide-react`를 만들고 demo를 옮기며 위 표의 `pyodide-rea
 - **`usePythonRunner`**: xterm 없이 core `createRunner`를 감싸는 저수준 hook이다(`{ status, run, stop, reset, interrupt, busy }`). `<PythonRunner>`는 이 hook을 쓰지 않고 terminal 실행창을 쓴다. 수명·latest-ref 로직만 내부 공용 hook을 공유한다.
 - **fit**: `fit?: boolean`(기본 `true`), 컨테이너 `ResizeObserver` + rAF 합침. demo 기본 화면은 `fit={false}`(80×24)라 기존 브라우저 기준선이 바뀌지 않고 `?fit=1`에서만 fit이다.
 - **미결·범위 밖**: iframecall 어댑터(앱 계층), `Terminal` 노출, dom-bridge와 React의 결합(RD-023 뒤).
+
+## 갱신(RD-023, 2026-09-25)
+
+RD-023이 `pyodide-dom-bridge`를 만들며 위 표의 `pyodide-dom-bridge` 행을 다음과 같이 구체화했다. 패키지 분리 자체와 "REPL + dom-bridge 비지원"은 바뀌지 않았다. 규칙 본문은 `docs/design/16-dom-bridge.md`.
+
+- **패키지·진입점**: `@cp949/runo-pyodide-dom-bridge`(private, 버전 동기). 진입점 `.`(main: `createBridgeMain`·`isDomBridgeSupported`)와 `./worker`(`domBridge`·`bridge`). coincident `4.1.1`·reflected-ffi `0.7.2`를 upstream 그대로 정확한 버전으로 `dependencies`에 고정한다(포크 없음). core는 `WorkerPlugin` 타입만 쓰므로(런타임 import 0) `peerDependencies`(+`devDependencies`)로 둔다. coincident 진입점은 `coincident/window/main`·`coincident/window/worker`뿐이다.
+- **core `plugins`**: `runWorker({ driver, plugins? })`, `WorkerPlugin { name; prepare({ pyodide }): void | Promise<void> }`. `loadPyodide`와 interrupt 공개 API 확인 뒤, `driver.createConsole` 앞에서 배열 순서로 하나씩 await한다. 실패는 `Error: plugin "<name>": <원인>` 페이로드의 `loadFailed`다. 훅은 `prepare` 하나뿐이고 해제 훅은 없다. 이 자리인 이유: `createConsole`이 동기라 비동기 준비를 기다릴 수 있는 지점이 그 앞뿐이고, 이 시점에는 `connectInterrupts` 전이라 정리할 부분 설치가 없다.
+- **init 버퍼링(규칙 변경)**: 위 결정의 "core init 리스너는 모듈 본문에서 동기 등록"을 다음으로 바꿨다. core `./worker` 모듈이 평가될 때(worker 전역일 때만) `message` 리스너를 걸어 init 프레임을 버퍼에 둔다. 앱은 `core/worker`를 정적 import하고 `runWorker` 호출 시점은 자유다. 두 번째 `runWorker` 호출은 명시 오류다(이중 부팅 방지). 기각한 대안: 동기 등록 규칙 유지(dom-bridge의 "첫 정적 import" 규칙과 겹쳐 규칙이 두 겹이 된다, 2026-09-25 그릴링 확정).
+- **dom-bridge 첫 정적 import 규칙**: coincident는 `coincident/window/worker`가 평가될 때 부트스트랩 리스너를 한 번만 건다. 그래서 dom-bridge `./worker`가 worker 파일의 첫 정적 import여야 한다. 위반은 `prepare`가 명시 오류로 알린다: 별도 모듈(부트스트랩 관찰기)이 coincident보다 먼저 리스너를 걸어 부트스트랩 도착을 기록하고, `prepare` 시점에 기록이 없으면 던진다(고정 대기 없음). 기각한 대안: 캡처 단계 리스너(Chromium worker 전역에서 대상 자신은 캡처·비캡처 구분 없이 등록 순서로 호출돼 성립하지 않았다, L1 첫 실행이 정상 배치를 `load-failed`로 만들어 발견), 관찰 없이 문서 규칙만.
+- **실패 통지**: 새 상태 `unsupported`를 만들지 않는다. 공개 상태 유니온(`RunnerStatus` 8종)은 그대로이고 `load-failed`(`onLoadFailed`)에 원인 문구를 담는다. main에서 미리 거를 수 있게 `isDomBridgeSupported()`(`crossOriginIsolated === true` + growable `SharedArrayBuffer` 생성 성공)를 낸다.
+- **`native: false` 방침**: `native`가 `false`이면(growable `SharedArrayBuffer` 불가) 동기 DOM 코드가 오류 없이 무효가 되므로(`TRP-065`) `prepare`가 명시 오류로 조기 실패한다(`load-failed`). 서비스워커(sabayon) 경로와 `await` 전용 API는 만들지 않는다. 스파이크가 서비스워커 없는 조건만 측정했으므로 필요해지면 그때 등록한다(`ROADMAP.md` "보류" 표).
+- **결과 절 정정**: 위 Consequences의 "Firefox·`native: false` 환경의 공존은 미실측이며 RD-023 착수 조건이다"는 낡은 문구다. 2026-09-25 Chromium 스파이크 판정은 `제한 있는 지원`이고, Firefox 공존 실측과 서비스워커 경로는 착수 조건이 아니라 `ROADMAP.md` "보류" 표 항목이다. Chromium에서만 검증했다(Firefox·Safari 미검증).
+- **경계 예외**: coincident 금지는 dom-bridge를 뺀 패키지에 그대로 적용된다. `scripts/check-dist.mjs`는 `--allow-sync-bridge`가 있을 때만 coincident 문자열 금지를 끄고 CSP 정적 규칙(허용 지정자 2개, 금지 표현, 관찰기 import 순서)을 건다. `pnpm smoke:pack`은 소비자를 둘로 나눈다(주 소비자는 dom-bridge를 뺀 5개 패키지로 "coincident·reflected-ffi 없음"을 유지, dom-bridge 소비자는 core + dom-bridge를 따로 설치해 자기 검사를 받는다). 기각한 대안: 한 소비자에서 dom-bridge를 예외로 빼는 판정(금지 검사가 약해질 수 있다). `sideEffects`는 dom-bridge만 배열이다(부수효과 전용 import가 트리셰이킹되면 리스너가 빠진다).
+- **React 결합**: `<PythonRunner createWorker={…}>`에 dom-bridge worker를 주입하는 조합은 react 패키지 변경 없이 동작하고 demo `?view=dom-bridge`가 시험한다. REPL과의 조합은 여전히 비지원이다.
+- **동기 호출 중 중단**: coincident 동기 호출 중에는 `interrupt()`가 호출 반환 뒤에야 전달된다. 결정한 것은 문서화와 시험 고정뿐이고 제품 동작은 바꾸지 않는다(에스컬레이션·호출 길이 상한은 범위 밖). 즉시 끝내는 경로는 `stop()`이다(`16-dom-bridge.md` 16.8).

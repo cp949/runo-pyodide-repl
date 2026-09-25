@@ -169,7 +169,7 @@ function App() {
 - **생성 옵션 변경**: 마운트 때만 읽는다(15.4). 바꾸려면 `key`로 재마운트한다.
 - **`autoFocus` prop**: 없다(15.6, `ref.current?.focus()`를 부모의 마운트 effect에서 부른다).
 - **`PythonRunner`의 `interrupt`·`busy`**: terminal 핸들에 없어 노출하지 않는다(15.2).
-- REPL + dom-bridge 조합은 지원하지 않는다(ADR-0006).
+- REPL + dom-bridge 조합은 지원하지 않는다(ADR-0006). `<PythonRunner createWorker={…}>`에 dom-bridge worker를 주입하는 조합은 react 패키지 변경 없이 동작하고 demo `?view=dom-bridge`가 시험한다(`16-dom-bridge.md` 16.13).
 - SSR 렌더링은 `usePythonRunner`의 `status`만 시험한다(`renderToString` → `hydrateRoot`, 격리·비격리 클라이언트에서 `onRecoverableError` 0). 컴포넌트의 SSR은 시험하지 않았다. `Terminal`·worker는 마운트 effect 안에서만 만든다. 번들 없는 Node ESM에서의 모듈 평가는 `pnpm smoke:pack`의 import 검사가 확인한다.
 
 판단 기록:

@@ -15,6 +15,8 @@
 
 ```ts
 // runner.worker.ts
+// core/worker는 정적 import한다(모듈이 평가될 때 init 프레임 수신기가 걸린다). runWorker 호출 시점은 자유다(늦게 불러도 버퍼에서 부팅한다).
+// dom-bridge를 쓰면 dom-bridge `./worker`가 이 파일의 첫 정적 import다(`16-dom-bridge.md` 16.3).
 import { runDriver, runWorker } from "@cp949/runo-pyodide-core/worker";
 runWorker({ driver: runDriver });
 

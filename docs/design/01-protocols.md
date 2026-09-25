@@ -167,7 +167,7 @@ interface InitFrame {
 ```
 
 - main: `worker.postMessage(frame, [frame.rpcPort])`. worker 생성 직후 첫 메시지로 보낸다.
-- worker: 스크립트 최상단(첫 `await` 이전, 모듈 본문에서 동기로)에서 core `runWorker({ driver })`가 `addEventListener('message', listener)`로 리스너를 건다. `{ once: true }`가 아니라 필터다(coincident 같은 다른 프로토콜이 같은 worker에 있어도 그 메시지를 삼키지 않는다, ADR-0006). 리스너는 메시지를 다음 규칙으로 처리한다.
+- worker: core `./worker` 모듈이 평가될 때(worker 전역일 때만) 수신기(`packages/pyodide-core/src/worker/init-receiver.ts`)가 `addEventListener('message', listener)`로 리스너를 걸고 도착한 프레임을 버퍼에 둔다. 앱의 worker 파일은 `@cp949/runo-pyodide-core/worker`를 **정적 import**해야 하고, `runWorker({ driver, plugins? })`를 부르는 시점은 자유다(다른 모듈의 top-level await 뒤처럼 늦게 불러도 버퍼의 프레임으로 부팅한다). 동적 `import()`로 core `./worker`를 늦게 평가하면 리스너가 걸리기 전에 온 프레임은 받을 수 없다(시험하지 않았다). `runWorker`는 worker당 한 번만 부를 수 있고 두 번째 호출은 `runWorker는 worker당 한 번만 부를 수 있다`를 던진다. dom-bridge를 쓰면 규칙이 하나 더 있다: dom-bridge `./worker`가 worker 파일의 **첫 정적 import**여야 한다(`16-dom-bridge.md` 16.3). 리스너는 `{ once: true }`가 아니라 필터다(coincident 같은 다른 프로토콜이 같은 worker에 있어도 그 메시지를 삼키지 않는다, ADR-0006). 리스너는 메시지를 다음 규칙으로 처리한다.
   - 배열 메시지(다른 프로토콜의 것): 조용히 넘기고 리스너를 유지한다.
   - `kind === 'init'`인 객체(init 후보): 리스너를 떼고(이후 네이티브 `message` 채널은 쓰지 않는다) `parseInitFrame`으로 검증한다. 실패하면 필드 이름을 담아 `console.error("[worker] 초기화 프레임이 올바르지 않다", …)` 후 프레임을 버린다.
   - 그 밖의 메시지(`kind`가 다른 객체·`null`·원시값): 같은 `console.error`(`parseInitFrame`의 오류 메시지 포함)를 남기되 리스너를 **유지**해 뒤에 오는 init을 받는다. 무시하지 않고 로그를 남기는 것은 옛 `{ once: true }` 동작의 오류 표시를 유지하기 위해서다.

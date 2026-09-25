@@ -12,7 +12,7 @@ _Avoid_: 엔진, 런타임
 
 **driver**:
 core가 세션 동안 부르는, 소비자(REPL 등)가 채우는 인터페이스. main 쪽 `MainDriver`(`session/driver.ts`)와 worker 쪽 `WorkerDriver`(`worker/driver.ts`) 둘이 한 쌍이다. driver가 화면 상호작용과 세션 제어 흐름을 내고, core가 공통 순서·게이트·종료를 소유한다.
-_Avoid_: 플러그인(`plugins`는 RD-023의 별개 개념), 콜백 모음, 어댑터
+_Avoid_: 플러그인(`plugins`는 별개 개념, 아래 **worker 플러그인**), 콜백 모음, 어댑터
 
 **driver 옵션**:
 초기화 프레임의 `driver` 필드(`InitFrame.driver: unknown`). core는 값의 모양을 모르고 필드가 있는지만 검증한다. worker 쪽 `WorkerDriver.parseOptions(frame.driver)`가 값을 검증한다. REPL은 `{ topLevelAwait }`, 실행 driver는 `{ filename, topLevelAwait }`(`parseRunDriverOptions`).
@@ -45,12 +45,16 @@ _Avoid_: 등록, 미들웨어
 ### worker 쪽
 
 **worker 커널**:
-`runWorker({ driver })`·`bootWorker`. 초기화 프레임 수신 → driver 옵션 검증 → RPC 생성 → pyodide 로드 → interrupt 공개 API 확인 → `driver.createConsole` → `driver.probe` → webloop 억제 → Ctrl+C 연결 → `setStdin` → `ready` → 감시 타이머 → `driver.run` 순서를 소유한다.
+`runWorker({ driver, plugins? })`·`bootWorker`. 초기화 프레임 수신 → driver 옵션 검증 → RPC 생성 → pyodide 로드 → interrupt 공개 API 확인 → `plugins` 준비 → `driver.createConsole` → `driver.probe` → webloop 억제 → Ctrl+C 연결 → `setStdin` → `ready` → 감시 타이머 → `driver.run` 순서를 소유한다.
 _Avoid_: 부트로더, 런처
 
 **init 필터**:
-`runWorker`가 모듈 본문에서 동기로 거는 `message` 리스너. `kind: "init"`인 객체만 소비한다. 배열 메시지(다른 프로토콜)는 넘기고, `kind`가 다른 메시지는 오류를 남기되 리스너를 유지한다. init 후보를 받으면 리스너를 뗀다.
+core `./worker` 모듈이 평가될 때 worker 전역에 거는 `message` 리스너(`init-receiver.ts`). 먼저 온 프레임은 버퍼에 두고 `runWorker`가 꺼내 부팅하므로 `runWorker` 호출 시점은 자유다(`core/worker`는 정적 import여야 한다). `kind: "init"`인 객체만 소비한다. 배열 메시지(다른 프로토콜)는 넘기고, `kind`가 다른 메시지는 오류를 남기되 리스너를 유지한다. init 후보를 받으면 리스너를 뗀다.
 _Avoid_: 첫 메시지 리스너, once 리스너
+
+**worker 플러그인(`WorkerPlugin`)**:
+`runWorker({ driver, plugins })`에 넘기는 `{ name, prepare({ pyodide }) }`. `bootWorker`가 `loadPyodide`와 interrupt 공개 API 확인 뒤, `driver.createConsole` 앞에서 배열 순서로 하나씩 `prepare`를 await한다. 던지거나 reject하면 `loadFailed`이고 페이로드는 `Error: plugin "<name>": <원인>`이다. 해제 훅은 없다(worker는 terminate로 끝난다). 소비자 예: `@cp949/runo-pyodide-dom-bridge`의 `domBridge()`.
+_Avoid_: driver(화면 상호작용·세션 제어 흐름을 채우는 별개 인터페이스), 미들웨어
 
 **콘솔 뼈대**:
 `installStdioWriters`(전역 stdout/stderr Writer)와 `createCoreConsole`(`PyodideConsole` 생성 + 콜백, 파일명 기본 `<console>`). `sys.ps1/ps2`·TLA 비트·헬퍼 namespace는 driver가 그 사이·뒤에 끼운다.
