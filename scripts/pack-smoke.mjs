@@ -6,6 +6,9 @@
 //   3. node ESM `import`(다섯 패키지의 공개 진입점 `.`·`./worker`·`./internal`)
 //   4. `tsc --noEmit`(`skipLibCheck: false`로 배포된 `.d.mts`의 타입 해석까지 검사)
 //   5. 설치된 트리에 `coincident`·`reflected-ffi` 없음(lockfile·`.pnpm` 디렉터리·설치된 dist 문자열)
+//   6. Vite dev 해석: 소비자에 설치한 vite(demo와 같은 버전)의 client 환경 해석기로 공개 진입점을 풀어 결과 파일이 설치본에 있는지
+//      확인한다(Node·tsc는 `development` 조건을 쓰지 않아 1~4단계가 놓치는 결함을 잡는다, 이슈 react-package-followups/05)
+//   1단계에는 tarball `exports`의 모든 대상 경로가 tarball 파일 목록에 있는지 보는 정적 검사도 들어 있다(조건 이름과 무관).
 // 사용: pnpm smoke:pack (= pnpm build && node scripts/pack-smoke.mjs). 약 1분, L0 수동 실행이며 `pnpm test`·turbo 기본
 // 파이프라인에는 넣지 않는다. 네트워크가 필요하다(`@xterm/xterm`·`@xterm/addon-fit`·`react`·`react-dom`·`string-width`·`typescript`·`pyodide`를 레지스트리에서 받는다,
 // `--prefer-offline`이라 pnpm 저장소에 있으면 다시 받지 않는다).
@@ -94,6 +97,12 @@ const ENTRY_POINTS = [
   ],
 ];
 
+/** Vite 해석 검사 대상: Node import 검사와 같은 공개 진입점(`ENTRY_POINTS`)과 각 패키지의 `./package.json`. */
+const VITE_ENTRIES = [
+  ...ENTRY_POINTS.map(([specifier]) => specifier),
+  ...PACKAGES.map(({ name }) => `${name}/package.json`),
+];
+
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /**
@@ -115,6 +124,20 @@ function readCatalogVersion(name) {
   return line[1];
 }
 
+/** `exports` 값에서 파일 경로 대상(`./…` 문자열)을 조건 이름과 무관하게 모두 모은다. `null`(비공개 표시)은 건너뛴다. */
+function collectExportTargets(value, path = "exports") {
+  if (typeof value === "string") return [{ path, target: value }];
+  if (Array.isArray(value))
+    return value.flatMap((item, index) =>
+      collectExportTargets(item, `${path}[${index}]`),
+    );
+  if (value !== null && typeof value === "object")
+    return Object.entries(value).flatMap(([key, item]) =>
+      collectExportTargets(item, `${path}.${key}`),
+    );
+  return [];
+}
+
 const started = Date.now();
 const elapsed = () => `${((Date.now() - started) / 1000).toFixed(1)}s`;
 const step = (message) => console.log(`\n[${elapsed()}] ${message}`);
@@ -134,6 +157,8 @@ const tarballName = (name, version) =>
   `${name.replace(/^@/, "").replace("/", "-")}-${version}.tgz`;
 
 async function main(tmp) {
+  /** 끝까지 실행한 뒤 함께 보고할 검사 실패(정적 exports 검사·Vite 해석 검사). */
+  const problems = [];
   // 소비자 설치에 쓰는 외부 버전은 저장소 매니페스트가 원천이다(스모크가 따로 정하지 않는다).
   const rootManifest = readJson(join(ROOT, "package.json"));
   const reactManifest = readJson(
@@ -148,6 +173,8 @@ async function main(tmp) {
     reactDom: reactManifest.devDependencies["react-dom"],
     typesReact: reactManifest.devDependencies["@types/react"],
     typescript: rootManifest.devDependencies.typescript,
+    // Vite 해석 검사는 demo가 쓰는 vite와 같은 버전으로 한다(원천은 demo 매니페스트).
+    vite: readJson(join(ROOT, "apps/demo/package.json")).devDependencies.vite,
     packageManager: rootManifest.packageManager,
   };
 
@@ -205,6 +232,26 @@ async function main(tmp) {
     );
     if (catalogLeft)
       throw new Error(`${name} tarball package.json에 catalog:가 남았다`);
+    // tarball `exports`의 모든 대상이 배포 파일에 있어야 한다. 작업공간 소스용 `development` 조건(`./src/…ts`)이 tarball에 남으면
+    // `files: ["dist"]`라 없는 파일을 가리킨다(Vite dev가 이 조건을 쓴다).
+    const packed = new Set(
+      execFileSync("tar", ["-tzf", tarballs[name]], { encoding: "utf8" })
+        .split("\n")
+        .filter(Boolean),
+    );
+    const missing = collectExportTargets(manifest.exports)
+      .filter(
+        ({ target }) => !packed.has(`package/${target.replace(/^\.\//, "")}`),
+      )
+      .map(({ path, target }) => `${path} -> ${target}`);
+    console.log(
+      `${name} exports 대상 ${collectExportTargets(manifest.exports).length}개, tarball 파일 ${packed.size}개, 없는 대상 ${missing.length}개`,
+    );
+    // 뒤 단계(Vite 해석 검사)의 결과도 한 번에 보도록 실패는 모아 두었다가 마지막에 던진다.
+    if (missing.length > 0)
+      problems.push(
+        `${name} tarball exports에 배포 파일에 없는 대상이 있다:\n  ${missing.join("\n  ")}`,
+      );
     // core는 pyodide 타입을 노출하므로 optional peer로 선언한다. repl은 노출하지 않아 peer에 pyodide가 없어야 한다.
     const peerRange = manifest.peerDependencies?.pyodide;
     if (name === "@cp949/runo-pyodide-core") {
@@ -272,6 +319,7 @@ async function main(tmp) {
           "@types/node": "24",
           "@types/react": versions.typesReact,
           "@types/emscripten": "^1.41.4",
+          vite: versions.vite,
         },
       },
       null,
@@ -356,6 +404,33 @@ async function main(tmp) {
     ].join("\n"),
   );
 
+  // Vite dev 해석 검사: client 환경 해석기(`createServer` middleware 모드)로 공개 진입점을 풀고 결과 파일이 설치본에 있는지 본다.
+  // Vite는 dev에서 `development` 조건을 기본으로 넣으므로, tarball `exports`가 배포되지 않은 `./src/…ts`를 가리키면 여기서 드러난다.
+  await writeFile(
+    join(consumer, "check-vite.mjs"),
+    [
+      `import { existsSync } from "node:fs";`,
+      `import { join } from "node:path";`,
+      `import { createServer } from "vite";`,
+      `const specifiers = ${JSON.stringify(VITE_ENTRIES)};`,
+      `const server = await createServer({ root: process.cwd(), configFile: false, appType: "custom", logLevel: "error", server: { middlewareMode: true }, optimizeDeps: { noDiscovery: true, include: [] } });`,
+      `let failed = false;`,
+      `try {`,
+      `  for (const specifier of specifiers) {`,
+      `    const resolved = await server.environments.client.pluginContainer.resolveId(specifier, join(process.cwd(), "index.js"));`,
+      `    const file = resolved?.id?.split("?")[0];`,
+      `    const found = typeof file === "string" && existsSync(file);`,
+      `    console.log(\`\${found ? "통과" : "FAIL"} vite 해석: \${specifier} -> \${resolved?.id ?? "(해석 실패)"}\`);`,
+      `    if (!found) failed = true;`,
+      `  }`,
+      `} finally {`,
+      `  await server.close();`,
+      `}`,
+      `if (failed) process.exit(1);`,
+      ``,
+    ].join("\n"),
+  );
+
   step("pnpm install (소비자)");
   run("pnpm", ["install", "--prefer-offline"], consumer);
 
@@ -364,6 +439,15 @@ async function main(tmp) {
 
   step("tsc --noEmit (skipLibCheck: false)");
   run("pnpm", ["exec", "tsc", "--noEmit", "-p", "tsconfig.json"], consumer);
+
+  step("Vite dev 해석(client 환경, 공개 진입점)");
+  try {
+    run("node", ["check-vite.mjs"], consumer);
+  } catch (error) {
+    problems.push(
+      `Vite dev 해석 검사 실패: ${error instanceof Error ? error.message : error}`,
+    );
+  }
 
   step("설치된 트리에 coincident·reflected-ffi 없음");
   const lock = readFileSync(
@@ -396,6 +480,8 @@ async function main(tmp) {
     [join(ROOT, "scripts/check-dist.mjs"), ...installedDists],
     consumer,
   );
+
+  if (problems.length > 0) throw new Error(problems.join("\n"));
 }
 
 const base = process.env.SMOKE_TMPDIR ?? tmpdir();
