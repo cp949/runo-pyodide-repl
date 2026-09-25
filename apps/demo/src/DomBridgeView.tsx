@@ -12,6 +12,7 @@ import type {
 import "@xterm/xterm/css/xterm.css";
 import { useRef, useState } from "react";
 import { createDomBridgeWorker } from "./create-dom-bridge-worker";
+import { DomBridgeCoreView } from "./DomBridgeCoreView";
 import { log } from "./dom-bridge-log";
 
 /** `run()`이 끝났을 때 `result`에 보여 줄 문자열(`RunnerView`와 같은 형태). */
@@ -32,14 +33,14 @@ function unsupportedReason(): string {
  * dom-bridge 실행창 데모(`?view=dom-bridge`, RD-023). `RunnerView`와 같은 plain 조작 요소(코드 입력·`run`·`stop`·`reset`·`clear`·상태·
  * 결과)에 `<canvas>`를 더한다. Python은 `from runo.browser import document`로 이 페이지의 `document`·`window`를 동기로 다룬다
  * (`input()`·출력·Ctrl+C는 core 채널). `isDomBridgeSupported()`가 false면 worker를 만들지 않고 이유만 보인다. 쿼리 `?gate=off`는
- * 이 검사를 건너뛰는 시험 훅이다(worker가 `load-failed`로 실패하는 경로를 보려면 worker가 만들어져야 한다).
+ * 이 검사를 건너뛰는 시험 훅이다(worker가 `load-failed`로 실패하는 경로를 보려면 worker가 만들어져야 한다). 쿼리 `?runner=core`는 `<PythonRunner>` 대신 core `createRunner`를 직접 쓰는 순서 시험 화면(`DomBridgeCoreView`)을 그린다.
  * REPL과의 조합은 지원하지 않는다(ADR-0006).
  */
 export function DomBridgeView({ fit }: { fit: boolean }) {
   const { native } = createBridgeMain();
   const supported = isDomBridgeSupported();
-  const gateOff =
-    new URLSearchParams(globalThis.location.search).get("gate") === "off";
+  const params = new URLSearchParams(globalThis.location.search);
+  const gateOff = params.get("gate") === "off";
   return (
     <>
       <p>
@@ -47,7 +48,11 @@ export function DomBridgeView({ fit }: { fit: boolean }) {
         supported: <output data-testid="supported">{String(supported)}</output>
       </p>
       {supported || gateOff ? (
-        <DomBridgeRunner fit={fit} />
+        params.get("runner") === "core" ? (
+          <DomBridgeCoreView />
+        ) : (
+          <DomBridgeRunner fit={fit} />
+        )
       ) : (
         <p data-testid="unsupported">{unsupportedReason()}</p>
       )}
