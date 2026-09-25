@@ -16,4 +16,5 @@
 
 - main·worker 진입 파일 양쪽에서 coincident import보다 먼저 `globalThis.SharedArrayBuffer`를 `maxByteLength` 옵션 생성만 던지는 Proxy로 바꾼다(2026-09-25 스파이크는 이 방식을 썼고, worker는 `location` 쿼리가 없어 `Worker`의 `name`으로 조건을 전달했다). 고정 길이 생성은 계속 되어야 한다(core의 interrupt buffer·mailbox가 쓴다).
 - 적용됐는지를 항목으로 판정한다: main `coincidentMain().native === false`(`nativeConfirm.main.coincidentMainEvent.native`), worker 쪽 `native` 값이 `False`, growable 생성이 던지고 고정 생성은 성공(`growableCtorThrows`·`fixedCtorWorks`), 서비스워커 등록 0. 이 항목 없이 "통과"만 기록하지 않는다.
+- dom-bridge demo의 `?native=0`(`apps/demo/src/force-non-native.ts`)은 이 방식의 구현이다: `SharedArrayBuffer` 생성자를 growable 옵션 생성만 던지는 Proxy로 가려 **main·worker 양쪽 realm**에 적용한다. main은 `DomBridgeView.tsx`의 첫 import가 쿼리 `native=0`일 때만 적용하고, worker는 `native=0`일 때만 만들어지는 별도 worker 파일(`dom-bridge-native0.worker.ts`)이 첫 import로 적용한다. worker realm에서 `native === false`가 적용됐는지는 `prepare`의 `!native` 분기 문구(`동기 DOM 브리지(native)를 쓸 수 없다`)가 `load-failed`로 나오는 것으로 판정한다(`e2e:dom-bridge` N0b). main은 `native`·`isDomBridgeSupported()`가 `false`인지 본다(N0a). `docs/design/16-dom-bridge.md` 16.7.
 - 이 조건은 Chromium 대리 측정이다. 실제 Firefox·WebKit의 worker 전역 `postMessage` 우회 경로와 다를 수 있다.

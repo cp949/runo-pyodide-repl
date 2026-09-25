@@ -429,6 +429,7 @@ e2e 스크립트에 적용한다. 기존 고정 대기(2026-09-24 기준 `checks
 - turbo 태스크 `check-dist`는 `dependsOn: ["build"]`, `cache: false`다. 루트 `pnpm test`는 `turbo run test check-dist`이고 `pnpm check-dist`로 단독 실행할 수 있다. `check-dist`는 vitest가 아니라 turbo 태스크라 시험 수에 잡히지 않는다.
 - 시험 안이 아니라 별도 태스크인 이유: turbo `test`는 `^build`(의존 패키지의 빌드)에만 의존하고 자기 패키지의 `build`에는 의존하지 않는다. 시험이 자기 `dist`를 읽으면 빌드 전에는 실패하고 빌드 뒤에는 낡은 산출물을 볼 수 있다. `test`가 `build`에 의존하게 바꾸면 demo(vite)까지 매번 빌드된다. `cache: false`는 `dist`가 `.gitignore` 대상이라 turbo 입력 해시에 들지 않아, 캐시가 켜져 있으면 변조가 가려지기 때문이다.
 - 스크립트 자체는 testkit `check-dist-script.test.ts`(자식 프로세스로 실행, 9건)가 시험한다. 실패 케이스는 종료 코드 1만 단언하면 스크립트가 없어도(`MODULE_NOT_FOUND`) 통과하므로 표식 `check-dist 실패`를 함께 단언한다.
+- 변이 검사 주의(dist 덧붙임): tsdown이 만든 `dist/*.mjs`는 마지막 줄이 `//# sourceMappingURL=…`이고 개행 없이 끝난다. `echo '…' >> dist/worker.mjs`로 덧붙이면 그 주석 줄에 흡수돼 주석 제거 뒤 판정에서 빠지고 "검사가 못 잡는다"로 잘못 보인다. 덧붙일 때 앞에 개행을 넣는다(`printf '\nimport "coincident/sync";\n' >> …`). 이 경우 `허용 밖 모듈 지정자`·`금지 표현` 2건으로 실패한다.
 
 ### 9.8.3 tarball 스모크(`pnpm smoke:pack`)
 

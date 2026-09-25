@@ -23,4 +23,5 @@
 - 브라우저 재현은 재시작 직후(옛 worker가 닫히기 전, 약 2초 안) 첫 interrupt를 N회 반복한다.
 - worker 수 판정은 고정 대기가 아니라 "옛 targetId가 목록에서 사라질 때까지" 조건 대기로 한다(정지 감지 상한은 잔존 약 2.0초의 몇 배로 넉넉히, `docs/design/09-testing.md` 9.7). "동시 worker 2개 이하"와 "최종 1개"를 나누어 판정한다. 소멸을 기다린 뒤 센 worker 수는 항상 1이라 `ready` 시점 지표가 아니다. 이 값으로 "`ready` 시점 worker 수"를 판정하면 잔존을 놓친다.
 - 재시작을 설계하는 쪽(dom-bridge 등)은 옛 worker와 새 worker가 약 2초 동시에 존재한다고 전제한다. 옛 worker가 남아 있는 동안 공유하는 배타 자원·이름(`worker.proxy` 핸들러, `MessageChannel`)이 있으면 충돌한다.
+- coincident 동기 호출 중 terminate한 옛 worker가 약 2초 뒤 종료돼도, 그 호출에 대한 main의 응답이 종료된 worker에 닿아 pageerror·콘솔 오류가 나지 않는다(`pnpm --filter demo e2e:dom-bridge` S5 stop 셀: 옛 slow 종료 뒤 pageerror 0). 이 스크립트의 worker 수 판정은 고정 대기가 아니라 옛 worker가 사라질 때까지의 조건 대기(`waitFor(() => page.workers().length === 1)`)다. `docs/design/16-dom-bridge.md` 16.10.
 - `page.on('worker')` 이벤트로 세는 경우의 다른 함정은 `TRP-061`이다.

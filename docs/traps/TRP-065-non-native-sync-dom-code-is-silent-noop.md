@@ -17,5 +17,6 @@
 ## 탐지/회피
 
 - `native: false`를 지원 대상에 넣는 설계는 (a) `runo` 등록 시 명시 오류로 조기 실패, (b) 서비스워커 경로 지원, (c) `await` 전용 API 중 하나를 정하고 그 결과를 시험으로 고정한다. "예외 없음"·"프록시 타입이 `JsProxy`"는 통과 근거로 쓰지 않는다.
+- 채택한 방침은 (a)다. dom-bridge `prepare`(`packages/pyodide-dom-bridge/src/dom-bridge-plugin.ts`)는 `native === false`이면 `runo` 모듈을 등록하지 않고 `동기 DOM 브리지(native)를 쓸 수 없다. …`로 던져 세션이 `load-failed`가 된다(새 상태는 만들지 않는다). (b)·(c)는 만들지 않았다(`ROADMAP.md` "보류" 표). 소비자는 worker를 만들기 전에 `isDomBridgeSupported()`로 거를 수 있다. 시험은 `pnpm --filter demo e2e:dom-bridge`의 N0b가 `load-failed`와 명시 문구를 확인한다. `docs/design/16-dom-bridge.md` 16.7.
 - 시험은 main의 관찰 가능한 결과(`document.title`·canvas 픽셀)로 판정한다. Python 쪽 결말(`ok`)만 보면 무효가 된 코드도 통과한다.
 - `native: false` 재현 방법은 `TRP-066`이다. `async def` 태스크 안 `await` 체인도 `AttributeError: getElementById`였으나 `run`의 `topLevelAwait` 옵션을 켜고 다시 보지는 않았다.
