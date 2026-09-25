@@ -94,7 +94,7 @@ const SETS = [
   { file: "checks/react-strictmode-check.mjs", server: "dev" },
   { file: "checks/react-fit-check.mjs", server: "dev" },
   // RD-023: dom-bridge 실행창(`?view=dom-bridge`) S1~S7·`?native=0`·늦은 import 양성 대조. dev 전용(StrictMode·dev 서버의 worker 파일 서빙 필요).
-  // 스크립트가 페이지 7개를 새 브라우저로 열어 결과 파일을 `dom-bridge-check-<plain|slow|core|native0g|native0|late|runlate>-dev.json`으로 나눠 쓴다.
+  // 스크립트가 페이지 7개를 새 브라우저로 열어 결과 파일을 `dom-bridge-check-<label>.json`(label = plain|slow|core|native0g|native0|late|runlate, `-dev` 접미 없음)으로 나눠 쓴다.
   { file: "checks/dom-bridge-check.mjs", server: "dev" },
   // RD-018 DELTA-05: 부팅 중 Ctrl+C 판정(N=30 기본값, boot-press.mjs는 measure/ 소속 파일이지만 baseline 세트다)
   { file: "measure/boot-press.mjs", server: "dev" },
