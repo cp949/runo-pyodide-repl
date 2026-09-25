@@ -87,6 +87,9 @@ const SETS = [
   // 결과 파일 label에 모드가 들어가 `runner-check-normal-dev.json`·`runner-check-not-isolated-dev.json`으로 나뉜다.
   { file: "checks/runner-check.mjs", args: ["normal"], server: "dev" },
   { file: "checks/runner-check.mjs", args: ["not-isolated"], server: "static" },
+  // RD-022a: REPL `runSource(code)`(REPL 화면의 `source`·`run-source`·`source-result` 요소). dev 전용(preview 재실행 없음).
+  // 결과 파일은 `run-source-check-dev.json`(label은 스크립트가 url 포트로 정한다).
+  { file: "checks/run-source-check.mjs", server: "dev" },
   // RD-022b: 열린 읽기 위 배경 출력 조율(REPL 화면). dev 전용(preview 재실행 없음).
   { file: "checks/bg-output-check.mjs", server: "dev" },
   // RD-024: `@cp949/runo-pyodide-react` 컴포넌트 확인. StrictMode worker 수(dev 서버의 `<StrictMode>` 필요)·`?fit=1` 리사이즈. dev 전용.

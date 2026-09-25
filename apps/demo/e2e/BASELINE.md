@@ -9,8 +9,10 @@ RD-018이 `_works/_completed/*/verify/`에 흩어져 있던 RD-005~017 브라우
 
 - `pnpm --filter demo e2e:baseline` — 서버 3개(5173 dev · 4173 preview · 4174 비격리 정적)를
   이 실행기가 비어 있으면 스스로 기동하고(이미 떠 있으면 "기존 사용"으로 표기하고 그대로 쓰며 종료
-  시에도 내리지 않는다) 판정 20종의 dev 전부 + preview 부분 + `boot-press` N=30을 순서대로 돌린 뒤
-  `apps/demo/e2e/results/summary.json`을 쓰고 이 실행기가 띄운 서버만 정리한다.
+  시에도 내리지 않는다) 판정 23종의 dev 전부 + preview 부분 + `boot-press` N=30을 순서대로 돌린 뒤
+  `apps/demo/e2e/results/summary.json`을 쓰고 이 실행기가 띄운 서버만 정리한다. "판정 N종"은
+  `run.mjs` `SETS`의 `checks/` 파일 중복을 뺀 개수다(`measure/boot-press.mjs`는 `SETS` 소속이지만
+  measure 파일이라 따로 적는다).
 - 판정 규칙: `summary.json`의 `failed`(`baseline.json`의 `deviations`·`unrun` 접두어에 해당하는
   이름은 제외) **0건** + 총 `pageerror`(`pageErrors` 필드, `expectedPageErrors`에 등록된 의도적
   forced 오류는 뺀 값) **0** + `ok: true`. "미실행"(`unrun`)은 실패가 아니다 — 담당 RD가

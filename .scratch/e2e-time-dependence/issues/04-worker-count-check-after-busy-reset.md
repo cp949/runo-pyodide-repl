@@ -42,3 +42,4 @@ worker 수를 세는 위치(2026-09-25 코드 읽기, 실행 없음):
 ## Comments
 
 - 2026-09-25 등록: `deferred`(`docs/agents/issue-tracker.md` "등록·분류 기준": 코드 읽기로만 추정한 테스트 도구 문제, 거짓 결과 미관찰).
+- 2026-09-26 재개 조건 3 판정(RD-023 완료 뒤 확인, 코드 읽기): **`deferred` 유지**. (1) RD-023이 더한 busy 종료 판정은 `apps/demo/e2e/checks/dom-bridge-check.mjs:480`의 `waitFor(() => page.workers().length === 1, "옛 worker 소멸", BOOT_TIMEOUT_MS)`이고, `stop()` 폴백(slow 호출 중 = busy) 직후를 조건 대기로 본다 — 이 이슈가 우려한 "즉시·고정 대기 판정"이 아니다. (2) 즉시 판정 2곳(`session-reset-check.mjs:396`·`:403`)은 strict 절이고 리셋 직전이 유휴(로드 직후·`resetAndWait()`는 `ready`+프롬프트까지 대기)라 2초 잔존 조건에 걸리지 않는다. (3) `repl-check.mjs:76`·`runner-check.mjs:115`는 `waitFor`, `repl-check.mjs:282`는 CDN 실패(worker 생성 없음) 경로다. 거짓 실패 관찰은 여전히 0건이다. 남은 재개 조건: busy 상태에서 worker 수를 **즉시** 세는 시험이 새로 생기거나, 위 판정이 간헐 실패할 때.
