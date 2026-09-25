@@ -21,4 +21,6 @@
 
 - 주입 조건을 호출 인자나 호출자로 좁힌다(예: `getattr(args[0], '__name__', '') == 'guard'`).
 - 주입 횟수를 함께 단언한다(예: `len(_hits) == 1`) — 주입 지점을 한 번도 안 지나는 공회전을 잡는다.
+- ABC 검사(`abc.ABCMeta.__subclasscheck__`)를 교체할 때 래퍼 안에서 `isinstance`·`issubclass`를 ABC에 쓰면 그 검사가 다시 래퍼로 들어와 재귀한다. 조건은 `is` 비교만 쓴다(예: `cls is collections.abc.Generator and subclass is pyodide.webloop.PyodideTask`).
+- WebLoop가 만드는 Task 클래스는 `asyncio.Task`가 아니라 `pyodide.webloop.PyodideTask`다. `asyncio.Task` 식별로 조건을 걸면 주입이 한 번도 일어나지 않는 공회전이 되고, 위 주입 횟수 단언이 잡는다.
 - RED 단계에서 실패 메시지가 기대한 노이즈·트레이스백인지 눈으로 확인한다. "실패했다"만으로 RED를 인정하지 않는다.
