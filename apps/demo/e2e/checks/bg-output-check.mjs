@@ -21,23 +21,30 @@
 //       `B07 100%` / `>>> pri`(`\r` 끝 조각이 사라지지 않고 그 행이 남는다, RD-022b 리뷰 SO-T1)
 //   B08 `pri` 입력 중 커서 숨김 진행률 조각 `\x1b[?25lB08 50%\r` → `B08 50%>>> pri`, 커서 열 14(실제 글자 끝). 벤더 폭 계산이 CSI 사설
 //       접두(`\x1b[?25l`)를 글자로 세면 `25l`이 3칸이 되어 커서가 열 17로 어긋난다(이슈 15). 이어 Backspace → 열 13, `\n` → `B08 50%` / `>>> pr`(열 6)
+//   B09 (`FIT=1`일 때만) `?fit=1`에서 `pri` 입력 중 아주 긴 배경 출력(재그리기 write 콜백이 오래 걸린다)을 합성 알림으로 넣고 곧바로 창
+//       너비를 줄인다 → 리사이즈가 재그리기 대기 중에 들어와도 입력줄 흔적 행이 남지 않는다(`>>> pri` 행 1개, 커서 열 7, 이슈 10). 수정 전에는
+//       `onResize`가 화면에 없는 입력줄을 콜백보다 먼저 그렸다. 기본 모드(`FIT` 미설정)에서는 B01~B08만, `FIT=1`에서는 B09만 실행한다
 //   끝  콘솔 경고·오류·pageerror 0
 //
 // 시간 판정(`docs/design/09-testing.md` 9.7): 고정 대기·ms 상한을 쓰지 않는다. 배경 출력은 조건 대기(`waitTail`·`waitLineWithCursor`)로
 // 기다리고, 입력한 코드 행과 출력 행은 행 정확일치로 구별한다(TRP-011). 셀은 Ctrl+L로 시작해 전체 행 목록을 단언한다(TRP-008).
 //
 // 사용: node bg-output-check.mjs [url](생략 시 http://localhost:5173)     ONLY=B01,B04 node bg-output-check.mjs
-// 결과 파일 label은 url 포트 4173이면 preview, 그 밖은 dev(RD-018 DELTA-02 결정과 같은 규칙).
+//       FIT=1 node bg-output-check.mjs   (B09: 페이지를 `/?fit=1`로 열고 창 크기를 바꾼다. 초기·끝 확인은 함께 돈다)
+// 결과 파일 label은 url 포트 4173이면 preview, 그 밖은 dev(RD-018 DELTA-02 결정과 같은 규칙). `FIT=1`이면 앞에 `fit-`을 붙인다.
 import { injectRpcNotice, installRpcTap, open, same, show } from "../lib.mjs";
 
-const url = process.argv[2] ?? "http://localhost:5173";
-const label = url.includes(":4173") ? "preview" : "dev";
+const baseUrl = process.argv[2] ?? "http://localhost:5173";
+/** `FIT=1`이면 `?fit=1`로 열어 xterm이 창 크기를 따르게 하고 B09만 돈다. 그 밖에는 기본 80×24 화면으로 B01~B08을 돈다. */
+const fit = process.env.FIT === "1";
+const url = fit ? new URL("/?fit=1", baseUrl).href : baseUrl;
+const label = `${fit ? "fit-" : ""}${baseUrl.includes(":4173") ? "preview" : "dev"}`;
 /** worker 부팅(pyodide 로드)·리셋 대기용 정지 감지 timeout(판정선이 아니다). */
 const BOOT_TIMEOUT_MS = 90000;
 /** 배경 출력 채널 이름(Python 수신기와 같다). */
 const CHANNEL = "bgout";
 
-const h = await open(url, { before: installRpcTap });
+const h = await open(url, { before: installRpcTap, ...(fit ? { viewport: { width: 1280, height: 720 } } : {}) });
 const { page, step, waitFor, waitPrompt, waitLastEndsWith, waitStatus, rows, trimmedRows, tail, cursorRow, focus, type, enter, press, submit, typeWhenReading, clear } = h;
 
 /** 커서가 있는 행에서 커서 앞 텍스트의 길이(열 좌표). 커서 행이 없으면 -1. */
@@ -142,6 +149,19 @@ async function bgStep(name, fn) {
   await step(name, fn);
   if (h.checks[name] === false) await recover().catch((e) => console.log(`복구 실패: ${e.message}`));
 }
+/** 기본 모드(`FIT` 미설정) 전용 셀. `FIT=1`에서는 건너뛴다. */
+const baseStep = (name, fn) => (fit ? undefined : bgStep(name, fn));
+/** `FIT=1` 전용 셀. 기본 모드에서는 건너뛴다. */
+const fitStep = (name, fn) => (fit ? bgStep(name, fn) : undefined);
+/** 화면 열 수(DOM 기하: `.xterm-screen` 너비 ÷ 셀 너비). 데모가 `Terminal`을 노출하지 않아 `react-fit-check.mjs`와 같은 방법으로 잰다. */
+const screenCols = () =>
+  page.evaluate(() => {
+    const screen = document.querySelector(".xterm-screen");
+    const measure = document.querySelector(".xterm-char-measure-element");
+    if (!screen || !measure) return Number.NaN;
+    const cell = measure.getBoundingClientRect().width / (measure.textContent ?? "").length;
+    return Math.round(screen.getBoundingClientRect().width / cell);
+  });
 
 await step("초기 프롬프트가 뜨고 배경 출력 수신기가 빈 프롬프트 위에 출력한다", async () => {
   await waitPrompt(">>>", BOOT_TIMEOUT_MS);
@@ -154,7 +174,7 @@ await step("초기 프롬프트가 뜨고 배경 출력 수신기가 빈 프롬�
   if (!info.isCursorRow) throw new Error(`커서가 프롬프트 행에 없다 ${show(info)}`);
 });
 
-await bgStep("B01 `pri` 입력 중 배경 `B01T` 행 → 행 `B01T` 아래 `>>> pri`(커서 열 7), `>>> priB01T` 없음", async () => {
+await baseStep("B01 `pri` 입력 중 배경 `B01T` 행 → 행 `B01T` 아래 `>>> pri`(커서 열 7), `>>> priB01T` 없음", async () => {
   await freshCell();
   await type("pri");
   await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
@@ -166,7 +186,7 @@ await bgStep("B01 `pri` 입력 중 배경 `B01T` 행 → 행 `B01T` 아래 `>>> 
   await wipeInput();
 });
 
-await bgStep("B02 배경 `B02T` 행 뒤 Backspace 2회 → `B02T` 행 보존, 마지막 행 `>>> p`(커서 열 5)", async () => {
+await baseStep("B02 배경 `B02T` 행 뒤 Backspace 2회 → `B02T` 행 보존, 마지막 행 `>>> p`(커서 열 5)", async () => {
   await freshCell();
   await type("pri");
   await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
@@ -179,7 +199,7 @@ await bgStep("B02 배경 `B02T` 행 뒤 Backspace 2회 → `B02T` 행 보존, �
   await wipeInput();
 });
 
-await bgStep("B03 개행 없는 배경 `B03T` → `B03T>>> pri`, Backspace·편집 뒤에도 접두 유지, Enter → 다음 `>>>`에 중복 없음", async () => {
+await baseStep("B03 개행 없는 배경 `B03T` → `B03T>>> pri`, Backspace·편집 뒤에도 접두 유지, Enter → 다음 `>>>`에 중복 없음", async () => {
   await freshCell();
   await type("pri");
   await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
@@ -199,7 +219,7 @@ await bgStep("B03 개행 없는 배경 `B03T` → `B03T>>> pri`, Backspace·편�
   if ((await countOf("B03T")) !== 1) throw new Error(`B03T ${await countOf("B03T")}번`);
 });
 
-await bgStep("B04 `input(\"x: \")`에 `ab` 입력 중 배경 `B04T` 행 → `B04T` 아래 `x: ab`(커서 열 5), Enter → `got ab`", async () => {
+await baseStep("B04 `input(\"x: \")`에 `ab` 입력 중 배경 `B04T` 행 → `B04T` 아래 `x: ab`(커서 열 5), Enter → `got ab`", async () => {
   await freshCell();
   await type('print("got", input("x: "))');
   await enter();
@@ -215,7 +235,7 @@ await bgStep("B04 `input(\"x: \")`에 `ab` 입력 중 배경 `B04T` 행 → `B04
   await waitScreen(['>>> print("got", input("x: "))', "B04T", "x: ab", "got ab", ">>>"], "Enter 뒤");
 });
 
-await bgStep("B05 `pri` 입력 중 배경 `B05T` 행 뒤 runSource(print(5)) → `B05T`·`5`·`>>> pri`, 옛 입력줄 흔적 없음", async () => {
+await baseStep("B05 `pri` 입력 중 배경 `B05T` 행 뒤 runSource(print(5)) → `B05T`·`5`·`>>> pri`, 옛 입력줄 흔적 없음", async () => {
   await freshCell();
   await type("pri");
   await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
@@ -230,7 +250,7 @@ await bgStep("B05 `pri` 입력 중 배경 `B05T` 행 뒤 runSource(print(5)) →
   await wipeInput();
 });
 
-await bgStep("B06 맨 아래 행 프롬프트에서 배경 1행·2행 출력(스크롤) → 입력줄이 맨 아래 행에 하나, 이어 편집·Enter", async () => {
+await baseStep("B06 맨 아래 행 프롬프트에서 배경 1행·2행 출력(스크롤) → 입력줄이 맨 아래 행에 하나, 이어 편집·Enter", async () => {
   await freshCell();
   await submit('print("\\n" * 30)');
   const total = (await rows()).length;
@@ -255,7 +275,7 @@ await bgStep("B06 맨 아래 행 프롬프트에서 배경 1행·2행 출력(스
   if ((await cursorRow()) !== total - 1) throw new Error(`Enter 뒤 커서 행 ${await cursorRow()} ≠ ${total - 1}`);
 });
 
-await bgStep("B07 `\\r`로 끝나는 진행률 조각 → `B07 100%>>> pri`, 이어 `\\n` → `B07 100%` 행 아래 `>>> pri`", async () => {
+await baseStep("B07 `\\r`로 끝나는 진행률 조각 → `B07 100%>>> pri`, 이어 `\\n` → `B07 100%` 행 아래 `>>> pri`", async () => {
   await freshCell();
   await type("pri");
   await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
@@ -271,7 +291,7 @@ await bgStep("B07 `\\r`로 끝나는 진행률 조각 → `B07 100%>>> pri`, 이
   await wipeInput();
 });
 
-await bgStep("B08 커서 숨김 진행률 조각 `\\x1b[?25lB08 50%\\r` → `B08 50%>>> pri`, 커서가 실제 글자 끝(열 14)", async () => {
+await baseStep("B08 커서 숨김 진행률 조각 `\\x1b[?25lB08 50%\\r` → `B08 50%>>> pri`, 커서가 실제 글자 끝(열 14)", async () => {
   await freshCell();
   await type("pri");
   await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
@@ -285,6 +305,32 @@ await bgStep("B08 커서 숨김 진행률 조각 `\\x1b[?25lB08 50%\\r` → `B08
   await emit("\n");
   await waitScreen(["B08 50%", ">>> pr"], "접두 확정 개행 뒤");
   await waitLineWithCursor(">>> pr", 6, "접두 없는 입력줄");
+  await wipeInput();
+});
+
+await fitStep("B09 `?fit=1`에서 긴 배경 출력의 재그리기 대기 중 창 너비를 줄여도 입력줄 흔적 행이 없다(`>>> pri` 행 1개, 커서 열 7)", async () => {
+  await freshCell();
+  await type("pri");
+  await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
+  const before = await screenCols();
+  // 긴 출력은 xterm이 여러 조각으로 나눠 해석하므로 그 뒤 재그리기 write 콜백이 수십 ms 뒤에 온다. 그 사이에 창 크기 리사이즈가 들어오게
+  // 하려는 것이다(짧은 출력은 콜백이 창 리사이즈의 `requestAnimationFrame`보다 먼저 온다). 합성 알림은 실제 `write` 알림과 같은 핸들러를 지난다.
+  const LINES = 200000;
+  await page.evaluate((count) => {
+    const port = window.__rpcTap?.port;
+    if (!port) throw new Error("RPC 알림을 받은 포트가 없다");
+    const text = Array.from({ length: count }, (_, i) => `B09 ${i}`).join("\n") + "\n";
+    port.dispatchEvent(new MessageEvent("message", { data: { kind: "ntf", name: "write", args: [text] } }));
+  }, LINES);
+  await page.setViewportSize({ width: 800, height: 720 });
+  await waitFor(async () => (await screenCols()) < before, `창 800px 뒤 cols가 ${before}보다 줄어듦`, 15000);
+  // 출력이 끝까지 도착하고(`B09 199999` 다음 행) 재그리기가 끝나면 마지막 두 행이 이 모양이다.
+  await waitTail([`B09 ${LINES - 1}`, ">>> pri"], "긴 배경 출력·재그리기 뒤", 60000);
+  await waitLineWithCursor(">>> pri", 7, "재그리기 뒤 입력줄", 60000);
+  const all = await rows();
+  const stray = all.filter((r) => r.includes(">>> pri")).length;
+  if (stray !== 1) throw new Error(`\`>>> pri\`가 ${stray}번 보인다(입력줄 흔적 행): ${show(all.filter((r) => r !== "").slice(-6))}`);
+  if ((await countOf(">>> pri")) !== 1) throw new Error(`이어붙인 화면에서 \`>>> pri\` ${await countOf(">>> pri")}번`);
   await wipeInput();
 });
 

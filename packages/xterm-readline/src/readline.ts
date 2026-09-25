@@ -203,7 +203,9 @@ export class Readline implements ITerminalAddon {
         tty.col = cols;
         tty.row = rows;
         if (tty.anchorRow >= rows) tty.anchorRow = Math.max(0, rows - 1);
-        if (this.activeRead !== undefined) {
+        // 재그리기 대기 중에는 입력줄이 화면에 없다. 지금 그리면 출력 아래에 흔적 행이 남고 콜백이 한 번 더 그린다.
+        // 크기는 위에서 이미 갱신했으므로 콜백(`finishRedraw`)이 새 크기로 그린다.
+        if (this.activeRead !== undefined && !this.redrawing) {
           this.state.refresh();
         }
       }),

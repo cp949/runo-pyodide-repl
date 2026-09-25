@@ -30,6 +30,7 @@ class StubTerminal {
   };
   public vt: VTerm;
   private onDataHandlers: ((data: string) => void)[] = [];
+  private onResizeHandlers: ((size: { cols: number; rows: number }) => void)[] = [];
   private queue: { text: string; cb: () => void }[] = [];
 
   constructor(cols: number, rows: number) {
@@ -44,8 +45,17 @@ class StubTerminal {
     return { dispose: () => {} };
   }
 
-  onResize(_handler: (size: { cols: number; rows: number }) => void) {
+  onResize(handler: (size: { cols: number; rows: number }) => void) {
+    this.onResizeHandlers.push(handler);
     return { dispose: () => {} };
+  }
+
+  /** 창 크기 변경을 흉내 낸다. xterm처럼 크기를 먼저 바꾼 뒤 리스너에 알린다. */
+  resize(cols: number, rows: number) {
+    this.cols = cols;
+    this.rows = rows;
+    this.vt.resize(cols, rows);
+    for (const handler of this.onResizeHandlers) handler({ cols, rows });
   }
 
   attachCustomKeyEventHandler(_fn: (event: KeyboardEvent) => boolean) {
@@ -942,5 +952,55 @@ describe("접두의 CSI 사설 시퀀스 폭(결함 15)", () => {
 
     expect(term.vt.screen()).toBe("xy> abc");
     expect(term.vt.cursor()).toEqual([0, 7]);
+  });
+});
+
+describe("재그리기 대기 중 리사이즈(결함 10)", () => {
+  test("재그리기 콜백 전 리사이즈가 입력줄을 먼저 그리지 않아 입력줄이 한 번만 남고 커서가 원래 자리다", () => {
+    const { term, readline } = setup(10, 8);
+    void readline.read("> ");
+    term.type("abcdefghijkl");
+    expect(readline.getCursor()).toBe(12);
+
+    term.asyncWrite = true;
+    void readline.printAboveRaw("t\n", "");
+    // 콜백을 기다리는 동안 창 크기 이벤트가 온다. 입력줄은 아직 화면에 없어야 한다.
+    term.resize(10, 9);
+    expect(term.vt.screen()).toBe("t");
+    term.flush();
+
+    expect(term.vt.screen()).toBe("t\n> abcdefgh\nijkl");
+    expect(count(term.vt.screen(), "> abcdefgh")).toBe(1);
+    expect(readline.getCursor()).toBe(12);
+    expect(term.vt.cursor()).toEqual([2, 4]);
+  });
+
+  test("재그리기 대기 중 열 수가 바뀌면 콜백이 새 열 수로 입력줄을 한 번 그린다", () => {
+    const { term, readline } = setup(10, 8);
+    void readline.read("> ");
+    term.type("abcdefghijkl");
+    term.feed(ARROW_LEFT);
+
+    term.asyncWrite = true;
+    void readline.printAboveRaw("t\n", "");
+    term.resize(20, 8);
+    expect(term.vt.screen()).toBe("t");
+    term.flush();
+
+    expect(term.vt.screen()).toBe("t\n> abcdefghijkl");
+    expect(count(term.vt.screen(), "> abcdefgh")).toBe(1);
+    expect(readline.getCursor()).toBe(11);
+    expect(term.vt.cursor()).toEqual([1, 13]);
+  });
+
+  test("재그리기 중이 아니면 리사이즈는 지금처럼 입력줄을 새 크기로 다시 그린다", () => {
+    const { term, readline } = setup(10, 8);
+    void readline.read("> ");
+    term.type("abcdefghijkl");
+
+    term.resize(20, 8);
+
+    expect(term.vt.screen()).toBe("> abcdefghijkl");
+    expect(term.vt.cursor()).toEqual([0, 14]);
   });
 });

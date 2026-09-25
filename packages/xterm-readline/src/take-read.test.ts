@@ -25,6 +25,7 @@ class StubTerminal {
   };
   public vt: VTerm;
   private onDataHandlers: ((data: string) => void)[] = [];
+  private onResizeHandlers: ((size: { cols: number; rows: number }) => void)[] = [];
   private queue: (() => void)[] = [];
 
   constructor(cols: number, rows: number) {
@@ -39,8 +40,17 @@ class StubTerminal {
     return { dispose: () => {} };
   }
 
-  onResize(_handler: (size: { cols: number; rows: number }) => void) {
+  onResize(handler: (size: { cols: number; rows: number }) => void) {
+    this.onResizeHandlers.push(handler);
     return { dispose: () => {} };
+  }
+
+  /** 창 크기 변경을 흉내 낸다. xterm처럼 크기를 먼저 바꾼 뒤 리스너에 알린다. */
+  resize(cols: number, rows: number) {
+    this.cols = cols;
+    this.rows = rows;
+    this.vt.resize(cols, rows);
+    for (const handler of this.onResizeHandlers) handler({ cols, rows });
   }
 
   attachCustomKeyEventHandler(_fn: (event: KeyboardEvent) => boolean) {
@@ -688,5 +698,32 @@ describe("takeRead와 prefill 왕복", () => {
     expect(term.vt.screen()).toBe(before.screen);
     expect(term.vt.cursor()).toEqual(before.cursor);
     expect(readline.getCursor()).toBe(taken.cursor);
+  });
+});
+
+describe("takeRead와 재그리기 대기 중 리사이즈", () => {
+  test("재그리기 대기 중 리사이즈 뒤 takeRead하면 화면에 흔적이 없고 새 소비자가 정상 크기로 그린다", () => {
+    const { term, readline } = setup(10, 8);
+    void readline.read("> ").catch(() => {});
+    term.type("abcdefghijkl");
+
+    term.asyncWrite = true;
+    void readline.printAboveRaw("t\n", "");
+    term.resize(20, 8);
+    const taken = readline.takeRead();
+    term.flush();
+
+    expect(taken).toEqual({ text: "abcdefghijkl", cursor: 12 });
+    // 리사이즈가 화면에 없는 입력줄을 그리지 않았으므로 지울 흔적도 없다.
+    expect(term.vt.screen()).toBe("t");
+    expect(term.vt.cursor()).toEqual([1, 0]);
+
+    // 새 소비자(예: 실행창)가 가져간 입력을 새 열 수로 그린다.
+    term.asyncWrite = false;
+    void readline
+      .read("> ", { prefill: taken!.text, prefillCursor: taken!.cursor })
+      .catch(() => {});
+    expect(term.vt.screen()).toBe("t\n> abcdefghijkl");
+    expect(term.vt.cursor()).toEqual([1, 14]);
   });
 });
