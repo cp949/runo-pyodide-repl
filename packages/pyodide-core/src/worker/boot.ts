@@ -23,6 +23,7 @@ import type { ConsoleSinks } from "./core-console";
 import type { WorkerDriver } from "./driver";
 import { connectInterrupts } from "./interrupt-buffer";
 import { startInterruptWatch } from "./interrupt-watch";
+import type { WorkerPlugin } from "./plugin";
 import type { InterruptIdle } from "./sigint-handler";
 import { createStdinCallback } from "./stdin-callback";
 import { suppressWebLoopReraise } from "./webloop-reraise";
@@ -33,6 +34,8 @@ export interface BootDeps {
 
 export interface BootOptions extends BootDeps {
   driver: WorkerDriver;
+  /** 없으면 플러그인 단계가 없다. 배열 순서대로 하나씩 await한다(`WorkerPlugin`). */
+  plugins?: readonly WorkerPlugin[];
 }
 
 /**
@@ -44,9 +47,10 @@ const CORE_WORKER_HANDLERS = {};
 
 /**
  * 순서: driver 옵션 검증(`parseOptions`) → driver 세션 생성 → RPC 생성(core + driver 핸들러 합성) → loadPyodide → interrupt 공개
- * API 확인 → `driver.createConsole` → `driver.probe` → suppressWebLoopReraise → connectInterrupts → setStdin → ntf ready →
+ * API 확인 → 플러그인 `prepare`(배열 순서, 하나씩 await) → `driver.createConsole` → `driver.probe` → suppressWebLoopReraise → connectInterrupts → setStdin → ntf ready →
  * 감시 타이머 시작 → `driver.run`(00-architecture.md 3.1(5)). interrupt 공개 API(`setInterruptBuffer`·`checkInterrupt`)가 없으면
- * Ctrl+C가 성립하지 않아 콘솔을 만들기 전에 loadFailed로 시작을 거부한다. 비공개 API 지점(driver `probe` + core 4지점)은 부팅 중
+ * Ctrl+C가 성립하지 않아 콘솔을 만들기 전에 loadFailed로 시작을 거부한다. 플러그인(RD-023)은 그 확인을 통과한 pyodide를 받고, 던지거나
+ * reject하면 `plugin "<name>": ` 접두를 붙여 같은 catch의 loadFailed로 간다(`connectInterrupts` 전이라 정리할 설치가 없다). 비공개 API 지점(driver `probe` + core 4지점)은 부팅 중
  * 한 번 탐지해 `ready` 페이로드 `{ pyodideVersion, versionMismatch, degraded, details? }`로 알린다(RD-021). worker는 경고를
  * 내지 않고 main 세션이 문제가 있을 때만 `console.warn`을 한 번 낸다. `suppressWebLoopReraise`(WebLoop의 KeyboardInterrupt·SystemExit 재보고 억제, 03-ctrl-c.md 2.8)는 콘솔 생성
  * 직후·Ctrl+C 연결 전에 한 번만 부른다. `connectInterrupts`(SIGINT 핸들러 설치 → 남은 SIGINT 폐기 → 버퍼 연결)는 부팅 중
@@ -84,6 +88,15 @@ export async function bootWorker(
       throw new Error(
         `pyodide에 Ctrl+C 공개 API(${missingApi.join(", ")})가 없어 시작할 수 없습니다`,
       );
+    }
+    // 플러그인 준비. 콘솔 생성 전이라 플러그인이 등록한 것(JS 모듈 등)이 콘솔·driver 시작 코드에서 보인다. 순서대로 하나씩 기다린다.
+    for (const plugin of options.plugins ?? []) {
+      try {
+        await plugin.prepare({ pyodide });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`plugin "${plugin.name}": ${reason}`, { cause: error });
+      }
     }
     pyconsole = session.createConsole({ pyodide, sinks, frame });
     // driver가 기대하는 비공개 API 지점 탐지. 콘솔 생성 직후 한 번이고 던지면 loadFailed다.

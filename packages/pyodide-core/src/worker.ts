@@ -43,5 +43,6 @@ export type {
   RunDriverOptions,
   RunOutcome,
 } from "./worker/run-driver";
+export type { PluginContext, WorkerPlugin } from "./worker/plugin";
 export { runWorker } from "./worker/run-worker";
 export type { RunWorkerOptions } from "./worker/run-worker";

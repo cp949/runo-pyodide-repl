@@ -1,50 +1,46 @@
 /**
- * worker 쪽 진입점(`runWorker({ driver })`). 앱의 얇은 worker 파일이 driver를 골라 부른다. main이 보낸 초기화 프레임을 받아
- * 검증한 뒤 CDN 로더를 주입해 부팅 시퀀스(`bootWorker`)를 시작한다.
+ * worker 쪽 진입점(`runWorker({ driver, plugins? })`). 앱의 얇은 worker 파일이 driver를 골라 부른다. main이 보낸 초기화 프레임을 받아
+ * 검증한 뒤 CDN 로더를 주입해 부팅 시퀀스(`bootWorker`)를 시작한다. 프레임 수신은 이 모듈이 평가될 때(worker 전역이면)
+ * 걸리는 수신기(`init-receiver.ts`)가 맡아, `runWorker`를 늦게 불러도(다른 모듈의 top-level await 뒤 등) 프레임을 잃지 않는다.
  */
-import { parseInitFrame } from "../protocol/init-frame";
 import { bootWorker } from "./boot";
 import type { WorkerDriver } from "./driver";
+import {
+  createInitReceiver,
+  isWorkerGlobalScope,
+  type InitReceiver,
+} from "./init-receiver";
 import { loadPyodideFromCdn } from "./load-pyodide";
+import type { WorkerPlugin } from "./plugin";
 
 export interface RunWorkerOptions {
   driver: WorkerDriver;
-}
-
-/** 초기화 프레임이라고 주장하는 메시지(`kind === "init"`인 객체)인가. 필드 검증은 `parseInitFrame`이 한다. */
-function isInitCandidate(data: unknown): boolean {
-  return (
-    typeof data === "object" &&
-    data !== null &&
-    !Array.isArray(data) &&
-    (data as { kind?: unknown }).kind === "init"
-  );
+  /** 부팅 중 `loadPyodide` 뒤·콘솔 생성 앞에서 배열 순서대로 하나씩 준비한다(`WorkerPlugin`). */
+  plugins?: readonly WorkerPlugin[];
 }
 
 /**
- * 모듈 본문에서 동기로 부른다(첫 await 이전, 01-protocols.md 4절). 리스너는 init 후보만 소비한다: 배열 메시지(동기 브리지 등
- * 다른 프로토콜)는 조용히 넘기고, `kind`가 init이 아닌 다른 메시지는 오류를 남기되 리스너를 유지해 뒤에 오는 init을 받는다.
- * init 후보를 받으면 리스너를 떼고(이후 네이티브 `message` 채널은 쓰지 않는다) 프레임을 검증한다. 필드 오류는 프레임을 버린다.
+ * 모듈 평가 시점의 수신기(최상위 문장이라 이 모듈을 import하는 순간 걸린다). worker 전역이 아니면 만들지 않고 `runWorker`가
+ * 호출될 때 만든다(jsdom·node 시험). 번들에서 이 문장이 빠지면 늦은 `runWorker`가 프레임을 잃는다(`dist` 정적 확인 대상).
+ */
+const moduleReceiver: InitReceiver | undefined = isWorkerGlobalScope()
+  ? createInitReceiver(self)
+  : undefined;
+
+/**
+ * init 프레임이 오면(이미 와 있으면 즉시) 검증된 프레임으로 부팅한다. `runWorker`는 worker당 한 번만 부를 수 있다: 두 번째
+ * 호출은 던진다(같은 프레임으로 두 번 부팅하지 않는다). worker 전역이 아니면 호출마다 자기 수신기를 만든다(시험용).
  */
 export function runWorker(options: RunWorkerOptions): void {
-  const listener = (event: Event): void => {
-    const data = (event as MessageEvent).data as unknown;
-    if (Array.isArray(data)) return;
-    if (isInitCandidate(data)) self.removeEventListener("message", listener);
-    let frame;
-    try {
-      frame = parseInitFrame(data);
-    } catch (error) {
-      console.error("[worker] 초기화 프레임이 올바르지 않다", error);
-      return;
-    }
+  const receiver = moduleReceiver ?? createInitReceiver(self);
+  receiver.take((frame) => {
     // 부팅 중 예상하지 못한 예외가 처리되지 않은 rejection으로 새지 않게 남긴다.
     bootWorker(frame, {
       driver: options.driver,
       loadPyodide: loadPyodideFromCdn,
+      plugins: options.plugins,
     }).catch((error: unknown) => {
       console.error("[worker] 부팅 시퀀스 예외", error);
     });
-  };
-  self.addEventListener("message", listener);
+  });
 }
