@@ -1,7 +1,7 @@
 /**
  * worker 플러그인 계약(RD-023). 앱의 worker 파일이 `runWorker({ driver, plugins })`로 넘기면 부팅 시퀀스가 `loadPyodide`와
  * interrupt 공개 API 확인 뒤, 콘솔 생성 앞에서 배열 순서대로 하나씩 `prepare`를 await한다(`bootWorker`). 비동기 준비(예:
- * `await coincident()` 뒤 `pyodide.registerJsModule`)를 부팅 안에서 마치는 자리다. 해제 훅은 없다(worker는 terminate로 끝난다).
+ * `await` 동기 브리지 초기화 뒤 `pyodide.registerJsModule`)를 부팅 안에서 마치는 자리다. 해제 훅은 없다(worker는 terminate로 끝난다).
  */
 import type { PyodideInterface } from "pyodide";
 

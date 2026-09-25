@@ -78,7 +78,7 @@ export interface InitFrameTarget {
 }
 
 /**
- * main이 worker 생성 직후 보내는 core의 첫 메시지다. worker가 받는 첫 메시지라는 보장은 아니다: dom-bridge의 coincident `Worker`
+ * main이 worker 생성 직후 보내는 core의 첫 메시지다. worker가 받는 첫 메시지라는 보장은 아니다: dom-bridge의 `Worker` 래퍼
  * 생성자는 부트스트랩 배열을 먼저 보낸다(01-protocols.md 4절). `rpcPort`는 복제할 수 없으므로 전송 목록에 담는다.
  */
 export function postInitFrame(target: InitFrameTarget, frame: InitFrame): void {
