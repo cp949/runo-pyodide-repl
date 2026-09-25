@@ -17,20 +17,20 @@
 
 core는 `WorkerPlugin` 타입만 쓰고(런타임 import 0) `peerDependencies`(+`devDependencies`)다. 소비자가 core를 한 벌만 설치한다. `pyodide`는 core의 optional peer로 전이되므로 이 패키지는 `devDependencies`(시험)로만 둔다. tarball의 peer 범위는 `workspace:*`가 정확 버전(현재 `0.0.0`)으로 치환된다(버전 동기 전제).
 
-`sideEffects`는 이 패키지만 배열이다(`["./dist/worker.mjs", "./dist/bootstrap-observer-install*.mjs", "./src/worker.ts", "./src/bootstrap-observer-install.ts"]`). 다른 패키지는 `false`다. `false`이면 `import "…/worker"`처럼 부수효과만 쓰는 import가 번들에서 통째로 지워져 부트스트랩 리스너가 빠진다(스크래치 Vite 빌드로 확인: 부수효과 전용 진입점이 `false`에서 70B, 배열 설정에서 10,147B). 관찰기 청크는 파일 이름에 해시가 붙어 글로브(`bootstrap-observer-install*.mjs`)가 필요하다. `package-boundary.test.ts`와 `smoke:pack`이 이 배열을 고정한다.
+`sideEffects`는 이 패키지만 배열이다(`["./dist/worker.mjs", "./dist/bootstrap-observer-install*.mjs", "./src/worker.ts", "./src/bootstrap-observer-install.ts"]`). 다른 패키지는 `false`다. `false`이면 `import "…/worker"`처럼 부수효과만 쓰는 import가 번들에서 통째로 지워져 부트스트랩 리스너가 빠진다. 스크래치 Vite 프로덕션 빌드(lib, dist 소비)로 잰 부수효과 전용 진입점 산출물은 현재 배열에서 9,128B(관찰기 1·coincident 부트스트랩 리스너 2, 관찰기가 앞), `sideEffects: false`로 바꾸면 0B다(RD-023 DELTA-04, `_works/_completed/20260925-32-rd-023-dom-bridge/verify/delta04/treeshake/`). 관찰기 청크는 파일 이름에 해시가 붙어 글로브(`bootstrap-observer-install*.mjs`)가 필요하다: 글로브를 빼면 산출물은 8,005B로 남지만 관찰기가 0이다(같은 폴더 `treeshake-mutation-exact-stub-only.log`). DELTA-03의 70B(`false`)·10,147B(배열)는 글로브가 없던 옛 배열에서 잰 값이다. 배열 전체(글로브 포함)를 고정하는 것은 `src/package-boundary.test.ts`뿐이고, `smoke:pack`은 tarball의 `sideEffects`가 배열이고 `./dist/worker.mjs`를 포함하는지만 본다(`scripts/pack-smoke.mjs` 403~404행).
 
 ## 16.2 공개 API
 
 내부 계약이고 공개 API로 확정하지 않았다. 이름은 `src/index.ts`·`src/worker.ts`의 export와 같다.
 
-| 진입점                                  | export                 | 시그니처·내용                                                                                                                                                         |
-| --------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@cp949/runo-pyodide-dom-bridge`        | `createBridgeMain`     | `(): BridgeMain` = `{ Worker, native }`. coincident main을 옵션 없이 한 번만 부르고 결과를 공유한다. `serviceWorker` 등 coincident 옵션은 통과시키지 않는다           |
-|                                         | `isDomBridgeSupported` | `(): boolean`. `crossOriginIsolated === true`이고 growable `SharedArrayBuffer` 생성이 성공하면 참. UA를 판별하지 않는다                                               |
-|                                         | 타입                   | `BridgeMain`·`BridgeMainWorker`(`Worker` + `proxy: Record<string, unknown>`)                                                                                          |
-| `@cp949/runo-pyodide-dom-bridge/worker` | `domBridge`            | `(): WorkerPlugin`. `name: "dom-bridge"`                                                                                                                              |
-|                                         | `bridge`               | `(): Promise<WorkerBridge>` = `{ proxy, window, native }`. `coincident()`를 worker당 한 번만 부르고 결과를 공유한다(메모이즈, reject도 공유). `ffi`는 노출하지 않는다 |
-|                                         | 타입                   | `WorkerBridge`                                                                                                                                                        |
+| 진입점                                  | export                 | 시그니처·내용                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@cp949/runo-pyodide-dom-bridge`        | `createBridgeMain`     | `(): BridgeMain` = `{ Worker, native }`. coincident main(`coincidentMain()`)을 옵션 없이 한 번만 부르고 결과를 공유한다. 돌려준 `Worker` 생성자의 두 번째 인자는 런타임에 coincident로 그대로 간다(`serviceWorker`·`import`·`reflected_ffi_timeout`도 걸러내지 않는다). 타입이 표준 `WorkerOptions`로 좁혀 TS 초과 속성 검사가 1차로 막을 뿐 런타임 차단은 없다 |
+|                                         | `isDomBridgeSupported` | `(): boolean`. `crossOriginIsolated === true`이고 growable `SharedArrayBuffer` 생성이 성공하면 참. UA를 판별하지 않는다                                                                                                                                                                                                                                         |
+|                                         | 타입                   | `BridgeMain`·`BridgeMainWorker`(`Worker` + `proxy: Record<string, unknown>`)                                                                                                                                                                                                                                                                                    |
+| `@cp949/runo-pyodide-dom-bridge/worker` | `domBridge`            | `(): WorkerPlugin`. `name: "dom-bridge"`                                                                                                                                                                                                                                                                                                                        |
+|                                         | `bridge`               | `(): Promise<WorkerBridge>` = `{ proxy, window, native }`. `coincident()`를 worker당 한 번만 부르고 결과를 공유한다(메모이즈, reject도 공유). `ffi`는 노출하지 않는다                                                                                                                                                                                           |
+|                                         | 타입                   | `WorkerBridge`                                                                                                                                                                                                                                                                                                                                                  |
 
 main 도우미는 Worker를 대신 만들어 주지 않는다. Vite가 worker를 번들하려면 소비자가 `new Worker(new URL(리터럴, import.meta.url), { type: "module" })`를 직접 써야 하고, 생성자의 지역 이름이 `Worker`여야 알아본다:
 
@@ -55,12 +55,12 @@ const createWorker = () =>
 ```ts
 // app.worker.ts
 import { domBridge } from "@cp949/runo-pyodide-dom-bridge/worker"; // 첫 정적 import
-import { runDriver, runWorker } from "@cp949/runo-pyodide-core/worker"; // core/worker도 정적 import
+import { runDriver, runWorker } from "@cp949/runo-pyodide-core/worker"; // 그 다음, top-level await가 있는 모듈의 import보다 앞
 runWorker({ driver: runDriver, plugins: [domBridge()] });
 ```
 
-- **dom-bridge `./worker`가 worker 파일의 첫 정적 import여야 한다.** coincident는 `coincident/window/worker`가 평가될 때 부트스트랩 리스너를 `{ once: true }`로 한 번만 건다. 이 모듈이 늦게(다른 모듈의 top-level await 뒤·동적 `import()`) 평가되면 이미 도착한 부트스트랩을 놓치고 `coincident()`가 영원히 대기한다. 위반은 `prepare`가 명시 오류로 알린다(16.5). 순서를 바꾸지 않는 한 `runWorker` 호출 위치는 자유다.
-- **`core/worker`는 정적 import여야 하고 `runWorker` 호출 시점은 자유다.** core `./worker`가 모듈 평가 시점에 init 프레임을 버퍼링하므로 `runWorker`를 늦게 불러도 버퍼에서 부팅한다(`01-protocols.md` 4절). 브라우저 확인은 `?mode=late-run`(init 프레임이 도착한 뒤 `runWorker`를 부르는 worker)이 `ready`가 되는 것이다. "모듈 본문에서 동기로 부른다"를 규칙으로 요구하지 않는다.
+- **dom-bridge `./worker`가 worker 파일의 첫 정적 import여야 한다.** coincident는 `coincident/window/worker`가 평가될 때 부트스트랩 리스너를 `{ once: true }`로 한 번만 건다. 이 모듈이 늦게(다른 모듈의 top-level await 뒤·동적 `import()`) 평가되면 이미 도착한 부트스트랩을 놓치고 `coincident()`가 영원히 대기한다. 위반은 `prepare`가 명시 오류로 알린다(16.5).
+- **`core/worker`는 top-level await가 있는 모듈의 import보다 앞선 정적 import여야 한다(dom-bridge `./worker` 다음). 이 순서를 지키면 `runWorker` 호출 시점(파일 안의 `await` 뒤 등)은 자유다.** core `./worker`가 모듈 평가 시점에 init 프레임을 버퍼링하므로 `runWorker`를 늦게 불러도 버퍼에서 부팅한다. top-level await 모듈을 core `./worker`보다 먼저 import하면 Vite 번들에서 수신기 등록 문장이 그 `await` 뒤로 밀린다(번들 순서는 확인, 그 사이 init 유실은 추정·브라우저 미실측, `01-protocols.md` 4절). 브라우저 확인은 `?mode=late-run`(init 프레임이 도착한 뒤 `runWorker`를 부르는 worker)이 `ready`가 되는 것이다. "모듈 본문에서 동기로 부른다"를 규칙으로 요구하지 않는다.
 - 첫 import는 `import "…/worker"` 부수효과 전용 형태여도 되지만 `sideEffects` 배열(16.1)이 전제다. 소비자 번들러 설정이 이 패키지의 `sideEffects`를 무시하거나 `false`로 덮으면 부수효과 전용 import가 지워져 관찰기와 부트스트랩 리스너가 빠질 수 있다(측정한 것은 이 패키지 자신이 `sideEffects: false`일 때다).
 - coincident는 평가될 때 전역 `EventTarget.prototype.addEventListener`를 패치한다(스파이크 S7). 전역 패치 뒤에도 core 채널(`MessagePort` `{ once }`·`onmessage`·`AbortSignal` `{ once }` 리스너)은 정상이다(`e2e:dom-bridge` S7). 그래도 REPL·실행창 같은 다른 화면이 패치를 받지 않게, demo는 dom-bridge 화면만 그 모듈을 평가하도록 `React.lazy`로 지연 import한다(`App.tsx`).
 - Vite dev는 worker에서만 import되는 bare 모듈(`coincident/window/worker`)을 브라우저가 처음 요청할 때 발견해 "의존성 최적화 → 전체 다시 불러오기"를 일으킨다. demo는 `vite.config.ts`의 `optimizeDeps.entries`에 `src/*.worker.ts`를 두어 서버 시작 때 미리 최적화한다. 소비자도 같은 설정이 필요할 수 있다.
@@ -138,7 +138,7 @@ coincident 동기 호출 동안 worker는 `Atomics.pause` 바쁜 루프처럼 �
 | core `createRunner` 직접    | 0~5(진단 프로브 0, `run4` 5) | 0   | 0   |
 | `<PythonRunner>` + terminal | 60~90(60·90·60·69)           | 0   | 0   |
 
-스파이크(core 직접, `native: true`)는 0/500이었다. **이번 core 직접 5/100과의 차이는 원인을 확인하지 않았다.** view 경로에서 C만 역전이 큰 이유도 원인 미확인이고(가설: terminal 출력 렌더 지연, 검증하지 않았다), 방식 Ag·Ar은 두 경로 모두 0이었다. 값은 실행마다 변동한다. 재측정과 원인 조사는 후속 이슈(`.scratch/dom-bridge-followups/issues/03-output-dom-arrival-order-inversion.md`, `deferred`)이고 재개 조건은 순서에 의존하는 소비자 요구가 생길 때다.
+스파이크(core 직접, `native: true`)의 0/500은 가드 없는 창의 함수 호출(`browser.window.spikeMark`) 방식으로 잰 값이다(`_works/_completed/20260925-31-rd-023-spike/RESULT.md` E4). 같은 함수 호출 방식인 이번 Ar·Ag는 core 직접 0/100으로 스파이크와 어긋나지 않는다. core 직접 5/100은 스파이크가 재지 않은 방식 C(title 대입 + `MutationObserver`)의 값이라 스파이크 0/500과 직접 비교할 수 없다. **방식 C의 core 직접 0~5/100 변동은 원인을 확인하지 않았다.** view 경로에서 C만 역전이 큰 이유도 원인 미확인이고(가설: terminal 출력 렌더 지연, 검증하지 않았다), 방식 Ag·Ar은 두 경로 모두 0이었다. 값은 실행마다 변동한다. 재측정과 원인 조사는 후속 이슈(`.scratch/dom-bridge-followups/issues/03-output-dom-arrival-order-inversion.md`, `deferred`)이고 재개 조건은 순서에 의존하는 소비자 요구가 생길 때다.
 
 ## 16.10 재시작과 옛 worker
 
@@ -169,7 +169,7 @@ CSP(`worker-src 'self'` 등)에서 위반을 내지 않는 coincident 진입점�
 | 다른 패키지의 금지 유지 | core·terminal·repl·react 의존 트리·dist·소비자 트리 | 각 `package-boundary.test.ts`, 옵션 없는 `check-dist`, `pnpm smoke:pack` 주 소비자(dom-bridge를 뺀 5개 패키지) |
 | dom-bridge 자기 검사    | 정확한 의존 버전·`sideEffects`·core는 peer          | `src/package-boundary.test.ts`, `pnpm smoke:pack` dom-bridge 소비자                                            |
 
-규칙(`--allow-sync-bridge`): 코드 파일(`.mjs`·`.ts` 등, 시험·소스맵 제외)에서 주석을 지운 뒤 (a) coincident·reflected-ffi 모듈 지정자가 위 두 개 밖이면(직접 `reflected-ffi` import 포함) 위반, (b) `evaluate`·`serviceWorker`·`coincident/sync`·`window.import`·멤버 `.import(`가 있으면 위반, (c) `coincident/window/worker`를 import하는 `.mjs`는 그보다 앞서 `bootstrap-observer-install`을 import해야 한다(16.5). `pyodide` 런타임 import 금지는 옵션에서도 유지한다. 한계: 주석 제거가 정규식이라 문자열 리터럴 속 `//`·`/*`를 파싱하지 않는다(현재 소스·dist에서 오판은 재현되지 않았고 변이 검사는 killed다). 넓은 토큰(`evaluate`)은 이 패키지 전용이라 거짓 위반이 나면 소스 표현을 바꾼다.
+규칙(`--allow-sync-bridge`): 코드 파일(`.mjs`·`.cjs`·`.js`·`.jsx`·`.mts`·`.cts`·`.ts`·`.tsx`, `.d.mts`·`.d.ts` 포함, 시험·소스맵 제외)에서 주석을 지운 뒤 (a) coincident·reflected-ffi 모듈 지정자가 위 두 개 밖이면(직접 `reflected-ffi` import 포함) 위반, (b) `evaluate`·`serviceWorker`·`coincident/sync`·`window.import`·멤버 `.import(`가 있으면 위반, (c) `coincident/window/worker`를 import하는 `.mjs`는 그보다 앞서 `bootstrap-observer-install`을 import해야 한다(16.5). 모듈 지정자는 따옴표 문자열과 `${`가 없는 템플릿 리터럴(``import(`x`)``·``require(`x`)``)을 인식한다(`${`가 있으면 런타임 경로라 지정자로 보지 않는다). 주석 제거는 블록 주석과 줄 주석을 한 정규식의 대안으로 앞에서부터 지워, 줄 주석 속 `/*`가 다음 `*/`까지 실제 코드를 지우지 않는다. 코드도 소스맵도 아닌 파일(`.html`·`.json` 등)은 허용 모드에서도 coincident 금지 문자열 검사를 받는다(CSP 규칙은 코드 문법만 보므로 건너뛰면 아무 검사도 받지 않는다). `--allow-sync-bridge`가 다른 5개 패키지의 `check-dist` 스크립트에 없음은 dom-bridge `src/package-boundary.test.ts`가 고정한다. 확장자 `.jsx`·`.tsx`, 템플릿 리터럴 지정자, 주석 제거 방식, 코드 밖 파일 검사, 다른 패키지의 플래그 부재 시험은 커밋 `035a95d`가 더했다. `pyodide` 런타임 import 금지는 옵션에서도 유지한다. 한계: 주석 제거가 정규식이라 코드의 문자열 리터럴 속 `/*`·` //`를 파싱하지 않는다(현재 소스·dist에서 오판은 재현되지 않았고 변이 검사는 killed다, 이슈 `dom-bridge-followups/01`). 넓은 토큰(`evaluate`)은 이 패키지 전용이라 거짓 위반이 나면 소스 표현을 바꾼다.
 
 ## 16.13 데모와 검증
 
