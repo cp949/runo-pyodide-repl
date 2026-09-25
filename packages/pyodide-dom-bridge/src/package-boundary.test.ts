@@ -5,6 +5,10 @@
  * ② 다른 패키지(core·terminal·repl·react·xterm-readline)의 의존 트리에 dom-bridge·coincident가 새지 않는다(기존 금지 보장 유지).
  * core·terminal·repl·react 자신의 `package-boundary.test.ts`는 그대로 두고, 여기서는 반대 방향(dom-bridge가 생긴 뒤에도
  * 그 트리들에 dom-bridge가 없다)을 본다.
+ * ③ `check-dist`의 허용 모드 플래그(`--allow-sync-bridge`)가 다른 5개 패키지의 `scripts`로 새지 않는다.
+ * ④ 배포 패키지 6종 모두 `publishConfig.exports`의 키가 `exports`와 같고 `development` 조건이 없다. 키가 어긋나면 tarball에서 진입점이
+ * 빠지는데 `smoke:pack`의 정적 exports 검사는 tarball에 남은 `exports`만 보므로 원리적으로 못 잡는다(Node import·Vite 해석 검사는
+ * `scripts/pack-smoke.mjs`의 `ENTRY_POINTS`·`BRIDGE_ENTRY_POINTS`에 있는 진입점만 잡는다).
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,6 +23,7 @@ const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 const manifest = JSON.parse(
   readFileSync(`${PACKAGE_DIR}/package.json`, "utf8"),
 ) as PackageManifest & {
+  scripts?: Record<string, string>;
   sideEffects?: unknown;
   exports?: Record<string, Record<string, string> | string>;
   publishConfig?: { exports?: Record<string, Record<string, string> | string> };
@@ -109,5 +114,76 @@ describe("다른 패키지의 의존 트리에는 dom-bridge·coincident가 없�
 
     expect(findForbiddenDependencies(names)).toEqual([]);
     expect(names.has("@cp949/runo-pyodide-dom-bridge")).toBe(false);
+  });
+});
+
+/** 저장소 안 패키지 폴더(`../../<name>/`)의 `package.json`. */
+function readManifest(relative: string) {
+  return JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL(`${relative}/package.json`, import.meta.url)),
+      "utf8",
+    ),
+  ) as PackageManifest & {
+    name: string;
+    scripts?: Record<string, string>;
+    exports?: Record<string, unknown>;
+    publishConfig?: { exports?: Record<string, unknown> };
+  };
+}
+
+describe("check-dist 허용 모드 플래그는 dom-bridge에만 있다", () => {
+  test.each([
+    ["core", "../../pyodide-core"],
+    ["terminal", "../../pyodide-terminal"],
+    ["repl", "../../pyodide-repl"],
+    ["react", "../../pyodide-react"],
+    ["xterm-readline", "../../xterm-readline"],
+  ])(
+    "%s의 package.json scripts에 --allow-sync-bridge가 없고 check-dist는 금지 문자열 검사를 받는다",
+    (_이름, relative) => {
+      const scripts = readManifest(relative).scripts ?? {};
+
+      // check-dist가 있어야 "플래그 없음"이 금지 문자열 검사를 받는다는 뜻이 된다(스크립트가 사라지면 이 단언이 빈 통과가 된다).
+      expect(scripts["check-dist"]).toContain("scripts/check-dist.mjs");
+      for (const [name, command] of Object.entries(scripts))
+        expect(command, name).not.toContain("--allow-sync-bridge");
+    },
+  );
+
+  test("dom-bridge 자신은 허용 모드로 검사한다(대조)", () => {
+    expect(manifest.scripts?.["check-dist"]).toContain("--allow-sync-bridge");
+  });
+});
+
+describe("배포 패키지 6종의 tarball exports(publishConfig)는 작업공간 exports와 키가 같고 development 조건이 없다", () => {
+  test.each([
+    ["core", "../../pyodide-core"],
+    ["terminal", "../../pyodide-terminal"],
+    ["repl", "../../pyodide-repl"],
+    ["react", "../../pyodide-react"],
+    ["xterm-readline", "../../xterm-readline"],
+    ["dom-bridge", ".."],
+  ])("%s", (_이름, relative) => {
+    const target = readManifest(relative);
+    const workspaceExports = target.exports ?? {};
+    const publishExports = target.publishConfig?.exports;
+
+    expect(publishExports, target.name).toBeDefined();
+    expect(Object.keys(publishExports ?? {}).sort()).toEqual(
+      Object.keys(workspaceExports).sort(),
+    );
+    // 값을 모두 훑어 `development` 조건 키가 어느 깊이에도 없음을 본다.
+    const conditionKeys: string[] = [];
+    const walk = (value: unknown) => {
+      if (value === null || typeof value !== "object") return;
+      for (const [key, inner] of Object.entries(value)) {
+        conditionKeys.push(key);
+        walk(inner);
+      }
+    };
+    walk(publishExports);
+    expect(conditionKeys).not.toContain("development");
+    expect(Object.keys(workspaceExports).length).toBeGreaterThan(0);
   });
 });

@@ -346,11 +346,13 @@ async function main(tmp) {
     console.log(
       `${name} exports 대상 ${collectExportTargets(manifest.exports).length}개, tarball 파일 ${packed.size}개, 없는 대상 ${missing.length}개`,
     );
-    // 뒤 단계(Vite 해석 검사)의 결과도 한 번에 보도록 실패는 모아 두었다가 마지막에 던진다.
-    if (missing.length > 0)
-      problems.push(
-        `${name} tarball exports에 배포 파일에 없는 대상이 있다:\n  ${missing.join("\n  ")}`,
-      );
+    // 뒤 단계(Vite 해석 검사)의 결과도 한 번에 보도록 실패는 모아 두었다가 마지막에 던진다. 뒤 단계가 먼저 던지면 모은 목록이
+    // 보이지 않으므로 목록은 발견 즉시 로그로도 찍는다.
+    if (missing.length > 0) {
+      const problem = `${name} tarball exports에 배포 파일에 없는 대상이 있다:\n  ${missing.join("\n  ")}`;
+      console.error(problem);
+      problems.push(problem);
+    }
     // core는 pyodide 타입을 노출하므로 optional peer로 선언한다. repl은 노출하지 않아 peer에 pyodide가 없어야 한다.
     const peerRange = manifest.peerDependencies?.pyodide;
     if (name === "@cp949/runo-pyodide-core") {

@@ -297,6 +297,131 @@ describe("check-dist 스크립트: --allow-sync-bridge(dom-bridge 예외)", () =
     expect(status, output).toBe(0);
   });
 
+  describe("주석 제거가 코드를 지우지 않는다", () => {
+    // 줄 주석 속 `/*`가 블록 주석 시작으로 잡히면 다음 `*/`(번들러의 `/* @__PURE__ */` 등)까지 실제 코드가 사라진다.
+    test("줄 주석 속 `/*` 뒤의 금지 import는 여전히 실패한다", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          '// 예: dist/*.mjs 파일\nimport "coincident/sync";\nconst x = /* @__PURE__ */ f();\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(1);
+      expect(output).toContain("coincident/sync");
+    });
+
+    test("줄 주석 속 `/*` 뒤의 관찰기 import 순서 위반도 실패한다", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          '// 예: dist/*.mjs 파일\nimport coincident from "coincident/window/worker";\nimport "./bootstrap-observer-install.mjs";\nconst x = /* @__PURE__ */ f();\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(1);
+      expect(output).toContain("뒤에 있다");
+    });
+
+    test("블록 주석 속 `//`는 뒤 코드를 가리지 않는다", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          '/* 주소: https://예시.test // 끝 */ import "coincident/sync";\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(1);
+      expect(output).toContain("coincident/sync");
+    });
+
+    test("주석을 지운 뒤 남은 올바른 코드는 통과한다(줄 주석 속 `/*`와 뒤의 `/* @__PURE__ */`)", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          '// 예: dist/*.mjs 파일\nimport "./bootstrap-observer-install.mjs";\nimport coincident from "coincident/window/worker";\nconst x = /* @__PURE__ */ f();\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(0);
+    });
+  });
+
+  describe("템플릿 리터럴 지정자", () => {
+    test.each([
+      ["import(`coincident/sw`)", "const m = await import(`coincident/sw`);\n"],
+      [
+        "require(`reflected-ffi/remote`)",
+        "const r = require(`reflected-ffi/remote`);\n",
+      ],
+    ])(
+      "`${` 없는 템플릿 리터럴 지정자(%s)도 허용 밖이면 실패한다",
+      (이름, 내용) => {
+        const dist = makeDist({ "worker.mjs": 내용 });
+
+        const { status, output } = runAllowSyncBridge(dist);
+
+        expect(status, 이름).toBe(1);
+        expect(output).toContain("CSP");
+      },
+    );
+
+    test("`${`가 있는 템플릿 import(런타임 경로)는 지정자로 보지 않는다", () => {
+      const dist = makeDist({
+        "worker.mjs": "const m = await import(`${base}pyodide-x.mjs`);\n",
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(0);
+    });
+  });
+
+  describe("코드 확장자 밖 파일", () => {
+    test.each([
+      ["worker.tsx", 'import c from "coincident/sw";\n'],
+      ["worker.jsx", 'import c from "coincident/sw";\n'],
+    ])("%s도 CSP 규칙을 받는다", (파일, 내용) => {
+      const dist = makeDist({ [파일]: 내용 });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, 파일).toBe(1);
+      expect(output).toContain(파일);
+      expect(output).toContain("CSP");
+    });
+
+    test.each([
+      [
+        "page.html",
+        '<script type="module">import "coincident/sync";</script>\n',
+      ],
+      ["bridge.json", '{"entry":"reflected-ffi/remote"}\n'],
+    ])(
+      "코드도 소스맵도 아닌 파일(%s)은 금지 문자열 검사를 받는다",
+      (파일, 내용) => {
+        const dist = makeDist({ "worker.mjs": "ok\n", [파일]: 내용 });
+
+        const { status, output } = runAllowSyncBridge(dist);
+
+        expect(status, 파일).toBe(1);
+        expect(output).toContain(파일);
+        expect(output).toContain("금지 문자열");
+      },
+    );
+
+    test("시험 파일(.test.tsx)은 CSP 검사에서 제외한다", () => {
+      const dist = makeDist({
+        "worker.mjs": "ok\n",
+        "worker.test.tsx": 'import "coincident/sync";\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(0);
+    });
+  });
+
   test("소스맵과 시험 파일은 CSP 검사에서 제외한다", () => {
     const dist = makeDist({
       "worker.mjs": "ok\n",

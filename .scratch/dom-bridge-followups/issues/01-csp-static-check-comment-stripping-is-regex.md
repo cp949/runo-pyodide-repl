@@ -16,3 +16,4 @@ dom-bridge 소스·dist에서 주석 제거 오판으로 위반을 놓치거나 
 ## Comments
 
 - 2026-09-25 등록 시점 분류: `deferred`. 규칙 본문은 `docs/design/16-dom-bridge.md` 16.12.
+- 2026-09-25 RD-023 사후 리뷰: 줄 주석 속 `/*`(예: `// dist/*.mjs`)가 블록 주석 시작으로 잡혀 다음 `*/`(번들러의 `/* @__PURE__ */` 등)까지 실제 코드를 지우던 경로는 고쳤다(두 주석을 한 정규식의 대안으로 앞에서부터 지움, 시험 `packages/pyodide-testkit/src/check-dist-script.test.ts` "주석 제거가 코드를 지우지 않는다"). 문자열 리터럴 속 `/*`·` //`는 여전히 파싱하지 않는다(이 이슈의 남은 범위, `deferred` 유지).
