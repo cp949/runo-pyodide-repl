@@ -882,7 +882,20 @@ RD-018·019가 `apps/demo/e2e/pty/`에 rd-008·015·016·019 기준 데이터와
 
 시나리오: CPython 3.14.4로 도구를 실행하면 저장소의 rd-015·016 기준 데이터와 같은 파일이 다시 만들어진다.
 
-완료 기준: 재생성 결과가 저장소 데이터와 같다(다르면 항목별 원인 기록). 실행 전제(인터프리터 경로, `pyte` 등, pty 24×80 `TERM=xterm`)를 `apps/demo/e2e/pty/README` 또는 `09-testing.md`에 적는다. 재측정 여부는 사용자가 정한다(ADR-0007).
+완료 기준(2026-09-26 그릴링 20건으로 구체화):
+
+- `apps/demo/e2e/pty/tools/`의 도구만으로 rd-015 7파일·rd-016 6파일을 재생성하고 비교기(`compare_baseline.py`)가 **판정값 차이 0**을 낸다. 판정값은 케이스별 `screen`·`cursor`·`res`·`mc`, 게이트 분류 4종, `native_vs_pyodide`의 차이 분류와 항목 목록이다. 차이가 나오면 도구 복원 실패이거나 편차 18·19의 전제가 깨진 것이므로 사용자 판단 사항으로 올린다.
+- 기준 대조 전에 같은 도구로 연속 2회 재생성해 자기 대조에서 판정값 차이 0을 먼저 확인한다. 경로·타임스탬프·환경 유래 차이(`*.meta.json`의 `cwd`·`stdlib_path`·`sys_path`·`python` 빌드 문자열은 이전 세션 경로라 **재현 불가능**)는 원인과 함께 `apps/demo/e2e/pty/REGEN.md`에 기록하고 진행한다.
+- 각 기준 파일의 생성 명령이 `REGEN.md`에 `파일 ← 명령` 표로 있다(훅의 `--with-mc` 상태 포함). `rd-015/res_s1.json`은 현행 출력명 규칙(`res_{group}_{lo}.json`)과 어긋나므로 `--out`으로 이름을 맞추고 내용으로 판정한다.
+- 기준 인터프리터는 `--python` > 환경변수 `PTY_PYTHON` > `PATH`의 `python3.14` 순으로 정해지고, 기대 버전(`3.14.4`)과 다르면 `--allow-version-mismatch` 없이는 중단한다. 홈 절대경로 기본값을 두지 않는다.
+- 실행 전제(인터프리터, `pyte==0.8.2`·`wcwidth==0.8.4` 설치 — LGPLv3라 벤더링하지 않는다, pty 24×80 `TERM=xterm`, `PYTHON_COLORS=0`·`NO_COLOR=1`·`PYTHON_HISTORY` 고정, 빈 임시 cwd)를 `apps/demo/e2e/pty/README.md`에 적는다. `09-testing.md`는 9.6.6을 새로 두고 요약·링크만 둔다(9.6.3의 이전 구현 경로는 그대로 남긴다).
+- 저장소 기준 데이터(`apps/demo/e2e/pty/rd-015|016/**`)는 읽기 전용이다. 재생성물은 `_works/<작업>/verify/regen/`에 쓴다. 재측정 여부는 사용자가 정한다(ADR-0007).
+
+범위 밖: `rd-008`·`rd-019` 스크립트 재작성(자립형이고 결과가 사람 판정이라 재생성 대조가 불가능), 이전 구현의 탐색 스크립트(`s*.py` 14개·`compare.py`·`node_complete.mjs`·pyodide 소스 복제본 3개 — 저장소 데이터를 만들지 않는다).
+
+검증 예산: pty 캡처 실행 ≤ 6회, node + 실제 pyodide 실행 ≤ 10회, L0 전체 1회. 브라우저 L1·L2·L3 0회(제품 코드·브라우저 경로를 건드리지 않는다).
+
+계획서: `_works/20260926-37-rd-025-pty-capture-tools/`.
 
 ### RD-026 — 재그리기 대기 창·접두 경로의 정확성 결함 4건
 
