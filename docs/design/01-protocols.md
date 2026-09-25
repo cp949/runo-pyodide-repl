@@ -172,7 +172,7 @@ interface InitFrame {
   - `kind === 'init'`인 객체(init 후보): 리스너를 떼고(이후 네이티브 `message` 채널은 쓰지 않는다) `parseInitFrame`으로 검증한다. 실패하면 필드 이름을 담아 `console.error("[worker] 초기화 프레임이 올바르지 않다", …)` 후 프레임을 버린다.
   - 그 밖의 메시지(`kind`가 다른 객체·`null`·원시값): 같은 `console.error`(`parseInitFrame`의 오류 메시지 포함)를 남기되 리스너를 **유지**해 뒤에 오는 init을 받는다. 무시하지 않고 로그를 남기는 것은 옛 `{ once: true }` 동작의 오류 표시를 유지하기 위해서다.
     검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`).
-- import 순서 조건의 근거(RD-023 사후 리뷰, 2026-09-25):
+- import 순서 조건의 근거(RD-023 사후 리뷰, 2026-09-25, 함정 `docs/traps/TRP-073-tla-import-before-core-worker-delays-init-receiver-in-bundle.md`):
   - 번들 순서(확인): Vite 8.3.0(rolldown) `vite build`는 모듈 코드를 import 순서대로 한 스코프에 이어 붙인다. worker 파일이 top-level await 모듈을 core `./worker`보다 먼저 import하면 산출물에서 수신기 등록 문장(`createInitReceiver(self)`)이 앞 모듈의 `await` 뒤에 놓이고, 순서를 바꾸면 앞에 놓인다(lib 모드와 `new Worker(new URL(…))` worker 번들 모두, `_works/_completed/20260925-32-rd-023-dom-bridge/verify/post-review/tla-bundle-order/result.log`).
   - init 유실(추정, 브라우저 미실측): 그 `await` 동안 도착한 init 프레임은 `message` 리스너가 없어 버려질 수 있다. HTML 명세 해석에 따른 추정이다: worker의 암묵 포트 메시지 큐는 모듈 스크립트 실행을 시작한 뒤 top-level await 완료를 기다리지 않고 활성화되고, 리스너가 없을 때 배달된 `message` 이벤트는 다시 오지 않는다.
   - 네이티브 ESM(dev 서버가 앱 모듈을 따로 제공할 때)에서는 형제 모듈이 앞 모듈의 top-level await를 기다리지 않고 평가돼 이 차이가 없다(node로 확인, 같은 폴더 `native/`).
