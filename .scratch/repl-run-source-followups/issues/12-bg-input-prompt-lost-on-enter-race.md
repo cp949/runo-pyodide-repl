@@ -12,7 +12,7 @@ REPL `>>> x = 41`이 열린 채 배경 task가 `input("bg> ")`을 부르면 work
 재현(jsdom, `packages/pyodide-repl/src/run-source.test.ts` 하니스와 같은 조립): `openPrompt(session, "x = 41")` → `session.output("bg> ")` → 화면 `bg> >>> x = 41` → `fake.type("\r")` → `rpc.notify("readInput", true)` → `fake.type("hello")`.
 
 - 실제: 화면 행 `["bg> >>> x = 41", "hello"]`
-- 기대(경합 없는 경로, read-guard 시험 "배경 input()의 프롬프트는 REPL 줄에서 떼어져 …"의 결과): `[">>> x = 41", "bg> hello"]`. 최소한 stdin 입력 행에 `bg> `가 있어야 한다.
+- 기대: `["bg> >>> x = 41", "bg> hello"]`(2026-09-25 그릴링 확정 4로 정정). Enter가 온 시점에 `bg> `는 이미 확정 행에 그려져 있어 되돌릴 수 없으므로, 경합 없는 경로의 결과 `[">>> x = 41", "bg> hello"]`를 그대로 요구하지 않는다. 판정 기준은 stdin 입력 행에 `bg> `가 있는 것이고, 프롬프트가 두 번 보이는 것은 받아들인다.
 
 RD-022b 전에는 sink가 읽기 중 출력도 꼬리에 먹여 이 경합에서도 `bg> `가 stdin 프롬프트가 됐다(코드 읽기, 실행 확인 안 함).
 
@@ -28,3 +28,4 @@ RD-022b 전에는 sink가 읽기 중 출력도 꼬리에 먹여 이 경합에서
 
 - 2026-09-25 등록 시점 분류: 같은 포트로 연달아 오는 두 알림 사이의 키 입력이라는 좁은 경합이고 jsdom 재현뿐, 사용자 시나리오 미관찰 → `deferred`. 설계 문서 기록: `docs/design/04-stdin-input.md` 3.2.
 - 2026-09-25 재분류 `deferred` → `open` (RD-026 승격, 예외 근거): 창이 두 알림 사이 태스크 한 번이라 브라우저 관찰을 요구하지 않고, `docs/design/04-stdin-input.md` 3.2의 접두→꼬리 이전 규칙 위반 + jsdom 재현을 근거로 삼는다(영향: 무엇을 입력해야 하는지 화면에 없다). 추적은 `ROADMAP.md` RD-026.
+- 2026-09-25 그릴링 확정 4·9(RD-026 계획, `_works/20260925-34-rd-026-redraw-window/`): 기대 화면을 위와 같이 정정했다. 수정 방식은 벤더가 Enter 제출 시점의 접두를 `lastAbovePrefix`로 1회 보관하고 `takeLastAbovePrefix()`로 꺼내며, `sinks.moveAbovePrefixToTail()`이 `abovePrefix()`가 `""`일 때만 폴백으로 쓴다. 만료는 `read()` 새 시작·`cancelRead()`·`dispose()`·소비 중 먼저 오는 것이다.
