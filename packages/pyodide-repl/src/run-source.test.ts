@@ -1438,6 +1438,7 @@ describe("Tab 완성 응답과 배경 출력 재그리기의 겹침", () => {
     return {
       session,
       first,
+      complete,
       finish: (value: SourceCompletion) => finish(value),
     };
   };
@@ -1470,5 +1471,75 @@ describe("Tab 완성 응답과 배경 출력 재그리기의 겹침", () => {
     session.fake.type(" os\r");
     await session.pump();
     await expect(first.promise).resolves.toBe("import os");
+  });
+
+  // 재그리기 대기 중 친 키는 벤더 큐에만 있고 버퍼에는 없다. 경합 판정이 큐를 봐야 배경 출력 유무와 무관하게 같은 결과가 된다(이슈 16).
+  test("대조: 배경 출력 없이 Tab 왕복 중 x를 치면 완성은 버려진다(impx)", async () => {
+    const { session, first, finish } = await openTab();
+    session.fake.type("x");
+    await session.pump();
+    finish({ completions: ["import"], start: 0 });
+    await settle();
+    await session.pump();
+
+    expect(session.vt.screen()).toBe(">>> impx");
+    session.fake.type("\r");
+    await session.pump();
+    await expect(first.promise).resolves.toBe("impx");
+  });
+
+  test("대조: 배경 출력 없이 Tab 왕복 중 Enter를 치면 imp가 제출된다", async () => {
+    const { session, first, finish } = await openTab();
+    session.fake.type("\r");
+    await session.pump();
+    finish({ completions: ["import"], start: 0 });
+    await settle();
+    await session.pump();
+
+    await expect(first.promise).resolves.toBe("imp");
+  });
+
+  test("배경 출력 재그리기 콜백 전 x(큐) → 완성 응답 → 콜백: 대조와 같게 impx여야 한다", async () => {
+    const { session, first, finish } = await openTab();
+    await session.output("tick\n");
+    session.fake.type("x");
+    finish({ completions: ["import"], start: 0 });
+    await settle();
+    await session.pump();
+
+    expect(session.vt.screen()).toBe("tick\n>>> impx");
+    session.fake.type("\r");
+    await session.pump();
+    await expect(first.promise).resolves.toBe("impx");
+  });
+
+  test("배경 출력 재그리기 콜백 전 Enter(큐) → 완성 응답 → 콜백: 대조와 같게 imp가 제출돼야 한다", async () => {
+    const { session, first, finish } = await openTab();
+    await session.output("tick\n");
+    session.fake.type("\r");
+    finish({ completions: ["import"], start: 0 });
+    await settle();
+    await session.pump();
+
+    await expect(first.promise).resolves.toBe("imp");
+  });
+
+  test("배경 출력 재그리기 콜백 전 큐가 있으면 목록 응답도 버려진다", async () => {
+    const { session, first, complete, finish } = await openTab();
+    // 첫 Tab은 채울 것이 없어(공통 접두사가 이미 입력) 아무것도 넣지 않고, 이어지는 두 번째 Tab이 목록을 연다.
+    finish({ completions: ["imp", "impl"], start: 0 });
+    await settle();
+    session.fake.type("\t");
+    await waitFor(() => complete.mock.calls.length > 1);
+    await session.output("tick\n");
+    session.fake.type("x");
+    finish({ completions: ["imp", "impl"], start: 0 });
+    await settle();
+    await session.pump();
+
+    expect(session.vt.screen()).toBe("tick\n>>> impx");
+    session.fake.type("\r");
+    await session.pump();
+    await expect(first.promise).resolves.toBe("impx");
   });
 });

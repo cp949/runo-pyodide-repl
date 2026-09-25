@@ -580,6 +580,16 @@ export class Readline implements ITerminalAddon {
   }
 
   /**
+   * 재그리기 대기 중 들어와 큐(`queued`)에 쌓인 입력이 있는가. 큐의 키는 콜백에서 재생되기 전까지 버퍼에 없어
+   * `getLine`·`getCursor` 비교로는 보이지 않으므로, 버퍼 비교로 경합을 판정하는 호출자(Tab 완성 응답)가 이 값을
+   * 함께 봐야 한다. 재그리기 중이 아니거나 큐가 비었으면 false다. 읽기 밖 type-ahead 버퍼는 활성 읽기가 없을 때의 것이라
+   * 포함하지 않는다.
+   */
+  public hasQueuedInput(): boolean {
+    return this.redrawing && this.queued.length > 0;
+  }
+
+  /**
    * 현재 버퍼의 커서 위치(UTF-16 인덱스)를 돌려준다. `getLine`/`updateLine`과 같은 수준으로 활성
    * 읽기가 없어도 현재 state에 작용한다. 재그리기 대기 중이면 저장 커서(`redrawCursor`)다 — Tab `printAbove`의
    * `moveCursorToEnd()`가 논리 커서를 끝으로 옮겨 두어도 공개 편집 API가 쓰는 자리와 같은 값을 돌려준다.

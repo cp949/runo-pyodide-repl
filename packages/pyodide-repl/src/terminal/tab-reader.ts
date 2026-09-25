@@ -57,7 +57,12 @@ export interface TabReader {
 
 type TabReaderReadline = Pick<
   Readline,
-  "getLine" | "getCursor" | "editInsert" | "tty" | "printAbove"
+  | "getLine"
+  | "getCursor"
+  | "editInsert"
+  | "tty"
+  | "printAbove"
+  | "hasQueuedInput"
 >;
 
 /** 왕복 중 눌려 큐에 쌓인 Tab 하나. */
@@ -102,7 +107,9 @@ export function createTabReader(
       snap.generation !== generation ||
       ended ||
       readline.getLine() !== snap.buf ||
-      readline.getCursor() !== snap.pos
+      readline.getCursor() !== snap.pos ||
+      // 재그리기 대기 중 친 키는 벤더 큐에만 있고 버퍼에 없어 위 비교를 통과한다. 큐가 있으면 삽입·목록 모두 버린다(이슈 16).
+      readline.hasQueuedInput()
     ) {
       return;
     }

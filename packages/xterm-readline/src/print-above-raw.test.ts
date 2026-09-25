@@ -30,7 +30,8 @@ class StubTerminal {
   };
   public vt: VTerm;
   private onDataHandlers: ((data: string) => void)[] = [];
-  private onResizeHandlers: ((size: { cols: number; rows: number }) => void)[] = [];
+  private onResizeHandlers: ((size: { cols: number; rows: number }) => void)[] =
+    [];
   private queue: { text: string; cb: () => void }[] = [];
 
   constructor(cols: number, rows: number) {
@@ -1002,5 +1003,87 @@ describe("재그리기 대기 중 리사이즈(결함 10)", () => {
 
     expect(term.vt.screen()).toBe("> abcdefghijkl");
     expect(term.vt.cursor()).toEqual([0, 14]);
+  });
+});
+
+describe("hasQueuedInput(결함 16)", () => {
+  test("재그리기 대기 중 키가 큐에 쌓이면 true이고 콜백이 재생한 뒤에는 false다", () => {
+    const { term, readline } = setup();
+    void readline.read("> ");
+    term.type("imp");
+
+    term.asyncWrite = true;
+    void readline.printAboveRaw("t\n", "");
+    // 재그리기를 기다리는 동안이라도 친 키가 없으면 큐는 비어 있다.
+    expect(readline.hasQueuedInput()).toBe(false);
+
+    term.feed("x");
+    expect(readline.hasQueuedInput()).toBe(true);
+    // 큐의 키는 버퍼에 아직 없다(경합 판정이 버퍼 비교만으로는 못 보는 이유).
+    expect(readline.getLine()).toBe("imp");
+
+    term.flush();
+    expect(readline.hasQueuedInput()).toBe(false);
+    expect(readline.getLine()).toBe("impx");
+  });
+
+  test("붙여넣기 덩어리와 Enter도 큐에 쌓인 입력으로 센다", () => {
+    const { term, readline } = setup();
+    void readline.read("> ").catch(() => {});
+    term.asyncWrite = true;
+    void readline.printAboveRaw("t\n", "");
+
+    term.feed("\r");
+    expect(readline.hasQueuedInput()).toBe(true);
+    term.flush();
+    expect(readline.hasQueuedInput()).toBe(false);
+  });
+
+  test("재그리기 중이 아니면 false다(읽기 전·읽는 중·재그리기 뒤)", () => {
+    const { term, readline } = setup();
+    expect(readline.hasQueuedInput()).toBe(false);
+
+    void readline.read("> ");
+    term.type("ab");
+    expect(readline.hasQueuedInput()).toBe(false);
+
+    term.asyncWrite = true;
+    void readline.printAboveRaw("t\n", "");
+    term.flush();
+    term.type("c");
+    expect(readline.hasQueuedInput()).toBe(false);
+  });
+
+  test("읽기 밖 type-ahead 버퍼의 키는 큐가 아니라서 false다", () => {
+    const { term, readline } = setup();
+    term.type("abc");
+    expect(readline.hasQueuedInput()).toBe(false);
+
+    void readline.read("> ");
+    expect(readline.hasQueuedInput()).toBe(false);
+    expect(readline.getLine()).toBe("abc");
+  });
+
+  test("재그리기 대기 중 cancelRead·takeRead가 큐를 비우면 false다", () => {
+    {
+      const { term, readline } = setup();
+      void readline.read("> ").catch(() => {});
+      term.asyncWrite = true;
+      void readline.printAboveRaw("t\n", "");
+      term.feed("x");
+      expect(readline.hasQueuedInput()).toBe(true);
+      readline.cancelRead();
+      expect(readline.hasQueuedInput()).toBe(false);
+    }
+    {
+      const { term, readline } = setup();
+      void readline.read("> ").catch(() => {});
+      term.asyncWrite = true;
+      void readline.printAboveRaw("t\n", "");
+      term.feed("x");
+      expect(readline.hasQueuedInput()).toBe(true);
+      readline.takeRead();
+      expect(readline.hasQueuedInput()).toBe(false);
+    }
   });
 });
