@@ -19,6 +19,8 @@
 //       (checklist 멈추는 지점 3, DELTA-01 "남은 위험" 앵커 확인)
 //   B07 `pri` 입력 중 `\r`로 끝나는 진행률 조각 `B07 50%\r`·`B07 100%\r` → `B07 100%>>> pri`(제자리 갱신, 커서 열 15), 이어 `\n` →
 //       `B07 100%` / `>>> pri`(`\r` 끝 조각이 사라지지 않고 그 행이 남는다, RD-022b 리뷰 SO-T1)
+//   B08 `pri` 입력 중 커서 숨김 진행률 조각 `\x1b[?25lB08 50%\r` → `B08 50%>>> pri`, 커서 열 14(실제 글자 끝). 벤더 폭 계산이 CSI 사설
+//       접두(`\x1b[?25l`)를 글자로 세면 `25l`이 3칸이 되어 커서가 열 17로 어긋난다(이슈 15). 이어 Backspace → 열 13, `\n` → `B08 50%` / `>>> pr`(열 6)
 //   끝  콘솔 경고·오류·pageerror 0
 //
 // 시간 판정(`docs/design/09-testing.md` 9.7): 고정 대기·ms 상한을 쓰지 않는다. 배경 출력은 조건 대기(`waitTail`·`waitLineWithCursor`)로
@@ -266,6 +268,23 @@ await bgStep("B07 `\\r`로 끝나는 진행률 조각 → `B07 100%>>> pri`, 이
   await waitScreen(["B07 100%", ">>> pri"], "진행률 끝 개행 뒤");
   await waitLineWithCursor(">>> pri", 7, "다시 그린 입력줄");
   if ((await countOf("B07 50%")) !== 0) throw new Error("`B07 50%`가 남았다(제자리 갱신 안 됨)");
+  await wipeInput();
+});
+
+await bgStep("B08 커서 숨김 진행률 조각 `\\x1b[?25lB08 50%\\r` → `B08 50%>>> pri`, 커서가 실제 글자 끝(열 14)", async () => {
+  await freshCell();
+  await type("pri");
+  await waitLineWithCursor(">>> pri", 7, "배경 출력 전 입력");
+  await emit("\x1b[?25lB08 50%\r");
+  await waitScreen(["B08 50%>>> pri"], "진행률 조각 뒤");
+  await waitLineWithCursor("B08 50%>>> pri", 14, "접두 붙은 입력줄");
+  // 뒤이은 편집 재그리기도 같은 폭으로 커서를 놓는다.
+  await press("Backspace");
+  await waitLineWithCursor("B08 50%>>> pr", 13, "Backspace 뒤 입력줄");
+  // 접두가 남은 채로는 `wipeInput`의 빈 `>>>` 대기가 통과하지 못하므로 `\n`으로 접두 행을 확정한 뒤 정리한다(B07과 같다).
+  await emit("\n");
+  await waitScreen(["B08 50%", ">>> pr"], "접두 확정 개행 뒤");
+  await waitLineWithCursor(">>> pr", 6, "접두 없는 입력줄");
   await wipeInput();
 });
 

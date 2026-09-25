@@ -914,3 +914,33 @@ describe("Tab printAbove와 접두", () => {
     expect(term.vt.cursor()).toEqual([3, 4]);
   });
 });
+
+describe("접두의 CSI 사설 시퀀스 폭(결함 15)", () => {
+  test("커서 숨김 접두 `\\x1b[?25l50%`는 폭 3으로 계산해 커서가 실제 글자 끝이다", () => {
+    const { term, readline } = setup(40, 8);
+    void readline.read("> ");
+    term.type("abc");
+
+    void readline.printAboveRaw("", "\x1b[?25l50%");
+
+    expect(term.vt.screen()).toBe("50%> abc");
+    expect(term.vt.cursor()).toEqual([0, 8]);
+    expect(readline.getCursor()).toBe(3);
+
+    // 뒤이은 편집 재그리기도 같은 폭으로 커서를 놓는다.
+    term.feed(BACKSPACE);
+    expect(term.vt.screen()).toBe("50%> ab");
+    expect(term.vt.cursor()).toEqual([0, 7]);
+  });
+
+  test("커서 표시·자동 줄바꿈 켜기 접두는 폭 0으로 계산한다", () => {
+    const { term, readline } = setup(40, 8);
+    void readline.read("> ");
+    term.type("abc");
+
+    void readline.printAboveRaw("", "x\x1b[?25h\x1b[?7hy");
+
+    expect(term.vt.screen()).toBe("xy> abc");
+    expect(term.vt.cursor()).toEqual([0, 7]);
+  });
+});

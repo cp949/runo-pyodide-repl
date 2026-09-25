@@ -792,3 +792,48 @@ describe("열린 읽기의 접두를 꼬리로 옮기기(`moveAbovePrefixToTail`
     expect(sinks.tail()).toBe("bg> ");
   });
 });
+
+describe("열린 읽기 위 접두의 제어 문자 정규화(결함 15, 실제 `Readline` 경로)", () => {
+  const BACKSPACE = "\x7f";
+
+  test("BS 스피너 `|` 뒤 `\\b/`는 접두 `/`가 되고 커서가 실제 글자 끝이다", () => {
+    const { fake, vt, readline, sinks, openRead } = setupReading();
+    openRead("xy");
+
+    sinks.write("|");
+    sinks.write("\b/");
+
+    expect(readline.abovePrefix()).toBe("/");
+    expect(vt.screen()).toBe("/> xy");
+    expect(vt.cursorCol).toBe(5);
+
+    // 뒤이은 편집 재그리기도 같은 자리에 커서를 놓는다.
+    fake.type(BACKSPACE);
+    expect(vt.screen()).toBe("/> x");
+    expect(vt.cursorCol).toBe(4);
+  });
+
+  test("커서 숨김 진행률 `\\x1b[?25l50%\\r`는 커서가 실제 글자 끝이다", () => {
+    const { vt, sinks, openRead } = setupReading();
+    openRead();
+
+    sinks.write("\x1b[?25l50%\r");
+
+    expect(vt.screen()).toBe("50%> abc");
+    expect(vt.cursorCol).toBe(8);
+  });
+
+  test("접두 BEL은 편집 재그리기마다 다시 울리지 않는다", () => {
+    const { fake, readline, sinks, openRead } = setupReading();
+    openRead();
+    sinks.write("\x07");
+    const before = fake.written.join("").length;
+
+    fake.type(BACKSPACE);
+    fake.type(BACKSPACE);
+
+    const redrawn = fake.written.join("").slice(before);
+    expect(redrawn.split("\x07").length - 1).toBe(0);
+    expect(readline.abovePrefix()).toBe("");
+  });
+});

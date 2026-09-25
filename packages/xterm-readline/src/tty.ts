@@ -357,11 +357,14 @@ function width(text: string, escSeq: number): [size: number, esc_seq: number] {
       return [0, 0];
     }
   } else if (escSeq === 2) {
-    if (!(text === ";" || (text[0] >= "0" && text[0] <= "9"))) {
-      // unsupported
-      return [0, 0];
+    // CSI 본문(ECMA-48): 파라미터 바이트 0x30-0x3F(숫자·`:`·`;`·사설 접두 `<=>?`)와 중간 바이트
+    // 0x20-0x2F는 시퀀스를 이어가고, 최종 바이트 0x40-0x7E에서 폭 0으로 끝난다. 그 밖의 문자는 예전처럼
+    // 지원하지 않는 시퀀스로 보고 끝낸다.
+    const code = text.charCodeAt(0);
+    if (code >= 0x20 && code <= 0x3f) {
+      return [0, escSeq];
     }
-    return [0, escSeq];
+    return [0, 0];
   } else if (text === "\x1b") {
     return [0, 1];
   } else if (text === "\n") {

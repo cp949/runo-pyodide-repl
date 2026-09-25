@@ -86,6 +86,12 @@ export class VtScreen {
       } else if (char === "\r") {
         this.cursorCol = 0;
         this.pendingWrap = false;
+      } else if (char === "\b") {
+        // 실제 터미널처럼 커서만 왼쪽으로 옮긴다(글자는 지우지 않는다).
+        this.cursorCol = Math.max(0, this.cursorCol - 1);
+        this.pendingWrap = false;
+      } else if (char === "\x07") {
+        // BEL은 화면에 그리지 않는다.
       } else {
         this.put(char);
       }

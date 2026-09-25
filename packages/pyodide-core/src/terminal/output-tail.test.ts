@@ -132,3 +132,76 @@ describe("출력 꼬리 추적", () => {
     expect(tail("이름: ")).toBe("이름: ");
   });
 });
+
+describe("제어 문자 정규화(BS 적용, BEL·나머지 C0 제거)", () => {
+  test("BS는 본문 마지막 글자를 지운다", () => {
+    expect(tail("ab\bc")).toBe("ac");
+    expect(tail("|\b/")).toBe("/");
+  });
+
+  test("BS가 여러 번이면 그만큼 지운다", () => {
+    expect(tail("abc\b\bx")).toBe("ax");
+  });
+
+  test("조각으로 나뉘어 온 BS도 앞 조각의 글자를 지운다", () => {
+    expect(tail("|", "\b/")).toBe("/");
+    expect(tail("ab", "\b", "\b", "c")).toBe("c");
+  });
+
+  test("본문이 비어 있으면 BS는 아무것도 지우지 않는다", () => {
+    expect(tail("\b")).toBe("");
+    expect(tail("a\b\b\bb")).toBe("b");
+    expect(tail("x\n\by")).toBe("y");
+    expect(tail("x\r\by")).toBe("y");
+  });
+
+  test("본문을 다 지운 BS는 줄 시작 SGR을 건드리지 않는다", () => {
+    expect(tail(`${GREEN}A\n`, "b\b\bc")).toBe(`${GREEN}c`);
+    expect(tail(`${RED}A\r`, "\b\bz")).toBe(`${RED}z`);
+  });
+
+  test("BS는 본문 안의 SGR 텍스트가 아니라 보이는 마지막 글자를 지운다", () => {
+    expect(tail(`ab${RED}`, "\bc")).toBe(`a${RED}c`);
+    expect(tail(`ab${RED}\bc`)).toBe(`a${RED}c`);
+  });
+
+  test("BS는 SGR 상태를 되돌리지 않는다", () => {
+    expect(tail(`${GREEN}x\b\n`, "y")).toBe(`${GREEN}y`);
+  });
+
+  test("BEL을 제거한다", () => {
+    expect(tail("a\x07b")).toBe("ab");
+    expect(tail("\x07")).toBe("");
+    expect(tail("\x07", "abc")).toBe("abc");
+  });
+
+  test.each([
+    ["NUL", "\x00"],
+    ["SOH", "\x01"],
+    ["ETX", "\x03"],
+    ["ACK", "\x06"],
+    ["VT", "\x0b"],
+    ["FF", "\x0c"],
+    ["SO", "\x0e"],
+    ["SUB", "\x1a"],
+    ["FS", "\x1c"],
+    ["US", "\x1f"],
+    ["DEL", "\x7f"],
+  ])("나머지 C0 %s를 제거한다", (_이름, 문자) => {
+    expect(tail(`a${문자}b`)).toBe("ab");
+  });
+
+  test("제거한 제어 문자가 ESC 시퀀스 앞뒤에 있어도 시퀀스는 그대로다", () => {
+    expect(tail("\x07\x1b[?25l50%")).toBe("\x1b[?25l50%");
+    expect(tail(`${RED}\x00x${RESET}`)).toBe(`${RED}x${RESET}`);
+  });
+
+  test("탭·개행·`\\r`·SGR·ESC는 그대로다", () => {
+    expect(tail("a\tb")).toBe("a\tb");
+    expect(tail("a\nb")).toBe("b");
+    expect(tail("a\rb")).toBe("b");
+    expect(tail("a\r\nb")).toBe("b");
+    expect(tail(`${RED}x${RESET}`)).toBe(`${RED}x${RESET}`);
+    expect(tail("a\x1b[2Kb")).toBe("a\x1b[2Kb");
+  });
+});

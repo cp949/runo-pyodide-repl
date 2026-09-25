@@ -100,3 +100,46 @@ test("refreshLine wraps emit in cursor-hide/show", () => {
   expect(emitted.startsWith("\x1b[?25l")).toBe(true);
   expect(emitted.endsWith("\x1b[?25h")).toBe(true);
 });
+
+test.each([
+  ["커서 숨김(사설 접두 ?)", "\x1b[?25l"],
+  ["커서 표시(사설 접두 ?)", "\x1b[?25h"],
+  ["기기 속성 요청(사설 접두 >)", "\x1b[>1c"],
+  ["기기 속성 요청(사설 접두 =)", "\x1b[=0c"],
+  ["사설 접두 <", "\x1b[<0m"],
+  ["커서 이동(파라미터 두 개)", "\x1b[1;2H"],
+  ["커서 모양(중간 바이트 공백)", "\x1b[2 q"],
+  ["소프트 리셋(사설 접두 없이 중간 바이트 !)", "\x1b[!p"],
+  ["콜론 파라미터 SGR", "\x1b[38:5:196m"],
+])("CSI 시퀀스는 폭 0이다: %s", (_이름, 시퀀스) => {
+  const tty = new Tty(80, 24, 8, new Output());
+  expect(tty.calculatePosition(시퀀스, new Position(0, 0))).toEqual(
+    new Position(0, 0),
+  );
+});
+
+test("사설 접두 CSI 뒤 글자는 폭을 센다(`\\x1b[?25l50%`는 3칸)", () => {
+  const tty = new Tty(80, 24, 8, new Output());
+  expect(tty.calculatePosition("\x1b[?25l50%", new Position(0, 0))).toEqual(
+    new Position(0, 3),
+  );
+  expect(
+    tty.calculatePosition("a\x1b[>1cb\x1b[?25hc", new Position(0, 0)),
+  ).toEqual(new Position(0, 3));
+});
+
+test("SGR 뒤 글자 폭 계산은 그대로다", () => {
+  const tty = new Tty(80, 24, 8, new Output());
+  expect(
+    tty.calculatePosition("\x1b[1;32mfoo\x1b[0m", new Position(0, 0)),
+  ).toEqual(new Position(0, 3));
+});
+
+test("splitIntoVisualRows는 사설 접두 CSI를 폭 0으로 보고 행을 나눈다", () => {
+  const tty = new Tty(5, 24, 8, new Output());
+  // `25l`이 글자로 세어지면 5칸 행이 `\x1b[?25l` + `abc`에서 이미 넘친다.
+  expect(tty.splitIntoVisualRows("\x1b[?25labcde")).toEqual([
+    "\x1b[?25labcde",
+    "",
+  ]);
+});
