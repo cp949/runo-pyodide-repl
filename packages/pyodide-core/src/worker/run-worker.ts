@@ -21,7 +21,9 @@ export interface RunWorkerOptions {
 
 /**
  * 모듈 평가 시점의 수신기(최상위 문장이라 이 모듈을 import하는 순간 걸린다). worker 전역이 아니면 만들지 않고 `runWorker`가
- * 호출될 때 만든다(jsdom·node 시험). 번들에서 이 문장이 빠지면 늦은 `runWorker`가 프레임을 잃는다(`dist` 정적 확인 대상).
+ * 호출될 때 만든다(jsdom·node 시험). 번들에서 이 문장이 빠지면 늦은 `runWorker`가 프레임을 잃는다. 상시 검사는 없다: 번들 결과에
+ * 이 수신기가 남는지는 RD-023 DELTA-02에서 demo 프로덕션 빌드로 한 번 손으로 확인했을 뿐이다
+ * (`_works/_completed/20260925-32-rd-023-dom-bridge/verify/delta02/bundle-static-check.log`).
  */
 const moduleReceiver: InitReceiver | undefined = isWorkerGlobalScope()
   ? createInitReceiver(self)

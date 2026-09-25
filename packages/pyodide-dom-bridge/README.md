@@ -48,6 +48,7 @@ document.title = "완료"
 - 출력(core 채널, 비동기)과 DOM 호출(coincident 채널, 동기)의 도착 순서는 보장하지 않는다. 실측(100쌍당 역전): core 직접 경로 0~5, `<PythonRunner>`+terminal 경로 60~90(`document.title` 대입 방식), 함수 호출 방식은 두 경로 모두 0이고 원인은 확인하지 않았다.
 - 재시작 직후 약 2초 동안 옛 worker와 새 worker가 함께 있다(Chromium이 유휴가 아닌 worker의 terminate를 늦춘다, `docs/traps/TRP-049`).
 - `bridge()`는 `coincident()`를 worker당 한 번만 부르고 결과를 공유한다. `ffi`(임의 코드 평가 등)는 노출하지 않는다.
+- `createBridgeMain()`은 `coincidentMain()`을 옵션 없이 부른다. 돌려준 `Worker`의 두 번째 인자는 런타임에 coincident로 그대로 가므로(`serviceWorker`·`import`·`reflected_ffi_timeout`도 걸러내지 않는다) 표준 `WorkerOptions`(`{ type: "module" }` 등)만 넘긴다. 타입이 `WorkerOptions`로 제한해 TS 초과 속성 검사가 1차로 막을 뿐 런타임 차단은 없다.
 
 ## CSP
 

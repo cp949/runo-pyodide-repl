@@ -5,8 +5,10 @@
  *   const { Worker } = createBridgeMain();
  *   const createWorker = () => new Worker(new URL("./app.worker.ts", import.meta.url), { type: "module" });
  *
- * 만들 때 coincident가 부트스트랩 메시지를 동기로 보내므로 core init 프레임보다 항상 먼저 도착한다. coincident 옵션
- * (`serviceWorker` 등)은 통과시키지 않는다.
+ * 만들 때 coincident가 부트스트랩 메시지를 동기로 보내므로 core init 프레임보다 항상 먼저 도착한다. `coincidentMain()`에는 옵션을
+ * 넘기지 않는다. 돌려준 `Worker` 생성자의 두 번째 인자는 런타임에 coincident로 그대로 간다(`serviceWorker`·`import`·
+ * `reflected_ffi_timeout`도 걸러내지 않는다). 타입(`BridgeMain.Worker`)이 표준 `WorkerOptions`로 제한해 TS 초과 속성 검사가 1차로
+ * 막을 뿐이다.
  */
 import coincidentMain from "coincident/window/main";
 
@@ -16,7 +18,7 @@ export interface BridgeMainWorker extends Worker {
 }
 
 export interface BridgeMain {
-  /** coincident가 확장한 `Worker` 생성자. */
+  /** coincident가 확장한 `Worker` 생성자. `options`는 런타임에 coincident로 그대로 간다(타입만 표준 `WorkerOptions`로 좁힌다). */
   Worker: new (
     scriptURL: string | URL,
     options?: WorkerOptions,
