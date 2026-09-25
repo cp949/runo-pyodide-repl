@@ -138,6 +138,8 @@
 | `results/`                    | 실행 결과 JSON(`.gitignore` 대상, 커밋하지 않는다)                                                                                                                          |
 | `BASELINE.md`·`baseline.json` | 기준선 문서(사람용)·기계용 사본(`run.mjs`가 읽는다)                                                                                                                         |
 
+pty 기준 데이터(`pty/rd-0NN/`)와 그 재생성 도구(`pty/tools/`)는 pnpm 스크립트가 아니다. 실행 전제·설치는 `pty/README.md`, 명령은 `pty/REGEN.md`를 본다.
+
 ## 결과 파일 규칙
 
 `lib.mjs`의 `finish({ label = "dev", ...extra } = {})`는 stdout에 결과 JSON을 찍는 것과 별개로

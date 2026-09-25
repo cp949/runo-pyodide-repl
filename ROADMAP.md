@@ -876,7 +876,7 @@ REPL 핸들에 `runSource(code)`를 추가한다. REPL globals에서 `<console>`
 
 ### RD-025 — 저장소에 없는 pty 캡처 도구 복원
 
-상태: 대기 · 이전: 없음 · 설계: `09-testing.md`, `13-version-upgrade.md`
+상태: 완료(2026-09-26, `dev` 병합) · 이전: 없음 · 설계: `09-testing.md`, `13-version-upgrade.md`
 
 RD-018·019가 `apps/demo/e2e/pty/`에 rd-008·015·016·019 기준 데이터와 `pty_cancel.py`·`pty_type_ahead.py`를 두었다. 아직 이전 구현 `_works/`에만 있는 캡처 도구(rd-015·016의 `ptyrepl.py`·`compare_native_pyodide.py`·`build_gate_corpus.py` 등)를 옮기고 기준 인터프리터를 인자로 받게 한다(3.15 재측정 대비).
 
@@ -891,11 +891,24 @@ RD-018·019가 `apps/demo/e2e/pty/`에 rd-008·015·016·019 기준 데이터와
 - 실행 전제(인터프리터, `pyte==0.8.2`·`wcwidth==0.8.4` 설치 — LGPLv3라 벤더링하지 않는다, pty 24×80 `TERM=xterm`, `PYTHON_COLORS=0`·`NO_COLOR=1`·`PYTHON_HISTORY` 고정, 빈 임시 cwd)를 `apps/demo/e2e/pty/README.md`에 적는다. `09-testing.md`는 9.6.6을 새로 두고 요약·링크만 둔다(9.6.3의 이전 구현 경로는 그대로 남긴다).
 - 저장소 기준 데이터(`apps/demo/e2e/pty/rd-015|016/**`)는 읽기 전용이다. 재생성물은 `_works/<작업>/verify/regen/`에 쓴다. 재측정 여부는 사용자가 정한다(ADR-0007).
 
-범위 밖: `rd-008`·`rd-019` 스크립트 재작성(자립형이고 결과가 사람 판정이라 재생성 대조가 불가능), 이전 구현의 탐색 스크립트(`s*.py` 14개·`compare.py`·`node_complete.mjs`·pyodide 소스 복제본 3개 — 저장소 데이터를 만들지 않는다).
+범위 밖: `rd-008`·`rd-019` 스크립트 재작성(자립형이고 결과가 사람 판정이라 재생성 대조가 불가능), 이전 구현의 탐색 스크립트(`s*.py` 16개·`compare.py`·`node_complete.mjs`·pyodide 소스 복제본 3개 — 저장소 데이터를 만들지 않는다).
 
 검증 예산: pty 캡처 실행 ≤ 6회, node + 실제 pyodide 실행 ≤ 10회, L0 전체 1회. 브라우저 L1·L2·L3 0회(제품 코드·브라우저 경로를 건드리지 않는다).
 
-계획서: `_works/20260926-37-rd-025-pty-capture-tools/`.
+결과(2026-09-26):
+
+- 성공: 도구 18개 스크립트(하니스 4 + rd-016 파이프라인 11 + rd-015 실행기 `runcases.py` + 비교기 `compare_baseline.py` + pyodide 해석 `resolve_pyodide.mjs`)와 `requirements.txt`를 `apps/demo/e2e/pty/tools/`에 두었다. 진입점은 `apps/demo/e2e/pty/README.md`(폴더·전제·설치) → `REGEN.md`(파일 ← 명령 13행·소요 시간·허용 차이·3.15 재측정 순서) → `tools/README.md`(도구별 입출력·인자·`compare_baseline.py`)다. 대상 CPython 3.14.4(로컬 uv 설치, 기준 데이터를 만든 빌드와 같다)로 재생성해 **rd-016 6파일은 판정값 차이 0**(5파일 기준과 바이트 동일, `native_vs_pyodide.meta.json`은 경로 필드만 다름)이고, **rd-015 7파일 중 6파일이 기준과 바이트 동일**이다. 각 파이프라인 2회 연속 재생성의 자기 대조는 판정값 차이 0이다(rd-015는 7파일 바이트 동일). 인터프리터는 `--python` > `PTY_PYTHON` > `PATH`의 `python3.14`로 정해지고 버전 불일치는 `--allow-version-mismatch` 없이 중단한다(중단·진행 양쪽 실측).
+- 예외(1) `rd-015/res_s1.json`: 바이트 동일이 아니다. 기준 `impor` 케이스의 후보 206개에 측정 당시 하니스 폴더의 `.py` 파일명 14개(`common,hook_startup,ptyrepl,pyodide_console,pyodide_rlcompleter,runcases,s1,s2,s3,s3b,s4,s5,s6,s7`)가 섞여 있고 빈 임시 cwd 재생성은 192개다(TRAP-27 계열). 옵션 없이는 판정값 차이 205건(종료 코드 1)이며, 사용자 확정(2026-09-26 (a))으로 `--ignore-baseline-candidates res_s1.json=<14개>`를 써서 기준 `res`에서만 뺀 뒤 판정값 차이 0(종료 코드 0)을 판정했다. `screen2` 22행(열 폭·`N more...`)은 환경 유래 표로 옮긴다. 이 파일의 원본 생성 명령(`s1=res_s1.json`)은 추정이다.
+- 예외(2) 환경 유래 차이: `native_vs_pyodide.meta.json`의 `/native/cwd`·`/native/stdlib_path`·`/native/sys_path/1..4`(기준값은 이전 세션 scratchpad 경로라 재현 불가능). `SUMMARY-import.md`·`expectations_check.json`·`pyodide_zip_patch_check.json`은 대조 대상이 아니다. 근거·규칙은 `REGEN.md`.
+- 소요(WSL2, 각 2회): rd-016 pty 312초 + 나머지 약 4초, rd-015 pty 566초 → 재측정 1회 약 15분.
+- 이식하지 않은 스크립트(이전 구현 `measure-3.14/` 폴더에 그대로 있다): 탐색 스크립트 `s*.py` 16개(`s7.py` 외에는 파일을 쓰지 않고, 저장소 기준 데이터를 만들지 않는다), `compare.py`·`node_complete.mjs`·`node_edge.mjs`·`cases_extra.json`, pyodide 소스 읽기용 사본 3개(다른 스크립트가 import하지 않는다), `pylib/`(pyte LGPLv3). 위치·이유는 `09-testing.md` 9.6.6.
+- 계획 밖 추가: 대상 인터프리터가 venv이거나 `pyte`·`wcwidth`가 import되면 중단하는 게이트(우회 옵션 없음, 자식 모듈 후보 오염 방지), `ptyrepl.py --check-only`, `--with-mc`·`--no-mc`(rd-015 기본 끔·rd-016 기본 켬), `compare_baseline.py --ignore-baseline-candidates`, `resolve_pyodide.mjs`(`--pyodide` > `createRequire` > 워크스페이스 폴백. `apps/demo`에 pyodide 의존을 더하지 않았다).
+- 3.15 재측정: 사용자가 정한다(ADR-0007, `13-version-upgrade.md` 13.4). 실행 순서는 `REGEN.md` "3.15 재측정 시 실행 순서". 빈 cwd 결과가 새 기준이므로 `--ignore-baseline-candidates`가 필요 없고, `ptyrepl.py`의 `EXPECTED_VERSION`·`WHICH_NAME`을 새 버전으로 바꿔야 한다.
+- 남은 위험: `res_s1.json`의 제외 목록이 판정값 차이를 가릴 수 있고(양성 대조: 이름 13개 종료 코드 1, 없는 이름 추가 종료 코드 1, 재생성에도 있는 이름 추가 종료 코드 1로 완화), `screen2` 열 배치 차이는 `_pyrepl` 배치 알고리즘을 재현하지 않아 단어 소속 검사만 한다. 대상 빌드(uv 3.14.4, 2026-04-14 Clang 22.1.3)가 사라지면 `env_*_top_level`이 흔들릴 수 있다. 결정성 증거는 연속 2회다. `pnpm --filter demo e2e:check`는 `pty/tools/*.mjs`를 검사하지 않는다(`node --check` 직접 실행). `rd-008`·`rd-019` 스크립트는 `PY314`·홈 절대경로 기본값을 그대로 둔다.
+- 검증: pty 캡처 6/6, node + pyodide 8/10, 브라우저 L1·L2·L3 0회. L0(`check-types`·`lint`·`test`·`build`·`e2e:check`) 통과(문서 작성 뒤 1회).
+- 후속: `.scratch/pty-tools-followups/issues/` 3건 — 01(13.8 버전 리터럴 grep이 `run-driver.py` 주석 1건을 잡는다, `open`, 이 RD와 무관한 기존 상태), 02(`e2e:check`가 `pty/tools/*.mjs`를 검사하지 않는다, `deferred`), 03(rd-008·rd-019 스크립트의 `PY314` 홈 절대경로 기본값, `deferred`, 3.15 재측정 착수 때 재개). 신규 TRP 없음(함정 7건 판정 결과 승격 조건 미충족).
+
+계획서: `_works/_completed/20260926-37-rd-025-pty-capture-tools/`.
 
 ### RD-026 — 재그리기 대기 창·접두 경로의 정확성 결함 4건
 
