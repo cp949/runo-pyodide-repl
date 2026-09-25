@@ -10,6 +10,8 @@ const fake = vi.hoisted(() => {
   const fakeWindow = { document: { title: "문서" }, parent: "부모" };
   return {
     fakeWindow,
+    /** 가짜 `coincident/window/worker` 모듈이 평가될 때 부를 훅(실제 모듈은 평가 때 부트스트랩 리스너를 건다). */
+    onEvaluate: undefined as (() => void) | undefined,
     coincident: vi.fn(async () => ({
       proxy: { slow: () => 1 },
       native: true,
@@ -20,8 +22,6 @@ const fake = vi.hoisted(() => {
     })),
   };
 });
-
-vi.mock("coincident/window/worker", () => ({ default: fake.coincident }));
 
 /** 모듈이 건 message 리스너. 시험이 끝나면 전역에서 치워 다음 시험으로 새지 않게 한다. */
 const registered: Array<{ listener: EventListener; capture: boolean }> = [];
@@ -44,6 +44,11 @@ async function evaluateModule() {
 
 beforeEach(() => {
   fake.coincident.mockClear();
+  // 모듈을 시험마다 새로 평가하므로(`vi.resetModules`) 가짜 모듈도 그때마다 새로 만들어져야 평가 시점 훅이 돈다(`vi.doMock`은 호이스팅되지 않고 이후 import에 적용된다).
+  vi.doMock("coincident/window/worker", () => {
+    fake.onEvaluate?.();
+    return { default: fake.coincident };
+  });
   const add = self.addEventListener.bind(self) as typeof self.addEventListener;
   vi.spyOn(self, "addEventListener").mockImplementation(
     (type: string, listener: unknown, options?: unknown) => {
@@ -62,6 +67,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  fake.onEvaluate = undefined;
   for (const { listener, capture } of registered.splice(0))
     self.removeEventListener("message", listener, capture);
   vi.restoreAllMocks();
@@ -114,12 +120,40 @@ describe("domBridge()", () => {
 });
 
 describe("모듈 평가 시점 부트스트랩 관찰(worker 전역)", () => {
-  test("모듈을 평가하면 캡처 단계 message 리스너가 걸린다", async () => {
+  test("모듈을 평가하면 message 리스너가 하나 걸리고 캡처 옵션은 쓰지 않는다", async () => {
     pretendWorkerScope();
 
     await evaluateModule();
 
-    expect(registered.filter((entry) => entry.capture)).toHaveLength(1);
+    expect(registered).toHaveLength(1);
+    expect(registered[0]?.capture).toBe(false);
+  });
+
+  test("관찰 리스너는 coincident 모듈이 평가되어 자기 리스너를 거는 것보다 먼저 등록된다(import 순서)", async () => {
+    pretendWorkerScope();
+    const order: string[] = [];
+    // 가짜 coincident가 평가될 때 하는 일: 부트스트랩 리스너를 걸고 메시지를 삼킨다. 등록 시점을 관찰기 리스너와 비교한다.
+    fake.onEvaluate = () => {
+      order.push(
+        `coincident 평가(그때까지 등록된 리스너 ${registered.length}개)`,
+      );
+      self.addEventListener("message", (event) =>
+        event.stopImmediatePropagation(),
+      );
+    };
+
+    const { domBridge } = await evaluateModule();
+
+    // 관찰기가 이미 등록돼 있는 상태에서 coincident가 평가된다.
+    expect(order).toEqual(["coincident 평가(그때까지 등록된 리스너 1개)"]);
+    // 뒤에 등록된 coincident 리스너가 전파를 멈춰도 관찰기는 부트스트랩(배열)을 본다.
+    self.dispatchEvent(
+      new MessageEvent("message", {
+        data: ["uid", false, -1],
+        cancelable: true,
+      }),
+    );
+    await domBridge().prepare({ pyodide: { registerJsModule() {} } as never });
   });
 
   test("worker 전역이 아니면 모듈을 평가해도 리스너를 걸지 않는다(시험이 남의 전역을 오염하지 않는다)", async () => {

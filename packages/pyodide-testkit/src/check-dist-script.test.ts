@@ -162,12 +162,83 @@ describe("check-dist 스크립트: --allow-sync-bridge(dom-bridge 예외)", () =
   test("허용 진입점(coincident/window/main·worker) import는 통과한다", () => {
     const dist = makeDist({
       "index.mjs": 'import coincident from "coincident/window/main";\n',
-      "worker.mjs": 'import coincident from "coincident/window/worker";\n',
+      // 관찰기 설치 import가 coincident보다 앞선다(아래 "관찰기 import 순서" 규칙).
+      "worker.mjs":
+        'import "./bootstrap-observer-install.mjs";\nimport coincident from "coincident/window/worker";\n',
     });
 
     const { status, output } = runAllowSyncBridge(dist);
 
     expect(status, output).toBe(0);
+  });
+
+  describe("관찰기 import 순서(coincident/window/worker보다 먼저 bootstrap-observer-install)", () => {
+    test("번들러가 붙인 해시 이름의 청크를 앞에 import해도 통과한다", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          'import { t as observer } from "./bootstrap-observer-install-Ce5xa7ii.mjs";\nimport coincident from "coincident/window/worker";\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(0);
+    });
+
+    test("coincident import가 관찰기 import보다 앞이면 실패한다(번들러가 외부 import를 위로 올린 모양)", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          'import coincident from "coincident/window/worker";\nimport "./bootstrap-observer-install.mjs";\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status).toBe(1);
+      expect(output).toContain(FAIL_MARK);
+      expect(output).toContain("worker.mjs");
+      expect(output).toContain("뒤에 있다");
+    });
+
+    test("관찰기 import가 없으면 실패한다(인라인된 경우)", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          'import coincident from "coincident/window/worker";\nconst observer = 1;\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status).toBe(1);
+      expect(output).toContain(FAIL_MARK);
+      expect(output).toContain("bootstrap-observer-install import가 없다");
+    });
+
+    test("주석에만 있는 관찰기 import는 세지 않는다", () => {
+      const dist = makeDist({
+        "worker.mjs":
+          '// import "./bootstrap-observer-install.mjs";\nimport coincident from "coincident/window/worker";\n',
+      });
+
+      const { status } = runAllowSyncBridge(dist);
+
+      expect(status).toBe(1);
+    });
+
+    test("coincident/window/worker를 import하지 않는 파일(main 진입점 등)은 대상이 아니다", () => {
+      const dist = makeDist({
+        "index.mjs": 'import coincident from "coincident/window/main";\n',
+      });
+
+      const { status, output } = runAllowSyncBridge(dist);
+
+      expect(status, output).toBe(0);
+    });
+
+    test("옵션 없는 검사에는 이 규칙이 없다(다른 패키지는 coincident 문자열 자체가 실패다)", () => {
+      const dist = makeDist({ "index.mjs": "export const a = 1;\n" });
+
+      const { status } = run(dist);
+
+      expect(status).toBe(0);
+    });
   });
 
   test("옵션 없이는 같은 dist가 그대로 실패한다(다른 패키지의 금지 보장은 약해지지 않는다)", () => {

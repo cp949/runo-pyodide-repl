@@ -1,8 +1,9 @@
 /**
  * 부트스트랩 관찰기: coincident가 worker 전역에서 받는 부트스트랩 메시지(배열)가 도착했는지만 기록한다. coincident 리스너는
- * `stopImmediatePropagation()`으로 메시지를 삼키므로, 뒤에 걸린 일반 리스너는 그 메시지를 보지 못한다. 관찰기는 캡처 단계 리스너라
- * 등록 순서와 무관하게 먼저 호출되고, 메시지를 소비하지 않는다. jsdom DOM 노드에 `message` 이벤트를 보내 DOM 표준 디스패치
- * 순서(같은 대상에서 캡처 리스너가 먼저)를 그대로 쓴다.
+ * `stopImmediatePropagation()`으로 메시지를 삼키므로 관찰기는 그보다 **먼저 등록**돼야 메시지를 본다(성립 조건은 등록 순서다.
+ * 캡처 단계로 순서를 피하는 방식은 Chromium worker 전역에서 성립하지 않았다). 관찰기는 메시지를 소비하지 않는다. jsdom DOM 노드에
+ * `message` 이벤트를 보내 "같은 대상의 리스너는 등록 순서대로 호출된다"를 시험한다. 실제 worker 전역에서의 성립은 브라우저(L1)로만
+ * 확인한다.
  */
 import { describe, expect, test } from "vitest";
 import { createBootstrapObserver } from "./bootstrap-observer";
@@ -58,18 +59,44 @@ describe("createBootstrapObserver", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  test("앞에 걸린 리스너가 stopImmediatePropagation을 불러도 관찰기는 메시지를 본다", () => {
+  test("나중에 걸린 리스너(coincident)가 stopImmediatePropagation을 불러도, 먼저 등록된 관찰기는 메시지를 본다", () => {
     const target = createTarget();
-    // coincident가 하는 일: 부트스트랩 리스너가 관찰기보다 먼저 등록돼 메시지를 삼킨다.
+    const observer = createBootstrapObserver(target);
+    // coincident가 하는 일: 부트스트랩 리스너가 관찰기보다 나중에 등록돼 메시지를 삼킨다.
+    let coincidentCalls = 0;
     target.addEventListener("message", (event) => {
+      coincidentCalls += 1;
       event.stopImmediatePropagation();
       event.preventDefault();
+    });
+
+    send(target, ["uid", false, -1]);
+
+    expect(observer.received).toBe(true);
+    expect(coincidentCalls).toBe(1);
+  });
+
+  test("삼키는 리스너보다 뒤에 등록된 관찰기는 메시지를 보지 못한다(등록 순서가 성립 조건이다)", () => {
+    const target = createTarget();
+    target.addEventListener("message", (event) => {
+      event.stopImmediatePropagation();
     });
     const observer = createBootstrapObserver(target);
 
     send(target, ["uid", false, -1]);
 
-    expect(observer.received).toBe(true);
+    expect(observer.received).toBe(false);
+  });
+
+  test("캡처 옵션 없이 일반 리스너로 등록한다(캡처 단계는 순서 보장이 아니다)", () => {
+    const calls: Array<unknown[]> = [];
+    createBootstrapObserver({
+      addEventListener: (...args: unknown[]) => calls.push(args),
+    } as never);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]).toBe("message");
+    expect(calls[0]).toHaveLength(2);
   });
 
   test("한 번 받은 뒤에도 리스너가 남아 이후 메시지에 영향을 주지 않는다", () => {

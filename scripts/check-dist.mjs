@@ -5,7 +5,9 @@
 // `--allow-sync-bridge`는 dom-bridge(RD-023, ADR-0006) 전용이다. coincident 금지 문자열 검사를 끄는 대신 CSP 정적 규칙을 건다:
 // 코드 파일(`.mjs`·`.ts` 등, 시험·소스맵 제외)의 coincident 모듈 지정자는 `coincident/window/main`·`coincident/window/worker`뿐이고
 // (`reflected-ffi`를 직접 import하지 않는다), 주석을 뺀 코드에 `evaluate`·`serviceWorker`·`coincident/sync`·`window.import`가 없어야
-// 한다. 다른 패키지는 이 옵션 없이 검사하므로 금지 보장이 그대로다. `pyodide` 런타임 import 금지는 이 옵션에서도 유지한다.
+// 한다. 또 `coincident/window/worker`를 import하는 `.mjs`는 그보다 **앞서** `bootstrap-observer-install` 모듈(부트스트랩 관찰기 설치, 별도
+// 파일)을 import해야 한다: 관찰 리스너가 coincident의 부트스트랩 리스너보다 먼저 등록돼야 메시지를 본다(번들러가 외부 import를 위로 올리면
+// 순서가 뒤집힌다). 다른 패키지는 이 옵션 없이 검사하므로 금지 보장이 그대로다. `pyodide` 런타임 import 금지는 이 옵션에서도 유지한다.
 // 폴더가 없거나 파일이 하나도 없으면 건너뛰지 않고 실패한다 — 빌드 전에 돌린 것을 통과로 착각하지 않게 한다(turbo `check-dist`가
 // `build` 뒤에 돌린다). 소스맵(.map)까지 모든 파일을 본다. 대소문자는 구분하지 않는다.
 import { readdir, readFile } from "node:fs/promises";
@@ -44,6 +46,45 @@ const CSP_FORBIDDEN_TOKENS = [
  */
 function stripComments(text) {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+}
+
+/** 부트스트랩 관찰기 설치 모듈의 지정자(`./bootstrap-observer-install.mjs`·번들러가 붙인 해시 이름 포함). */
+const OBSERVER_SPECIFIER = /(?:^|\/)bootstrap-observer-install[^/]*\.mjs$/;
+
+/**
+ * 코드에서 지정자가 나타나는 첫 위치(문자 오프셋). `match`가 함수면 지정자 문자열로 판정한다. 없으면 -1.
+ * `from "x"`·`import "x"`·`import("x")` 모두 지정자 문자열의 위치를 돌려주므로 서로 비교할 수 있다.
+ */
+function firstSpecifierIndex(code, match) {
+  let first = -1;
+  for (const pattern of SPECIFIER_PATTERNS) {
+    for (const m of code.matchAll(pattern)) {
+      if (!match(m[1])) continue;
+      if (first < 0 || m.index < first) first = m.index;
+    }
+  }
+  return first;
+}
+
+/**
+ * `coincident/window/worker`를 import하는 `.mjs`에서 관찰기 설치 모듈 import가 그보다 앞에 없으면 위반 설명을, 아니면 `null`을 돌려준다
+ * (coincident를 import하지 않는 파일은 대상이 아니다).
+ */
+function findObserverOrderViolation(text) {
+  const code = stripComments(text);
+  const coincident = firstSpecifierIndex(
+    code,
+    (specifier) => specifier === "coincident/window/worker",
+  );
+  if (coincident < 0) return null;
+  const observer = firstSpecifierIndex(code, (specifier) =>
+    OBSERVER_SPECIFIER.test(specifier),
+  );
+  if (observer < 0)
+    return "coincident/window/worker를 import하지만 bootstrap-observer-install import가 없다";
+  if (observer > coincident)
+    return "bootstrap-observer-install import가 coincident/window/worker import보다 뒤에 있다(관찰 리스너가 coincident 리스너보다 늦게 등록된다)";
+  return null;
 }
 
 /** `text`(코드 파일 내용)의 CSP 위반 설명 목록. */
@@ -129,6 +170,13 @@ if (targets.length === 0) {
           fail(`${file}에 CSP 정적 검사 위반이 있다: ${violation}`);
         }
       }
+      if (allowSyncBridge && file.endsWith(".mjs")) {
+        const violation = findObserverOrderViolation(raw);
+        if (violation) {
+          clean = false;
+          fail(`${file}: ${violation}`);
+        }
+      }
       if (allowSyncBridge) continue;
       const text = raw.toLowerCase();
       for (const needle of FORBIDDEN) {
@@ -140,7 +188,7 @@ if (targets.length === 0) {
     if (clean)
       console.log(
         allowSyncBridge
-          ? `check-dist 통과: ${target} (${files.length}개 파일, 동기 브리지 허용 모드: CSP 정적 규칙 위반·pyodide 런타임 import 0)`
+          ? `check-dist 통과: ${target} (${files.length}개 파일, 동기 브리지 허용 모드: CSP 정적 규칙 위반·관찰기 import 순서 위반·pyodide 런타임 import 0)`
           : `check-dist 통과: ${target} (${files.length}개 파일, 금지 문자열·pyodide 런타임 import 0)`,
       );
   }

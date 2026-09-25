@@ -13,7 +13,7 @@ coincident `Worker`가 생성자 안에서 동기로 보내는 첫 메시지(배
 _Avoid_: 핸드셰이크
 
 **부트스트랩 관찰기(`createBootstrapObserver`)**:
-모듈 평가 시점에 `message`를 캡처 단계 리스너로 듣고 배열 메시지가 도착했는지만 기록한다. coincident 리스너가 `stopImmediatePropagation()`으로 메시지를 삼키므로 일반 리스너는 그 뒤에서 보지 못해 캡처 단계로 건다. 메시지를 소비하지 않는다. `prepare`가 이 기록으로 첫 정적 import 위반을 고정 대기 없이 알아챈다.
+모듈 평가 시점에 `message` 리스너를 걸고 배열 메시지가 도착했는지만 기록한다. coincident 리스너가 `stopImmediatePropagation()`으로 메시지를 삼키므로 **coincident 리스너보다 먼저 등록**돼야 한다(성립 조건은 등록 순서다. 캡처 단계로 거는 방식은 Chromium worker 전역에서 성립하지 않았다). 그래서 별도 모듈(`bootstrap-observer-install`, dist에서도 별도 파일)로 두고 `worker.ts`가 `coincident/window/worker`보다 먼저 import한다. 메시지를 소비하지 않는다. `prepare`가 이 기록으로 첫 정적 import 위반을 고정 대기 없이 알아챈다.
 _Avoid_: 감시자, 스니퍼
 
 **첫 정적 import 규칙**:

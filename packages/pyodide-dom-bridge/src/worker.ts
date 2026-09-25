@@ -9,25 +9,14 @@
  *
  * Python에는 `from runo.browser import window, document`로 노출한다(`window`는 `parent`·`top`·`opener`를 막은 얕은 guard).
  */
+// 순서 유지: 관찰기 설치가 `coincident/window/worker`보다 먼저 평가돼야 한다(관찰 리스너가 coincident 리스너보다 먼저 등록).
+import { observer } from "./bootstrap-observer-install";
 import coincident from "coincident/window/worker";
 import type { WorkerPlugin } from "@cp949/runo-pyodide-core/worker";
-import { createBootstrapObserver } from "./bootstrap-observer";
 import { createDomBridgePlugin } from "./dom-bridge-plugin";
 import type { WorkerBridge } from "./worker-bridge";
 
 export type { WorkerBridge } from "./worker-bridge";
-
-/** 지금 전역이 worker 전역인가. 아니면(jsdom·node 시험) 모듈 평가 때 리스너를 걸지 않는다. */
-function isWorkerGlobalScope(): boolean {
-  const scope = (globalThis as { WorkerGlobalScope?: unknown })
-    .WorkerGlobalScope;
-  return typeof scope === "function" && globalThis instanceof scope;
-}
-
-// 모듈 평가 시점에 건다(`prepare`가 아니라). 부트스트랩은 이 시점 이후에만 볼 수 있다.
-const observer = isWorkerGlobalScope()
-  ? createBootstrapObserver(self)
-  : undefined;
 
 let bridgePromise: Promise<WorkerBridge> | undefined;
 

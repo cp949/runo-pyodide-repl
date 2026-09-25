@@ -71,10 +71,12 @@ describe("dom-bridge 자신의 의존 선언", () => {
     ]);
   });
 
-  test("sideEffects는 worker 진입점(import 시점 리스너)을 트리셰이킹에서 지키는 배열이다", () => {
+  test("sideEffects는 worker 진입점과 관찰기 설치 모듈(import 시점 리스너, dist의 해시 청크 포함)을 트리셰이킹에서 지키는 배열이다", () => {
     expect(manifest.sideEffects).toEqual([
       "./dist/worker.mjs",
+      "./dist/bootstrap-observer-install*.mjs",
       "./src/worker.ts",
+      "./src/bootstrap-observer-install.ts",
     ]);
   });
 

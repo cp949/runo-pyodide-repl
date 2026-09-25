@@ -14,7 +14,9 @@
   "type": "module",
   "sideEffects": [
     "./dist/worker.mjs",
-    "./src/worker.ts"
+    "./dist/bootstrap-observer-install*.mjs",
+    "./src/worker.ts",
+    "./src/bootstrap-observer-install.ts"
   ],
   "files": [
     "dist"
