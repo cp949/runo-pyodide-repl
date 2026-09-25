@@ -29,6 +29,9 @@ importers:
       '@cp949/runo-pyodide-core':
         specifier: workspace:*
         version: link:../../packages/pyodide-core
+      '@cp949/runo-pyodide-dom-bridge':
+        specifier: workspace:*
+        version: link:../../packages/pyodide-dom-bridge
       '@cp949/runo-pyodide-react':
         specifier: workspace:*
         version: link:../../packages/pyodide-react
