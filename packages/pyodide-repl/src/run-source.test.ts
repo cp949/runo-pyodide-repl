@@ -1361,6 +1361,39 @@ describe.each([
   });
 });
 
+// 이슈 13: 재그리기 콜백 전 reset()은 벤더가 화면에 아무것도 쓰지 않아 아직 그리지 않은 접두를 잃는다. reset이 복원한다.
+describe("재그리기 대기 중 reset()의 접두 복원(이슈 13)", () => {
+  test("아직 그리지 않은 접두 tick이 화면에 남고 안내 줄은 그 아래 행에 나온다", async () => {
+    const session = startSession({ asyncWrite: true });
+    await openPrompt(session, "pri");
+    // 재그리기 콜백을 배출하지 않는다: 입력줄은 지워졌고 접두 `tick`은 아직 그려지지 않았다.
+    await session.output("tick");
+    expect(session.vt.screen()).toBe("");
+
+    session.handle.reset();
+    await session.pump();
+
+    const lines = session.vt.lines();
+    expect(lines[0]).toBe("tick");
+    expect(lines[1]).toContain("세션 리셋됨");
+  });
+
+  test("대조: 재그리기가 끝난 뒤 reset()하면 접두는 이미 그려진 행에 있고 다시 쓰지 않는다", async () => {
+    const session = startSession({ asyncWrite: true });
+    await openPrompt(session, "pri");
+    await session.output("tick");
+    await session.pump();
+    expect(session.vt.screen()).toBe("tick>>> pri");
+
+    session.handle.reset();
+    await session.pump();
+
+    const lines = session.vt.lines();
+    expect(lines[0]).toBe("tick>>> pri");
+    expect(lines[1]).toContain("세션 리셋됨");
+  });
+});
+
 describe("열린 읽기 위 배경 출력(write 콜백 순서 경계)", () => {
   test("재그리기 콜백 전에 runSource하면 아직 그리지 않은 접두 tick을 행으로 남기고 출력 뒤 >>> pri를 복원한다", async () => {
     const session = startSession({ asyncWrite: true });

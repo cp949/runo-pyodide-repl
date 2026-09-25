@@ -831,6 +831,60 @@ describe("입력 읽기의 signal abort", () => {
     expect(fake.written.slice(before)).toEqual(["\r\n"]);
   });
 
+  // 이슈 13: 재그리기 콜백 전 abort하면 벤더가 화면에 아무것도 쓰지 않아 아직 그리지 않은 접두가 사라진다. 호출자가 복원한다.
+  describe("재그리기 대기 중 abort의 접두 복원(이슈 13)", () => {
+    /** `x: ab`가 그려진 입력 읽기를 열고, 배경 출력 `tick`(개행 없음)의 재그리기 write 콜백은 배출하지 않은 채 둔다. */
+    const openWithPendingPrefix = async () => {
+      const fake = createFakeTerminal({ asyncWrite: true });
+      const vt = new VtScreen(80, 24);
+      attachVtScreen(fake, vt);
+      const context = setup({ fake });
+      void context.handle.run("code");
+      context.core.output({ stream: "stdout", text: "x: " });
+      const request = context.core.requestInput("x: ");
+      for (let round = 0; round < 3; round += 1) {
+        await tick();
+        fake.flush();
+      }
+      fake.type("ab");
+      fake.flush();
+      expect(vt.screen()).toBe("x: ab");
+      return { ...context, vt, request };
+    };
+
+    test("아직 그리지 않은 접두 tick이 화면에 남고 뒤이은 트레이스백이 같은 행에 붙지 않는다", async () => {
+      const { fake, core, vt, request } = await openWithPendingPrefix();
+      core.output({ stream: "stdout", text: "tick" });
+      // 입력줄은 지워졌고 접두는 재그리기 콜백을 기다린다.
+      expect(vt.screen()).toBe("");
+
+      request.controller.abort();
+      await expect(request.result).resolves.toBeNull();
+      core.output({ stream: "stderr", text: "Traceback\n" });
+      fake.flush();
+      await tick();
+      fake.flush();
+
+      expect(vt.lines()).toEqual(["tick", "Traceback"]);
+      core.finishRun();
+    });
+
+    test("대조: 재그리기가 끝난 뒤 abort하면 접두가 이미 그려진 행에 있고 다시 쓰지 않는다", async () => {
+      const { fake, core, vt, request } = await openWithPendingPrefix();
+      core.output({ stream: "stdout", text: "tick" });
+      fake.flush();
+      expect(vt.screen()).toBe("tickx: ab");
+
+      request.controller.abort();
+      await expect(request.result).resolves.toBeNull();
+      core.output({ stream: "stderr", text: "Traceback\n" });
+      fake.flush();
+
+      expect(vt.lines()).toEqual(["tickx: ab", "Traceback"]);
+      core.finishRun();
+    });
+  });
+
   test("abort 뒤 친 키는 죽은 읽기에 들어가지 않고, 다음 읽기는 그 키를 받지 않는다", async () => {
     const { fake, startInput } = setup();
     const first = await startInput();

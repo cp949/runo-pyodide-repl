@@ -480,6 +480,16 @@ export class Readline implements ITerminalAddon {
   }
 
   /**
+   * `abovePrefix()` 중 아직 화면에 그리지 않은 것. 재그리기(`printAboveRaw`)의 write 콜백을 기다리는 동안에만 접두가 있으면
+   * 접두를 돌려주고(입력줄이 접두째 지워진 상태), 그 밖에는 `""`다. `cancelRead()`는 화면에 쓰지 않으므로 콜백 전에 취소하면
+   * 이 접두가 사라진다 — 취소 직전에 이 값을 읽어 다시 쓰는 것은 호출자 몫이다. 재그리기가 끝난 뒤의 접두는 이미 프롬프트 행에
+   * 그려져 있으므로 이 값이 `""`이고, 다시 쓰면 중복된다.
+   */
+  public undrawnAbovePrefix(): string {
+    return this.redrawing ? this.abovePrefix() : "";
+  }
+
+  /**
    * 열린 읽기 위에 배경 출력을 쓴다. 입력줄(프롬프트 첫 행부터 입력 마지막 행까지, 접두 포함)을 지우고 그 자리에
    * `lines`를 쓴 뒤, 프롬프트 앞에 `prefix`를 붙여 같은 읽기(버퍼·커서)를 그 아래에 다시 그린다. 다시 그리기는
    * write 콜백에서 앵커를 새 커서 행으로 옮긴 뒤 하고, 그동안 들어온 키는 `queued`에 쌓았다가 재생한다.

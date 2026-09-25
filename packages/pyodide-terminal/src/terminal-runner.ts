@@ -150,6 +150,10 @@ export function createTerminalRunnerWith(
     // 읽는 도중 abort(Ctrl+C·`stop()`·`reset()`·크래시): 열린 읽기를 끝내 다음 Enter가 죽은 읽기에 들어가지 않게 하고,
     // 입력줄 뒤에 줄바꿈을 내 이어질 트레이스백이 입력줄에 붙지 않게 한다. dispose 중에는 화면에 쓰지 않는다.
     const onAbort = () => {
+      // 재그리기 콜백 전이면 아직 그리지 않은 배경 출력 접두가 `cancelRead()`(화면 미기록)와 함께 사라진다. 먼저 남긴다.
+      // 벤더에 직접 쓴다: 열린 읽기가 있는 동안 sink 쓰기는 다시 입력줄 위 출력 경로(`printAboveRaw`)로 간다.
+      const undrawn = readline.undrawnAbovePrefix();
+      if (!disposed && undrawn !== "") readline.write(undrawn + "\x1b[0m");
       readline.cancelRead();
       if (!disposed) sinks.write("\r\n");
     };

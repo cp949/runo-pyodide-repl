@@ -198,6 +198,10 @@ export function createRepl(options: ReplOptions): ReplHandle {
         // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
         // rpc.dispose() → worker.terminate()(session.terminate()). 앞 리셋의 worker 생성이 실패해 세션이 없으면 쌓인 type-ahead만
         // 버린다(`cancelRead()`, 08-session.md 8.1).
+        // 재그리기 콜백 전이면 아직 그리지 않은 배경 출력 접두가 `cancelRead()`(화면 미기록)와 함께 사라진다. 먼저 자기 행으로 남기고
+        // 개행을 붙인다(안내 줄이 같은 행에 붙지 않게).
+        const undrawn = readline.undrawnAbovePrefix();
+        if (undrawn !== "") readline.write(undrawn + "\x1b[0m\r\n");
         if (session !== undefined) session.terminate();
         else readline.cancelRead();
         // 새 worker 생성이 실패해도 끝난 옛 세션을 가리키지 않게 한다(runner `restart()`와 같다).

@@ -1087,3 +1087,50 @@ describe("hasQueuedInput(결함 16)", () => {
     }
   });
 });
+
+describe("undrawnAbovePrefix(이슈 13)", () => {
+  test("재그리기 콜백을 기다리는 동안은 아직 그리지 않은 접두를 돌려주고 콜백 뒤에는 빈 문자열이다", () => {
+    const { term, readline } = setup();
+    void readline.read("> ");
+    term.type("abc");
+    term.asyncWrite = true;
+    void readline.printAboveRaw("", "tick");
+
+    expect(readline.undrawnAbovePrefix()).toBe("tick");
+    expect(term.vt.screen()).not.toContain("tick");
+
+    term.flush();
+    // 접두는 프롬프트 행에 그려졌다. 다시 쓰면 중복이므로 미그림 접두는 비어 있다(`abovePrefix()`는 그대로).
+    expect(term.vt.screen()).toContain("tick> abc");
+    expect(readline.abovePrefix()).toBe("tick");
+    expect(readline.undrawnAbovePrefix()).toBe("");
+  });
+
+  test("접두 없는 재그리기 대기·열린 읽기 없음·재그리기 밖에서는 빈 문자열이다", () => {
+    const { term, readline } = setup();
+    expect(readline.undrawnAbovePrefix()).toBe("");
+
+    void readline.read("> ");
+    term.type("abc");
+    expect(readline.undrawnAbovePrefix()).toBe("");
+
+    term.asyncWrite = true;
+    void readline.printAboveRaw("t\n", "");
+    expect(readline.undrawnAbovePrefix()).toBe("");
+  });
+
+  test("재그리기 대기 중 cancelRead()는 화면에 쓰지 않고 이후 미그림 접두도 비어 있다", () => {
+    const { term, readline } = setup();
+    void readline.read("> ").catch(() => {});
+    term.type("abc");
+    term.asyncWrite = true;
+    void readline.printAboveRaw("", "tick");
+    const before = term.bytes();
+
+    readline.cancelRead();
+    term.flush();
+
+    expect(term.bytes()).toBe(before);
+    expect(readline.undrawnAbovePrefix()).toBe("");
+  });
+});
