@@ -11,11 +11,11 @@
 
 ## 원인
 
-- reflected-ffi 원격 프록시는 자기 target이 비어 있는데도 `getOwnPropertyDescriptor`가 실제 창의 설명자를 돌려준다. 실제 `window.document`·`location`은 비설정(non-configurable) own 속성이다. 감싸는 `Proxy`가 그 설명자를 그대로 전달하면, target에 없거나 설정 가능한 속성에 대해 비설정으로 보고하는 것이 되어 프록시 불변식 위반이다.
-- Python `JsProxy`가 속성을 읽을 때 설명자 요청이 나간다.
+- reflected-ffi 원격 프록시는 자기 target이 비어 있는데도 `getOwnPropertyDescriptor`가 실제 창의 설명자를 돌려준다. 실제 `window.document`·`location`은 비설정(non-configurable) own 속성이라, 원격 프록시에 설명자를 묻는 순간 "target에 없거나 설정 가능한 속성을 비설정으로 보고"한 것이 되어 원격 프록시 자신의 불변식 위반(`TypeError`)으로 던진다.
+- 설명자를 묻는 쪽은 Python `JsProxy`가 아니라 **바깥 `Proxy`의 `[[Get]]` 불변식 검사**다. 원격 프록시를 target으로 둔 감싸는 `Proxy`는 `get` trap 결과를 검사하려고 target에 `getOwnPropertyDescriptor`를 묻는다. 그래서 `get` trap만 있는 감싸기로도 순수 JS에서 재현된다: `new Proxy(remote, { get: (t, k) => Reflect.get(t, k) }).document`(실제 reflected-ffi 0.7.2 local/remote 쌍, `_works/_completed/20260925-32-rd-023-dom-bridge/verify/post-review/a1-defect-probe.mjs`). Python에서는 `window.document` 읽기가 이 경로로 실패한다.
 
 ## 탐지/회피
 
-- `packages/pyodide-dom-bridge/src/guarded-window.ts`: 감싸는 프록시의 target을 **빈 일반 객체**로 두고 `get`·`set`·`has`·`deleteProperty`·`ownKeys`를 원격에 직접 위임한다. `getOwnPropertyDescriptor`는 원격 설명자를 묻지 않고 값에서 만든 설정 가능한(`configurable: true`) 데이터 설명자로 돌려준다. `parent`·`top`·`opener`는 `get`에서 명시 오류, 설명자·나열에서는 없는 속성처럼 처리한다.
-- L0는 "빈 target 프록시 + 비설정 속성 설명자" 대역을 쓴다(`packages/pyodide-dom-bridge/src/guarded-window.test.ts`). 실제 원격 프록시의 동작은 브라우저에서만 나오므로 `pnpm --filter demo e2e:dom-bridge` S2 guarded 셀(guarded `window`의 `document` 읽기와 `parent` 차단)이 확인한다.
+- `packages/pyodide-dom-bridge/src/guarded-window.ts`: 감싸는 프록시의 target을 **빈 일반 객체**로 두고 `get`·`set`·`has`(심볼 키 포함)·`deleteProperty`·`ownKeys`·`getPrototypeOf`를 원격에 직접 위임한다. 빈 target을 바꾸는 `defineProperty`·`setPrototypeOf`·`preventExtensions`는 `false`로 거부한다(빈 target에 비설정 속성이 생기거나 확장 불가가 되면 뒤의 설명자·나열이 불변식 오류로 영구히 깨진다). `has`가 심볼 키를 위임해야 메서드 호출 receiver로 넘어간 guard를 reflected-ffi가 `reflected in value` 검사로 원격 창 참조로 되돌려 main 쪽 `this`가 원본 창이 된다. `getOwnPropertyDescriptor`는 원격 설명자를 묻지 않고 값에서 만든 설정 가능한(`configurable: true`) 데이터 설명자로 돌려준다. `parent`·`top`·`opener`는 `get`에서 명시 오류, 설명자·나열에서는 없는 속성처럼 처리한다.
+- L0는 "빈 target 프록시 + 비설정 속성 설명자" 대역과 실제 reflected-ffi 0.7.2 local/remote 쌍(메서드 호출 receiver)을 쓴다(`packages/pyodide-dom-bridge/src/guarded-window.test.ts`). 실제 원격 프록시의 동작은 브라우저에서만 나오므로 `pnpm --filter demo e2e:dom-bridge` S2 guarded 셀(guarded `window`의 `document` 읽기와 `parent` 차단)이 확인한다.
 - 알려진 차이: `dir(window)` 길이가 가드 없는 창보다 3개 적다(차단 3개, 프로브 기준 1289 → 1286). `docs/design/16-dom-bridge.md` 16.6.
