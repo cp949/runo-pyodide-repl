@@ -8,7 +8,7 @@
  * 그 행째 화면에 남으므로 다음 읽기의 꼬리가 되지 않는다.
  */
 import type { Readline } from "@cp949/runo-xterm-readline";
-import { createOutputTail } from "@cp949/runo-pyodide-core";
+import { createOutputTail, leavesVisibleText } from "@cp949/runo-pyodide-core";
 
 export const RED = "\x1b[31m";
 export const RESET = "\x1b[0m";
@@ -46,27 +46,14 @@ export interface AboveReadSplit {
   resume?: string;
 }
 
-/** SGR(`ESC [ 숫자;: m`)을 뺀 글자가 있는가(`\r` 구간이 화면에 무언가를 남기는가). */
-function hasVisibleText(segment: string): boolean {
-  let index = 0;
-  while (index < segment.length) {
-    if (segment[index] !== "\x1b" || segment[index + 1] !== "[") return true;
-    let end = index + 2;
-    while (end < segment.length && "0123456789;:".includes(segment.charAt(end)))
-      end += 1;
-    if (segment[end] !== "m") return true;
-    index = end + 1;
-  }
-  return false;
-}
-
 /**
  * 열린 읽기의 현재 접두 `prefix`(또는 앞 분리의 `resume`) 뒤에 출력 `text`가 왔을 때 완성 행과 새 접두로 나눈다. `prefix + text`의
  * 마지막 `\n`까지가 완성 행(벤더가 접두째 지우므로 앞 접두를 이어 쓴다)이고, 새 접두는 꼬리 규칙(04-stdin-input.md 3.3: 마지막
  * `\n` 뒤, 그 안의 마지막 `\r` 뒤, 줄 경계를 넘어 열린 SGR을 앞에 이어 붙임)을 `createOutputTail`로 그대로 계산한 값이다.
- * 예외: 마지막 `\r` 뒤에 보이는 글자가 없으면(`100%\r`, 05-output.md 4.4) 꼬리 규칙은 빈 접두를 내 조각이 사라지므로, 그 행에서
- * 마지막으로 보이는 `\r` 구간까지 먹인 꼬리를 접두로 하고 나머지(`\r`부터)를 붙인 원문을 `resume`으로 준다. `\n` → `\r\n` 정규화는
- * 벤더 `write`가 한다.
+ * 예외: 마지막 `\r` 뒤에 보이는 글자가 없으면(`100%\r`·`50%\r\x07`, 05-output.md 4.4) 꼬리 규칙은 빈 접두를 내 조각이 사라지므로, 그 행에서
+ * 마지막으로 보이는 `\r` 구간까지 먹인 꼬리를 접두로 하고 나머지(`\r`부터)를 붙인 원문을 `resume`으로 준다. "보이는 글자"는 꼬리
+ * 정규화와 같은 기준(core `leavesVisibleText`)이라야 한다 — 정규화가 지우는 BEL·BS를 글자로 세면 접두가 빈 문자열이 되어 화면의
+ * 진행률이 통째로 사라진다. `\n` → `\r\n` 정규화는 벤더 `write`가 한다.
  */
 export function splitAboveRead(prefix: string, text: string): AboveReadSplit {
   const full = prefix + text;
@@ -77,14 +64,14 @@ export function splitAboveRead(prefix: string, text: string): AboveReadSplit {
   const next = tail.value();
   const lastLine = full.slice(lineStart);
   const lastCr = lastLine.lastIndexOf("\r");
-  if (lastCr === -1 || hasVisibleText(lastLine.slice(lastCr + 1))) {
+  if (lastCr === -1 || leavesVisibleText(lastLine.slice(lastCr + 1))) {
     return { lines, prefix: next };
   }
   // 마지막으로 보이는 `\r` 구간의 끝(그 뒤 `\r`의 위치)을 찾는다.
   let end = lastCr;
   while (end > 0) {
     const start = lastLine.lastIndexOf("\r", end - 1) + 1;
-    if (hasVisibleText(lastLine.slice(start, end))) break;
+    if (leavesVisibleText(lastLine.slice(start, end))) break;
     end = start - 1;
   }
   if (end <= 0) return { lines, prefix: next };

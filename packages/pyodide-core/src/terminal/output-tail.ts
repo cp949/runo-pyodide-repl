@@ -3,6 +3,7 @@
  * "마지막 `\n` 뒤이면서 그 안에서 마지막 `\r` 뒤" 텍스트를 프롬프트로 다시 그릴 수 있게 한다.
  * 줄 경계를 넘어 열린 SGR(색) 시퀀스는 꼬리 앞에 이어 붙인다. 커서 이동 없이 줄 위에서 글자만 바꾸는 제어 문자는
  * 폭 계산이 어긋나지 않게 정규화한다 — BS(`\b`)는 본문 마지막 글자를 지우고, BEL 등 나머지 C0와 DEL은 제거한다.
+ * 예외로 문자열 시퀀스(OSC·DCS 등) 안은 손대지 않는다: 종료자 BEL을 지우면 시퀀스가 열린 채 남는다.
  * 터미널·pyodide에 의존하지 않는 순수 모듈이다.
  */
 export interface OutputTail {
@@ -44,6 +45,17 @@ function isDroppedControl(code: number): boolean {
   );
 }
 
+/**
+ * ESC 다음 바이트가 문자열 시퀀스(OSC `]`·DCS `P`·SOS `X`·PM `^`·APC `_`)를 여는가. 이 시퀀스는 BEL이나
+ * ST(`ESC \`)가 닫으므로 그 안의 제어 문자는 정규화하지 않는다 — 종료자를 지우면 시퀀스가 열린 채 남아
+ * 터미널이 뒤따르는 프롬프트·입력까지 삼킨다.
+ */
+function opensStringSequence(char: string | undefined): boolean {
+  return (
+    char === "]" || char === "P" || char === "X" || char === "^" || char === "_"
+  );
+}
+
 /** `text[start]`가 ESC이고 CSI 시퀀스가 `text` 끝까지 이어지면 true. 본문 끝의 시퀀스를 건너뛰는 데 쓴다. */
 function endsWithCsi(text: string, start: number): boolean {
   if (text[start + 1] !== "[") return false;
@@ -82,14 +94,41 @@ function eraseLastChar(body: string): string {
   return body.slice(0, end - size) + body.slice(end);
 }
 
+/**
+ * `feed`가 정규화한 뒤에도 화면에 남는 글자가 `segment`에 있는가. `\n`·`\r`이 없는 한 줄 구간을 받는다
+ * (`\r` 구간이 화면에 무언가를 남기는지 보는 소비자용, `05-output.md` 4.4). SGR은 화면에 글자를 남기지 않으므로
+ * 건너뛰고, SGR이 아닌 시퀀스는 본문에 남으므로 보이는 것으로 센다. 제거 대상 제어 문자는 세지 않고 BS는 앞 글자를
+ * 하나 무른다 — 이 판정이 정규화와 어긋나면 접두가 빈 문자열이 되어 화면의 글자가 사라진다.
+ */
+export function leavesVisibleText(segment: string): boolean {
+  let index = 0;
+  let visible = 0;
+  while (index < segment.length) {
+    const char = segment[index];
+    if (char === ESC) {
+      const end = sgrEnd(segment, index);
+      if (end === -1) return true;
+      index = end;
+      continue;
+    }
+    if (char === "\b") visible = Math.max(0, visible - 1);
+    else if (!isDroppedControl(segment.charCodeAt(index))) visible += 1;
+    index += 1;
+  }
+  return visible > 0;
+}
+
 export function createOutputTail(): OutputTail {
   let active: string[] = []; // 커서 위치에서 열려 있는 SGR
   let carried: string[] = []; // 현재 줄이 시작될 때 열려 있던 SGR
   let body = "";
+  // 닫히지 않은 문자열 시퀀스(OSC 등) 안인가. 조각을 넘어 이어지고, 줄이 바뀌면 끝난 것으로 본다.
+  let inString = false;
 
   const startLine = () => {
     body = "";
     carried = active;
+    inString = false;
   };
   const applySgr = (sequence: string, parameters: string) => {
     // 첫 파라미터가 0(또는 빈 값)이면 지금까지의 SGR이 모두 꺼진다. 나머지 파라미터가 있으면 그 시퀀스만 남는다.
@@ -111,6 +150,17 @@ export function createOutputTail(): OutputTail {
           startLine();
           index += 1;
           segmentStart = index;
+        } else if (inString) {
+          // 문자열 시퀀스의 본문: 원문 그대로 두고 종료자(BEL·ST)에서만 닫는다.
+          if (char === "\x07") {
+            inString = false;
+            index += 1;
+          } else if (char === ESC && text[index + 1] === "\\") {
+            inString = false;
+            index += 2;
+          } else {
+            index += 1;
+          }
         } else if (char === "\b") {
           // 본문 마지막 글자를 지운다. 줄 시작 SGR(`carried`)은 본문과 별개라 건드리지 않는다.
           body = eraseLastChar(body + text.slice(segmentStart, index));
@@ -123,7 +173,13 @@ export function createOutputTail(): OutputTail {
         } else if (char === ESC) {
           const end = sgrEnd(text, index);
           if (end === -1) {
-            index += 1; // SGR이 아닌 제어 시퀀스는 본문에 그대로 남긴다
+            // SGR이 아닌 제어 시퀀스는 본문에 그대로 남긴다. 문자열 시퀀스면 종료자까지 정규화를 멈춘다.
+            if (opensStringSequence(text[index + 1])) {
+              inString = true;
+              index += 2;
+            } else {
+              index += 1;
+            }
           } else {
             applySgr(text.slice(index, end), text.slice(index + 2, end - 1));
             index = end; // SGR 텍스트도 본문에 남는다(segmentStart를 옮기지 않음)
@@ -138,6 +194,7 @@ export function createOutputTail(): OutputTail {
       active = [];
       carried = [];
       body = "";
+      inString = false;
     },
     value: () => carried.join("") + body,
   };

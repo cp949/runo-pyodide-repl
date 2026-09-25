@@ -4,7 +4,11 @@
  * 순수 함수로 확인한다. 터미널·pyodide·worker 없이 도는 jsdom 기본 환경 시험이다(04-stdin-input.md 3.3).
  */
 import { describe, expect, test } from "vitest";
-import { createOutputTail, MAX_ACTIVE_SGR } from "./output-tail";
+import {
+  createOutputTail,
+  leavesVisibleText,
+  MAX_ACTIVE_SGR,
+} from "./output-tail";
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -203,5 +207,71 @@ describe("제어 문자 정규화(BS 적용, BEL·나머지 C0 제거)", () => {
     expect(tail("a\r\nb")).toBe("b");
     expect(tail(`${RED}x${RESET}`)).toBe(`${RED}x${RESET}`);
     expect(tail("a\x1b[2Kb")).toBe("a\x1b[2Kb");
+  });
+});
+
+// 문자열 시퀀스(OSC·DCS 등)는 BEL·ST가 닫는다. 종료자를 C0로 보고 지우면 시퀀스가 열린 채 본문에 남아
+// 터미널이 뒤따르는 프롬프트·입력까지 삼킨다(RD-026 사후 리뷰).
+describe("문자열 시퀀스(OSC·DCS)는 정규화하지 않는다", () => {
+  test("OSC의 종료자 BEL을 지우지 않는다", () => {
+    expect(tail("\x1b]0;title\x07done")).toBe("\x1b]0;title\x07done");
+  });
+
+  test("시퀀스가 닫힌 뒤의 BEL은 다시 제거한다", () => {
+    expect(tail("\x1b]0;t\x07a\x07b")).toBe("\x1b]0;t\x07ab");
+  });
+
+  test("ST(`ESC \\`)로 닫는 시퀀스도 그대로 남는다", () => {
+    expect(tail("\x1b]8;;http://x\x1b\\a\x07b")).toBe(
+      "\x1b]8;;http://x\x1b\\ab",
+    );
+  });
+
+  test("조각으로 나뉘어 와도 종료자가 남는다", () => {
+    expect(tail("\x1b]0;ti", "tle\x07x")).toBe("\x1b]0;title\x07x");
+  });
+
+  test("시퀀스 안의 BS·다른 C0는 적용·제거하지 않는다", () => {
+    expect(tail("\x1b]0;a\bb\x01c\x07d")).toBe("\x1b]0;a\bb\x01c\x07d");
+  });
+
+  test("OSC 밖의 SGR·BS 처리는 그대로다", () => {
+    expect(tail(`${RED}ab\b`, "\x1b]0;t\x07", "c\bd")).toBe(
+      `${RED}a\x1b]0;t\x07d`,
+    );
+  });
+
+  test("개행·`\\r`는 열린 시퀀스도 끝내고 본문을 비운다(줄 단위 꼬리 규칙)", () => {
+    expect(tail("\x1b]0;a\nb\x07c")).toBe("bc");
+    expect(tail("\x1b]0;a\rb\x07c")).toBe("bc");
+  });
+
+  test("DCS(`ESC P`)·APC(`ESC _`)도 같은 규칙이다", () => {
+    expect(tail("\x1bP1;2q\x07x")).toBe("\x1bP1;2q\x07x");
+    expect(tail("\x1b_G1\x1b\\\x07y")).toBe("\x1b_G1\x1b\\y");
+  });
+});
+
+// `\r` 구간이 화면에 무언가를 남기는지 보는 소비자(terminal `splitAboveRead`)용 판정. 정규화와 기준이 어긋나면
+// 접두가 빈 문자열이 되어 화면의 글자가 사라진다(RD-026 사후 리뷰).
+describe("정규화 뒤 남는 글자 판정(`leavesVisibleText`)", () => {
+  test.each([
+    ["빈 구간", "", false],
+    ["글자", "50%", true],
+    ["탭", "\t", true],
+    ["SGR만", `${RED}${RESET}`, false],
+    ["SGR 뒤 글자", `${RED}x`, true],
+    ["BEL만", "\x07", false],
+    ["BEL과 다른 C0만", "\x07\x00\x1a\x7f", false],
+    ["BEL 뒤 글자", "\x07x", true],
+    ["BS만", "\b", false],
+    ["글자를 다 지운 BS", "ab\b\b", false],
+    ["글자보다 많은 BS", "a\b\b\b", false],
+    ["글자를 다 지우지 못한 BS", "ab\b", true],
+    ["BS 뒤 글자", "a\bx", true],
+    ["SGR이 아닌 CSI는 본문에 남는다", "\x1b[K", true],
+    ["OSC는 본문에 남는다", "\x1b]0;t\x07", true],
+  ])("%s", (_이름, 구간, 기대) => {
+    expect(leavesVisibleText(구간)).toBe(기대);
   });
 });

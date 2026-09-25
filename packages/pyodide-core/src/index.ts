@@ -19,7 +19,7 @@ export {
   createStdinMailbox,
 } from "./protocol/stdin-mailbox";
 export { composeRpcHandlers } from "./protocol/rpc-handlers";
-export { createOutputTail } from "./terminal/output-tail";
+export { createOutputTail, leavesVisibleText } from "./terminal/output-tail";
 export {
   CORE_MAIN_HANDLER_NAMES,
   startCoreSession,

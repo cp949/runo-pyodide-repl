@@ -539,6 +539,40 @@ describe("열린 읽기 중 `\\r`로 끝나는 조각(진행률)", () => {
       resume: undefined,
     },
     {
+      // 보이는 글자 판정은 꼬리 정규화와 같은 기준이어야 한다. BEL을 글자로 세면 접두가 빈 문자열이 되어
+      // 화면의 `50%`가 통째로 사라진다(RD-026 사후 리뷰).
+      name: "`\\r` 뒤 BEL만 있으면 정규화로 사라지므로 그 앞 구간을 접두로 보관한다",
+      prefix: "",
+      text: "50%\r\x07",
+      lines: "",
+      next: "50%",
+      resume: "50%\r\x07",
+    },
+    {
+      name: "`\\r` 뒤 BS만 있어도 같다(정규화 뒤 남는 글자가 없다)",
+      prefix: "",
+      text: "50%\r\b",
+      lines: "",
+      next: "50%",
+      resume: "50%\r\b",
+    },
+    {
+      name: "BEL뿐인 `\\r` 구간은 건너뛰고 그 앞 구간까지 거슬러 보관한다",
+      prefix: "",
+      text: "50%\r\x07\r",
+      lines: "",
+      next: "50%",
+      resume: "50%\r\x07\r",
+    },
+    {
+      name: "`\\r` 뒤 BS가 글자를 다 지우지 못하면 남은 글자가 접두다",
+      prefix: "",
+      text: "50%\rab\b",
+      lines: "",
+      next: "a",
+      resume: undefined,
+    },
+    {
       name: "`\\r` 뒤 SGR이 아닌 제어 시퀀스는 글자로 보고 꼬리 규칙 그대로다",
       prefix: "",
       text: "100%\r\x1b[K",
