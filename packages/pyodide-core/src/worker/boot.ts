@@ -1,6 +1,7 @@
 /**
  * worker 부팅 시퀀스(01-protocols.md 5절 S1, 00-architecture.md 3.1). 초기화 프레임을 받은 뒤
- * pyodide 로드 → 콘솔 생성 → 호환 탐지 → Ctrl+C 연결 → stdin 배선 → `ready` → driver 실행 순서로 진행한다. 로더는 주입해 node에서 npm
+ * pyodide 로드 → interrupt 공개 API 확인 → 플러그인 `prepare` → 콘솔 생성 → 호환 탐지 → Ctrl+C 연결 → stdin 배선 → `ready` → driver 실행
+ * 순서로 진행한다. 로더는 주입해 node에서 npm
  * `loadPyodide`로 시험하고 브라우저에서는 CDN 로더(`loadPyodideFromCdn`)를 쓴다.
  */
 import type { PyodideInterface } from "pyodide";
@@ -44,6 +45,20 @@ export interface BootOptions extends BootDeps {
  * 두 표는 서로 다른 RPC 끝점에 붙어 이름 충돌 검사도 따로 한다(각 끝점에서 core 표 + driver 표를 `composeRpcHandlers`로 합성).
  */
 const CORE_WORKER_HANDLERS = {};
+
+/**
+ * 플러그인이 던지거나 reject한 값을 `plugin "<name>": ` 뒤에 붙일 문구로 바꾼다. `String()`이 던지는 값(null 프로토타입 객체,
+ * `toString`이 던지는 객체)이면 `Object.prototype.toString`(`[object Object]` 등)으로 대신한다: 변환이 catch 안에서 던지면 접두와
+ * 플러그인 이름이 사라진 다른 오류가 loadFailed로 나간다.
+ */
+function describePluginFailure(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  try {
+    return String(error);
+  } catch {
+    return Object.prototype.toString.call(error);
+  }
+}
 
 /**
  * 순서: driver 옵션 검증(`parseOptions`) → driver 세션 생성 → RPC 생성(core + driver 핸들러 합성) → loadPyodide → interrupt 공개
@@ -94,8 +109,10 @@ export async function bootWorker(
       try {
         await plugin.prepare({ pyodide });
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`plugin "${plugin.name}": ${reason}`, { cause: error });
+        throw new Error(
+          `plugin "${plugin.name}": ${describePluginFailure(error)}`,
+          { cause: error },
+        );
       }
     }
     pyconsole = session.createConsole({ pyodide, sinks, frame });

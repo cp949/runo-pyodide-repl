@@ -259,6 +259,56 @@ describe("bootWorker: plugins 실패는 loadFailed", () => {
     expect(outcome).toEqual(["loadFailed", 'Error: plugin "c": 문자열 사유']);
   });
 
+  test.each([
+    ["null 프로토타입 객체", () => Object.create(null) as unknown],
+    [
+      "toString이 던지는 객체",
+      () => ({
+        toString() {
+          throw new Error("변환 실패");
+        },
+      }),
+    ],
+  ])(
+    "%s로 reject해도 사유 변환이 던지지 않고 plugin 접두를 붙인 loadFailed로 알린다",
+    async (_이름, makeReason) => {
+      const main = createMainSide();
+      const plugin: WorkerPlugin = {
+        name: "x",
+        prepare: () => Promise.reject(makeReason()),
+      };
+
+      await bootWorker(main.frame, {
+        driver: createDriver([]),
+        loadPyodide: async () => fakePyodide,
+        plugins: [plugin],
+      });
+      const outcome = await main.waitForOutcome();
+
+      expect(outcome[0]).toBe("loadFailed");
+      expect(String(outcome[1])).toMatch(/^Error: plugin "x": \S/);
+    },
+  );
+
+  test("plugins가 모두 성공한 뒤 createConsole이 실패하면 loadFailed 문구에 plugin 접두가 없다", async () => {
+    const main = createMainSide();
+    const log: string[] = [];
+
+    await bootWorker(main.frame, {
+      driver: createDriver(log),
+      loadPyodide: async () => fakePyodide,
+      plugins: [
+        { name: "a", prepare: () => void log.push("a") },
+        { name: "b", prepare: () => void log.push("b") },
+      ],
+    });
+    const outcome = await main.waitForOutcome();
+
+    expect(log).toEqual(["a", "b", "createConsole"]);
+    expect(outcome).toEqual(["loadFailed", "Error: stop"]);
+    expect(String(outcome[1])).not.toContain('plugin "');
+  });
+
   test("앞 플러그인이 실패하면 뒤 플러그인은 부르지 않는다", async () => {
     const main = createMainSide();
     const log: string[] = [];

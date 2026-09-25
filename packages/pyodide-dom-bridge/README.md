@@ -13,7 +13,7 @@ worker의 Python에서 main 페이지의 `window`·`document`를 동기 프록�
 
 ## 사용
 
-worker 파일에서 `./worker`를 **첫 정적 import**로 둔다. coincident는 이 모듈이 평가될 때 부트스트랩 메시지 리스너를 한 번 건다. main이 보낸 부트스트랩은 worker 생성 직후 도착하므로 import가 늦으면(동적 import 포함) 메시지를 놓치고 대기가 끝나지 않는다. 이 경우 `domBridge().prepare`가 명시 오류로 실패해 세션이 `load-failed`가 된다.
+worker 파일에서 `./worker`를 **첫 정적 import**로 둔다. coincident는 이 모듈이 평가될 때 부트스트랩 메시지 리스너를 한 번 건다. main이 보낸 부트스트랩은 worker 생성 직후 도착하므로 import가 늦으면(동적 import 포함) 메시지를 놓치고 대기가 끝나지 않는다. 이 경우 `domBridge().prepare`가 명시 오류로 실패해 세션이 `load-failed`가 된다. main이 `createBridgeMain()`의 `Worker`가 아니라 전역 `Worker`로 worker를 만들어도 부트스트랩이 오지 않아 같은 오류가 난다(문구가 두 원인을 함께 알린다).
 
 ```ts
 // app.worker.ts

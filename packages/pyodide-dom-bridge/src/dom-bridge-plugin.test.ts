@@ -64,6 +64,25 @@ describe("dom-bridge 플러그인 prepare", () => {
     expect(registerJsModule).not.toHaveBeenCalled();
   });
 
+  test("부트스트랩 미수신 문구는 기존 접두를 유지하고 두 번째 원인(main이 createBridgeMain()의 Worker로 만들지 않음)도 알린다", async () => {
+    const { plugin, pyodide } = createHarness({ received: false });
+
+    const error = await Promise.resolve(plugin.prepare({ pyodide })).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    // e2e(`judgeLoadFailedRows`)·문서가 매칭하는 접두와 원인 문구.
+    expect(
+      message.startsWith("coincident 부트스트랩 메시지를 받지 못했다. "),
+    ).toBe(true);
+    expect(message).toContain("첫 정적 import");
+    expect(message).toContain("createBridgeMain()");
+    expect(message).toContain("전역 Worker");
+  });
+
   test("native가 false면 동기 DOM을 쓸 수 없다는 명시 오류로 실패하고 runo 모듈을 등록하지 않는다", async () => {
     const { plugin, pyodide, bridge, registerJsModule } = createHarness({
       native: false,
