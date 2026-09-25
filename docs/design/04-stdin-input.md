@@ -14,7 +14,7 @@
   stdin 콜백은 GIL이 풀린 상태라 `checkInterrupt()`가 `FS.ErrnoError(EINTR)`를 던지고, CPython이
   EINTR 뒤 `PyErr_CheckSignals()`로 버퍼를 소비해 **`input()` 호출 지점에서** `KeyboardInterrupt`를
   올린다(PEP 475). 콜백 안에서 쓰고 바로 소비되므로 잔류 SIGINT가 없다.
-- `checkInterrupt()`가 던지지 않고 돌아오면 `console.warn("[repl.worker] checkInterrupt가 SIGINT를 소비하지 않아 입력 취소를 EOF로 처리한다")`를 남기고 `null`을 돌려준다(→ `EOFError`). 버퍼가 아직 연결되지 않은 구간(`connectInterrupts` 전)에 콜백이 불리는 경우다.
+- `checkInterrupt()`가 던지지 않고 돌아오면 `console.warn("[worker] checkInterrupt가 SIGINT를 소비하지 않아 입력 취소를 EOF로 처리한다")`를 남기고 `null`을 돌려준다(→ `EOFError`). 버퍼가 아직 연결되지 않은 구간(`connectInterrupts` 전)에 콜백이 불리는 경우다.
 - `signalInterrupt`로 써서 **요청 번호를 반드시 올린다**. 번호를 올리지 않으면 핸들러가 직전 눌림의
   재전송으로 보고 이 취소를 무시한다(TRP-035).
 - 금지된 대안 5종(실측으로 탈락, TRP-014): `buf[0]=2` 뒤 정상 반환(신호가 임의 지점에서 소비돼 HANG·엉뚱한

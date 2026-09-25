@@ -47,7 +47,7 @@ export function createStdinCallback(
     deps.signalInterrupt();
     deps.checkInterrupt();
     console.warn(
-      "[repl.worker] checkInterrupt가 SIGINT를 소비하지 않아 입력 취소를 EOF로 처리한다",
+      "[worker] checkInterrupt가 SIGINT를 소비하지 않아 입력 취소를 EOF로 처리한다",
     );
     return null;
   };
