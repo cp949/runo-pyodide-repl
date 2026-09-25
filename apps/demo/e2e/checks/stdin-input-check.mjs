@@ -17,7 +17,7 @@ const url = process.argv[2] ?? "http://localhost:5173";
 const label = url.includes(":4173") ? "preview" : "dev";
 
 const h = await open(url);
-const { step, waitPrompt, waitLastEndsWith, waitFor, clear, type, enter, press, tail, lastLine, rows, trimmedRows, nonEmpty, spansOf, cursorRow, focus, typeWhenReading, settled, page } = h;
+const { step, waitPrompt, waitLastEndsWith, waitFor, clear, type, enter, press, tail, lastLine, rows, trimmedRows, nonEmpty, spansOf, cursorRow, focus, typeWhenReading, settled, markText, readMark, page } = h;
 
 /** 화면을 지우고 문장을 제출해 stdin 읽기가 시작될 때까지 기다린다. `promptSuffix`가 있으면 그 프롬프트가 보일 때까지 기다린다. */
 async function startInput(code, promptSuffix) {
@@ -241,21 +241,24 @@ await stdinStep("U1 앞 문장의 꼬리(t)를 물려받지 않는다(t>>> 뒤 i
   await finishRead();
 });
 
-await stdinStep("TICK ROADMAP: 프롬프트 대기 중 call_later(2, print, 'TICK')의 TICK이 Enter 없이 2.5초 안에 보인다", async () => {
+await stdinStep("TICK ROADMAP: 프롬프트 대기 중 call_later(2, print, 'TICK')의 TICK이 Enter 없이 보이고 2초보다 이르지 않다", async () => {
   await clear();
   await type("import asyncio; asyncio.get_event_loop().call_later(2, print, 'TICK')");
+  // 입력한 코드 행(`call_later(2, print, 'TICK')`)도 `TICK`을 포함한다. 그 행을 빼야 출력이 나온 시점을 잰다(빼지 않으면 즉시 참).
+  // 시작점은 프롬프트 복귀가 아니라 Enter `keydown`의 페이지 시각이다. 복귀 뒤에 재면 느린 장비에서 구간이 짧아져 하한이 깨진다.
+  // 페이지 시계라 Node↔CDP 왕복이 값에 섞이지 않는다(TRP-022). 입력 줄이 80열 안에 들어가 감기지 않으므로 `call_later`가 같은 행에 있다.
+  await markText("TICK", { exclude: "call_later", startOnKey: { key: "Enter" } });
   await enter();
   await waitPrompt(">>>");
-  // 입력한 코드 행(`call_later(2, print, 'TICK')`)도 `TICK`을 포함한다. 그 행을 빼야 출력이 나온 시점을 잰다(빼지 않으면 즉시 참).
   const tickRows = async () => (await rows()).filter((l) => l.includes("TICK") && !l.includes("call_later"));
   if ((await tickRows()).length !== 0) throw new Error(`프롬프트가 돌아온 시점에 이미 TICK 출력이 있다 ${show(await tail(4))}`);
-  const started = Date.now();
-  await waitFor(async () => (await tickRows()).length > 0, "TICK 출력(Enter 없이)", 3000);
-  const elapsed = Date.now() - started;
+  // 정지 감지용 10초 대기다(판정선이 아니다, 9.7 4항). 상한 ms 판정은 하지 않는다: 요구 사항은 "Enter 없이 나온다"이지 응답성 수치가 아니다.
+  const { elapsedMs } = await readMark({ timeoutMs: 10000 });
   await settled();
-  console.log(`관찰  TICK ${elapsed}ms 뒤 화면 끝:`, show(await tail(4)), "커서 행", await cursorRow());
-  if (elapsed < 1000) throw new Error(`TICK이 ${elapsed}ms 만에 보였다(call_later(2)보다 이르다)`);
-  if (elapsed > 2500) throw new Error(`TICK이 ${elapsed}ms 뒤에 보였다(2500ms 초과)`);
+  console.log(`관찰  TICK ${elapsedMs.toFixed(1)}ms 뒤(Enter 기준) 화면 끝:`, show(await tail(4)), "커서 행", await cursorRow());
+  h.notes["TICK Enter→TICK 출현(기록, ms)"] = Math.round(elapsedMs * 10) / 10;
+  // 하한: `call_later(2)` 타이머 자체가 2000ms라 느린 장비에서 더 빨라지지 않는다(9.7 하한 행).
+  if (elapsedMs < 2000) throw new Error(`TICK이 Enter 뒤 ${elapsedMs.toFixed(1)}ms 만에 보였다(call_later(2)의 2000ms보다 이르다)`);
 });
 
 await step("콘솔 경고·오류·pageerror가 없다", async () => {

@@ -693,11 +693,11 @@ async function run(url) {
         throw new Error(`정지 a.=${attrStats.nulls} 빈스템=${blankStats.nulls}`);
       }
     });
-    await step("C12 최대 200ms 이내(a.·빈 스템 둘 다)", async () => {
-      if (attrStats.max > 200 || blankStats.max > 200) {
-        throw new Error(`최대 a.=${attrStats.max}ms 빈스템=${blankStats.max}ms`);
-      }
-    });
+    // 왕복 지연의 중앙값·최대는 판정이 아니라 기록이다(9.7 6항, 절대 ms 상한 금지). 정지 여부는 위 "정지 0" 판정이 맡는다.
+    h.notes["C12 a. 속성 후보 지연(기록, 웜 N=20, ms)"] =
+      `중앙값 ${attrStats.median?.toFixed(1)} 최대 ${attrStats.max?.toFixed(1)} 미도착 ${attrStats.nulls}`;
+    h.notes["C12 빈 스템 지연(기록, 웜 N=20, ms)"] =
+      `중앙값 ${blankStats.median?.toFixed(1)} 최대 ${blankStats.max?.toFixed(1)} 미도착 ${blankStats.nulls}`;
     c12Result = {
       attr: { median: attrStats.median, max: attrStats.max, samples: attrStats.sorted },
       blank: { median: blankStats.median, max: blankStats.max, samples: blankStats.sorted },

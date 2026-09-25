@@ -21,7 +21,7 @@ const h = await open(url);
 const {
   step, waitPrompt, waitPromptTail, clear, type, enter, press, tail, rows, lastLine, spansOf,
   cursorRow, focus, settled, ctrlC, ctrlCBurst, holdCtrlC, caretCount, cancelWhenReading,
-  typeWhenReading, startBlockLine, countTracebacks, resetPrompt, page,
+  typeWhenReading, startBlockLine, countTracebacks, resetPrompt, markText, readMark, page,
 } = h;
 
 async function recover() {
@@ -295,33 +295,35 @@ await check("H2 취소 뒤에도 제출한 블록이 history에 남아 있다(RD
 });
 
 // ── EC(확정 7, 판정): `except`로 취소를 잡은 뒤 이어지는 계산 중 Ctrl+C가 곧 중단한다
-await check("EC `except KeyboardInterrupt` 뒤 4초 계산 중 Ctrl+C가 0.5초 이내에 중단한다", async () => {
+await check("EC `except KeyboardInterrupt` 뒤 4초 계산 중 Ctrl+C가 1초(× E2E_TIME_SCALE) 이내에 중단한다", async () => {
   await freshScreen();
   await type(
     `exec("import time\\ntry:\\n input()\\nexcept KeyboardInterrupt:\\n pass\\nt = time.time()\\nwhile time.time() - t < 4: pass\\nprint('loop-done')")`,
   );
   await enter();
   await cancelWhenReading("z");
-  // 제출한 소스 줄이 `KeyboardInterrupt`·`loop-done`을 글자로 담고 있다. 눌림 직전의 개수를 기준선으로 잡고
-  // 증가분만 본다(첫 취소는 `except`가 잡아 트레이스백이 없으므로 기준선은 소스 줄 몫뿐이다).
+  // 제출한 소스 줄이 `KeyboardInterrupt`·`loop-done`을 글자로 담고 있다(줄이 80열에서 감겨 `KeyboardInterrupt`는 첫 행에
+  // `except`와 함께 있다). 첫 취소는 `except`가 잡아 트레이스백이 없으므로, 소스 줄을 뺀(`exclude: "except"`) 행에서
+  // `KeyboardInterrupt`가 나오면 그것이 중단 트레이스백이다. `loop-done`은 눌림 직전의 개수를 기준선으로 증가분만 본다.
   await page.waitForTimeout(1200);
-  const baseKI = await countOf("KeyboardInterrupt");
   const baseDone = await countOf("loop-done");
-  const pressedAt = Date.now();
+  // Ctrl+C `keydown`의 페이지 시각부터 재므로 Node↔CDP 왕복과 폴링 간격이 값에 섞이지 않는다(TRP-022).
+  await markText("KeyboardInterrupt", { exclude: "except", startOnKey: { key: "c", ctrlKey: true } });
   await ctrlC();
   let elapsed = -1;
-  for (let i = 0; i < 200; i += 1) {
-    if ((await countOf("loop-done")) > baseDone)
-      throw new Error(`Ctrl+C가 무시돼 loop-done이 나왔다(${Date.now() - pressedAt}ms)`);
-    if ((await countOf("KeyboardInterrupt")) > baseKI) {
-      elapsed = Date.now() - pressedAt;
-      break;
-    }
-    await page.waitForTimeout(25);
+  try {
+    ({ elapsedMs: elapsed } = await readMark({ timeoutMs: 15000 }));
+  } catch (err) {
+    if ((await countOf("loop-done")) > baseDone) throw new Error("Ctrl+C가 무시돼 loop-done이 나왔다");
+    throw err;
   }
-  burstNotes.EC = { elapsedMs: elapsed };
-  if (elapsed < 0) throw new Error("20초 안에 중단되지 않았다");
-  if (elapsed > 500) throw new Error(`중단까지 ${elapsed}ms(0.5초 초과)`);
+  burstNotes.EC = { elapsedMs: Math.round(elapsed * 10) / 10 };
+  if ((await countOf("loop-done")) > baseDone) throw new Error(`Ctrl+C가 무시돼 loop-done이 나왔다(중단 표시 ${elapsed}ms)`);
+  // 응답성 수치 자체가 요구 사항이라 9.7 2항의 상한 예외다(`ROADMAP.md:184` RD-009 시나리오의 Ctrl+C 응답성 요구). 결함(Ctrl+C 무시·지연)이면
+  // 값이 `loop-done`이 나오는 4초 근처로 뛰므로 1초로 가른다. 정상 쪽에는 동시 실행 부하 여유를 둔다(L0 SIGINT 상한도 1초).
+  // 느린 장비는 `E2E_TIME_SCALE`로 곱한다(기본 1).
+  const limitMs = 1000 * h.timeScale;
+  if (elapsed > limitMs) throw new Error(`중단까지 ${elapsed.toFixed(1)}ms(상한 ${limitMs}ms = 1000 × 배율 ${h.timeScale} 초과)`);
   await waitPromptTail(15000);
 });
 
