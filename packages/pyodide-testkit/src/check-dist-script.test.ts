@@ -40,6 +40,11 @@ function run(...targets: string[]) {
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
 
+/** 동기 브리지 허용 패키지(dom-bridge)용 옵션으로 실행한다. */
+function runAllowSyncBridge(...targets: string[]) {
+  return run("--allow-sync-bridge", ...targets);
+}
+
 /** 스크립트가 없어서(MODULE_NOT_FOUND) 종료 코드 1이 나오는 경우와 구분하려고, 검사가 스스로 실패했다는 표식을 함께 본다. */
 const FAIL_MARK = "check-dist 실패";
 
@@ -150,5 +155,124 @@ describe("check-dist 스크립트", () => {
 
   test("대상 폴더를 하나도 주지 않으면 실패한다", () => {
     expect(run().output).toContain(FAIL_MARK);
+  });
+});
+
+describe("check-dist 스크립트: --allow-sync-bridge(dom-bridge 예외)", () => {
+  test("허용 진입점(coincident/window/main·worker) import는 통과한다", () => {
+    const dist = makeDist({
+      "index.mjs": 'import coincident from "coincident/window/main";\n',
+      "worker.mjs": 'import coincident from "coincident/window/worker";\n',
+    });
+
+    const { status, output } = runAllowSyncBridge(dist);
+
+    expect(status, output).toBe(0);
+  });
+
+  test("옵션 없이는 같은 dist가 그대로 실패한다(다른 패키지의 금지 보장은 약해지지 않는다)", () => {
+    const dist = makeDist({
+      "index.mjs": 'import coincident from "coincident/window/main";\n',
+    });
+
+    const { status, output } = run(dist);
+
+    expect(status).toBe(1);
+    expect(output).toContain(FAIL_MARK);
+  });
+
+  test.each([
+    ["coincident/sync", 'import "coincident/sync";\n'],
+    ["coincident/sw", 'import "coincident/sw";\n'],
+    ["coincident/main", 'import c from "coincident/main";\n'],
+    ["coincident/server/worker", 'import c from "coincident/server/worker";\n'],
+    ["coincident/window/sync", 'import c from "coincident/window/sync";\n'],
+    ["coincident", 'import c from "coincident";\n'],
+    ["동적 import", 'const c = await import("coincident/sync");\n'],
+    ["reflected-ffi", 'import r from "reflected-ffi/remote";\n'],
+  ])("허용 밖 진입점(%s)은 실패한다", (이름, 내용) => {
+    const dist = makeDist({ "worker.mjs": 내용 });
+
+    const { status, output } = runAllowSyncBridge(dist);
+
+    expect(status, 이름).toBe(1);
+    expect(output).toContain(FAIL_MARK);
+    expect(output).toContain("worker.mjs");
+    expect(output).toContain("CSP");
+  });
+
+  test.each([
+    ["evaluate", "const r = ffi.evaluate('1');\n"],
+    ["serviceWorker", "const o = { serviceWorker: '/sw.js' };\n"],
+    ["window.import", "await window.import('x');\n"],
+    ["멤버 import 호출", "await w.import('x');\n"],
+  ])("CSP 금지 사용(%s)이 있으면 실패한다", (이름, 내용) => {
+    const dist = makeDist({ "worker.mjs": 내용 });
+
+    const { status, output } = runAllowSyncBridge(dist);
+
+    expect(status, 이름).toBe(1);
+    expect(output).toContain("CSP");
+  });
+
+  test("주석 안의 금지 표현과 동적 import()는 통과한다", () => {
+    const dist = makeDist({
+      "worker.mjs":
+        "// ffi.evaluate와 serviceWorker는 쓰지 않는다\n/* window.import, coincident/sync */\nconst m = await import('./x.mjs');\n",
+    });
+
+    const { status, output } = runAllowSyncBridge(dist);
+
+    expect(status, output).toBe(0);
+  });
+
+  test("소스맵과 시험 파일은 CSP 검사에서 제외한다", () => {
+    const dist = makeDist({
+      "worker.mjs": "ok\n",
+      "worker.mjs.map": '{"sourcesContent":["import \\"coincident/sync\\""]}',
+      "worker.test.ts": 'import "coincident/sync";\n',
+    });
+
+    const { status, output } = runAllowSyncBridge(dist);
+
+    expect(status, output).toBe(0);
+  });
+
+  test(".ts 소스도 검사한다(src 폴더 검사)", () => {
+    const src = makeDist({
+      "worker.ts": 'import "coincident/sync";\n',
+      "coincident.d.ts": 'declare module "coincident/window/main" {}\n',
+    });
+
+    const { status, output } = runAllowSyncBridge(src);
+
+    expect(status).toBe(1);
+    expect(output).toContain("worker.ts");
+    expect(output).not.toContain("coincident.d.ts");
+  });
+
+  test("pyodide 런타임 import는 이 옵션에서도 실패한다", () => {
+    const dist = makeDist({
+      "worker.mjs": 'import { loadPyodide } from "pyodide";\n',
+    });
+
+    const { status, output } = runAllowSyncBridge(dist);
+
+    expect(status).toBe(1);
+    expect(output).toContain("pyodide 런타임 import");
+  });
+
+  test("dist 폴더가 없으면 이 옵션에서도 건너뛰지 않고 실패한다", () => {
+    const dist = makeDist({});
+    rmSync(dist, { recursive: true });
+
+    const { status, output } = runAllowSyncBridge(dist);
+
+    expect(status).toBe(1);
+    expect(output).toContain("pnpm build");
+  });
+
+  test("옵션만 주고 폴더를 주지 않으면 실패한다", () => {
+    expect(runAllowSyncBridge().output).toContain(FAIL_MARK);
   });
 });
