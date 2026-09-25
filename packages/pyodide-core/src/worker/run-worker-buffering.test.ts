@@ -1,6 +1,6 @@
 /**
  * `runWorker`의 init 프레임 버퍼링(RD-023). worker 전역이면 모듈이 평가될 때 수신기가 message 리스너를 걸어, `runWorker`를 늦게
- * 불러도(다른 모듈의 top-level await 뒤 등) init 프레임을 잃지 않고 그때 부팅한다. 모듈 평가 시점의 동작을 보려고 시험마다
+ * 불러도(파일 안의 `await` 뒤 등) init 프레임을 잃지 않고 그때 부팅한다(번들의 import 순서 조건은 01-protocols.md 4절). 모듈 평가 시점의 동작을 보려고 시험마다
  * 모듈을 새로 불러온다(`vi.resetModules`). jsdom의 `self`에는 worker 전역 표지가 없어 `WorkerGlobalScope`를 가짜로 세워 구분한다.
  * 리스너 규칙(배열·비 init·필드 오류)은 `init-receiver.test.ts`, 호출 즉시 리스너가 걸리는 기존 경로는 `run-worker.test.ts`가 본다.
  */

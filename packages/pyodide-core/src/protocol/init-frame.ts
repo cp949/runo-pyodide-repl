@@ -34,7 +34,10 @@ function isSharedView(
   );
 }
 
-/** worker가 받은 첫 메시지를 검증한다. 잘못됐으면 어느 필드가 왜 틀렸는지 담은 오류를 던진다. */
+/**
+ * worker가 받은 배열이 아닌 메시지를 init 프레임으로 검증한다(배열은 수신기가 먼저 거른다, `worker/init-receiver.ts`). 잘못됐으면
+ * 어느 필드가 왜 틀렸는지 담은 오류를 던진다.
+ */
 export function parseInitFrame(data: unknown): InitFrame {
   if (typeof data !== "object" || data === null) {
     throw new Error("첫 메시지가 init 프레임이 아니다: 객체가 아님");
@@ -74,7 +77,10 @@ export interface InitFrameTarget {
   postMessage(message: unknown, transfer: Transferable[]): void;
 }
 
-/** main이 worker 생성 직후 첫 메시지로 보낸다. `rpcPort`는 복제할 수 없으므로 전송 목록에 담는다. */
+/**
+ * main이 worker 생성 직후 보내는 core의 첫 메시지다. worker가 받는 첫 메시지라는 보장은 아니다: dom-bridge의 coincident `Worker`
+ * 생성자는 부트스트랩 배열을 먼저 보낸다(01-protocols.md 4절). `rpcPort`는 복제할 수 없으므로 전송 목록에 담는다.
+ */
 export function postInitFrame(target: InitFrameTarget, frame: InitFrame): void {
   target.postMessage(frame, [frame.rpcPort]);
 }

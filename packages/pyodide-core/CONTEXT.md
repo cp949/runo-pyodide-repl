@@ -49,7 +49,7 @@ _Avoid_: 등록, 미들웨어
 _Avoid_: 부트로더, 런처
 
 **init 필터**:
-core `./worker` 모듈이 평가될 때 worker 전역에 거는 `message` 리스너(`init-receiver.ts`). 먼저 온 프레임은 버퍼에 두고 `runWorker`가 꺼내 부팅하므로 `runWorker` 호출 시점은 자유다(`core/worker`는 정적 import여야 한다). `kind: "init"`인 객체만 소비한다. 배열 메시지(다른 프로토콜)는 넘기고, `kind`가 다른 메시지는 오류를 남기되 리스너를 유지한다. init 후보를 받으면 리스너를 뗀다.
+core `./worker` 모듈이 평가될 때 worker 전역에 거는 `message` 리스너(`init-receiver.ts`). 먼저 온 프레임은 버퍼에 두고 `runWorker`가 꺼내 부팅한다. `core/worker`는 top-level await가 있는 모듈의 import보다 앞선 정적 import여야 하고(dom-bridge를 쓰면 dom-bridge `./worker` 다음), 이 순서를 지키면 `runWorker` 호출 시점은 자유다. 리스너는 `runWorker`를 부르지 않아도 import 시점에 걸린다. `kind: "init"`인 객체만 소비한다. 배열 메시지(다른 프로토콜)는 넘기고, `kind`가 다른 메시지는 오류를 남기되 리스너를 유지한다. init 후보를 받으면 리스너를 뗀다.
 _Avoid_: 첫 메시지 리스너, once 리스너
 
 **worker 플러그인(`WorkerPlugin`)**:

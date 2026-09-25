@@ -166,12 +166,16 @@ interface InitFrame {
 }
 ```
 
-- main: `worker.postMessage(frame, [frame.rpcPort])`. worker 생성 직후 첫 메시지로 보낸다.
-- worker: core `./worker` 모듈이 평가될 때(worker 전역일 때만) 수신기(`packages/pyodide-core/src/worker/init-receiver.ts`)가 `addEventListener('message', listener)`로 리스너를 걸고 도착한 프레임을 버퍼에 둔다. 앱의 worker 파일은 `@cp949/runo-pyodide-core/worker`를 **정적 import**해야 하고, `runWorker({ driver, plugins? })`를 부르는 시점은 자유다(다른 모듈의 top-level await 뒤처럼 늦게 불러도 버퍼의 프레임으로 부팅한다). 동적 `import()`로 core `./worker`를 늦게 평가하면 리스너가 걸리기 전에 온 프레임은 받을 수 없다(시험하지 않았다). `runWorker`는 worker당 한 번만 부를 수 있고 두 번째 호출은 `runWorker는 worker당 한 번만 부를 수 있다`를 던진다. dom-bridge를 쓰면 규칙이 하나 더 있다: dom-bridge `./worker`가 worker 파일의 **첫 정적 import**여야 한다(`16-dom-bridge.md` 16.3). 리스너는 `{ once: true }`가 아니라 필터다(coincident 같은 다른 프로토콜이 같은 worker에 있어도 그 메시지를 삼키지 않는다, ADR-0006). 리스너는 메시지를 다음 규칙으로 처리한다.
+- main: `worker.postMessage(frame, [frame.rpcPort])`. worker 생성 직후 core가 보내는 첫 메시지다. worker가 받는 첫 메시지라는 보장은 아니다: dom-bridge를 쓰면 `createBridgeMain()`이 돌려준 coincident `Worker` 생성자가 생성 중에 부트스트랩 배열 `[UID, serviceWorker, ffi_timeout]`을 먼저 `postMessage`한다(`coincident@4.1.1` `src/main.js` 126행). 그래서 worker 수신기는 첫 메시지를 무조건 소비하지 않고 아래 필터로 고른다.
+- worker: core `./worker` 모듈이 평가될 때(worker 전역일 때만) 수신기(`packages/pyodide-core/src/worker/init-receiver.ts`)가 `addEventListener('message', listener)`로 리스너를 걸고 도착한 프레임을 버퍼에 둔다. 앱의 worker 파일은 `@cp949/runo-pyodide-core/worker`를 top-level await가 있는 모듈의 import보다 앞선 **정적 import**로 둔다(dom-bridge를 쓰면 dom-bridge `./worker` 다음). 이 순서를 지키면 `runWorker({ driver, plugins? })`를 부르는 시점(파일 안의 `await` 뒤 등)은 자유다(늦게 불러도 버퍼의 프레임으로 부팅한다). top-level await가 있는 모듈에는 그런 모듈을 import하는 모듈도 포함된다(순서 조건의 근거는 이 절 아래 "import 순서 조건의 근거"). 동적 `import()`로 core `./worker`를 늦게 평가하면 리스너가 걸리기 전에 온 프레임은 받을 수 없다(시험하지 않았다). 수신기는 `runWorker`를 부르지 않아도 core `./worker`를 import하는 순간(worker 전역일 때) `run-worker.ts`의 모듈 최상위 문장으로 걸린다. 그래서 `bootWorker` 등 다른 공개 export만 쓰는 worker에서도 init 전에 온 비 init 객체 메시지마다 아래 `console.error`가 남는다(`bootWorker`만 import한 `vite build` 산출물에도 이 문장이 남는 것을 확인했다, `_works/_completed/20260925-32-rd-023-dom-bridge/verify/post-review/receiver-without-runworker/result.log`). `runWorker`는 worker당 한 번만 부를 수 있고 두 번째 호출은 `runWorker는 worker당 한 번만 부를 수 있다`를 던진다. dom-bridge를 쓰면 규칙이 하나 더 있다: dom-bridge `./worker`가 worker 파일의 **첫 정적 import**여야 한다(`16-dom-bridge.md` 16.3). 리스너는 `{ once: true }`가 아니라 필터다(coincident 같은 다른 프로토콜이 같은 worker에 있어도 그 메시지를 삼키지 않는다, ADR-0006). 리스너는 메시지를 다음 규칙으로 처리한다.
   - 배열 메시지(다른 프로토콜의 것): 조용히 넘기고 리스너를 유지한다.
   - `kind === 'init'`인 객체(init 후보): 리스너를 떼고(이후 네이티브 `message` 채널은 쓰지 않는다) `parseInitFrame`으로 검증한다. 실패하면 필드 이름을 담아 `console.error("[worker] 초기화 프레임이 올바르지 않다", …)` 후 프레임을 버린다.
   - 그 밖의 메시지(`kind`가 다른 객체·`null`·원시값): 같은 `console.error`(`parseInitFrame`의 오류 메시지 포함)를 남기되 리스너를 **유지**해 뒤에 오는 init을 받는다. 무시하지 않고 로그를 남기는 것은 옛 `{ once: true }` 동작의 오류 표시를 유지하기 위해서다.
     검증 항목은 객체 여부, `kind === 'init'`, 필드 존재·타입, `interruptBuffer`·`stdinCtrl`·`stdinData`가 `SharedArrayBuffer` 위의 뷰인지다(비공유 뷰는 구조적 복제에서 복사돼 메모리 공유가 조용히 끊긴다, `docs/traps/TRP-002`).
+- import 순서 조건의 근거(RD-023 사후 리뷰, 2026-09-25):
+  - 번들 순서(확인): Vite 8.3.0(rolldown) `vite build`는 모듈 코드를 import 순서대로 한 스코프에 이어 붙인다. worker 파일이 top-level await 모듈을 core `./worker`보다 먼저 import하면 산출물에서 수신기 등록 문장(`createInitReceiver(self)`)이 앞 모듈의 `await` 뒤에 놓이고, 순서를 바꾸면 앞에 놓인다(lib 모드와 `new Worker(new URL(…))` worker 번들 모두, `_works/_completed/20260925-32-rd-023-dom-bridge/verify/post-review/tla-bundle-order/result.log`).
+  - init 유실(추정, 브라우저 미실측): 그 `await` 동안 도착한 init 프레임은 `message` 리스너가 없어 버려질 수 있다. HTML 명세 해석에 따른 추정이다: worker의 암묵 포트 메시지 큐는 모듈 스크립트 실행을 시작한 뒤 top-level await 완료를 기다리지 않고 활성화되고, 리스너가 없을 때 배달된 `message` 이벤트는 다시 오지 않는다.
+  - 네이티브 ESM(dev 서버가 앱 모듈을 따로 제공할 때)에서는 형제 모듈이 앞 모듈의 top-level await를 기다리지 않고 평가돼 이 차이가 없다(node로 확인, 같은 폴더 `native/`).
 - `driver` 필드: `parseInitFrame`은 필드가 있는지만 본다(`"driver" in frame`, 값은 `undefined`도 통과). 옛 모양(최상위 `topLevelAwait`, `driver` 없음)의 프레임을 worker가 조용히 받아 driver 옵션을 잃는 것을 막는다. 값은 worker 쪽 driver가 `WorkerDriver.parseOptions(frame.driver)`로 검증한다. REPL은 `{ topLevelAwait: boolean }`이고 repl `driver-options.ts`의 파서가 `driver: 객체 필요`·`topLevelAwait: boolean 필요` 오류를 낸다. 옵션 검증이 던지면 RPC 생성·pyodide 로드 없이 부팅이 그 오류로 거부되고 `runWorker`가 `console.error("[worker] 부팅 시퀀스 예외", …)`로 남긴다. main 쪽 driver의 `options`가 프레임의 `driver` 필드로 실린다. 실행 driver의 `createRunner`는 worker를 만들기 전에 같은 파서(`parseRunDriverOptions`)로 먼저 검증한다(`docs/traps/TRP-042`, `14-runner.md` 14.2.3).
 - `SharedArrayBuffer` 뷰는 postMessage로 넘겨도 같은 메모리를 공유한다(coincident 프록시가 값으로 직렬화하던 문제가 없다).
 - 설정 변경(REPL의 `topLevelAwait`)은 새 프레임 = 새 worker다. worker가 main에 설정을 되묻는 호출은 없다.
@@ -184,11 +188,12 @@ main : Terminal/Readline·interrupt buffer 생성(핸들) → REPL main driver �
        → MessageChannel 생성 → createRpc → createWorker() → postMessage(init, [port]) → onStatus('loading')
        (crossOriginIsolated가 거짓이면 위를 하지 않고 경고 한 줄 + onStatus('not-isolated')로 끝난다)
 worker: init 수신(필터 리스너, 4절) → parseOptions(frame.driver) → driver.createSession → createRpc(core 핸들러 + driver 핸들러 합성)
-      → loadPyodide → interrupt 공개 API 확인(없으면 loadFailed) → driver.createConsole(setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(driver 옵션 값))
+      → loadPyodide → interrupt 공개 API 확인(없으면 loadFailed) → plugins prepare(있을 때만, 배열 순서로 하나씩 await, 16-dom-bridge.md 16.4) → driver.createConsole(setStdout/setStderr(전역 Writer) → sys.ps1/ps2 → PyodideConsole → TLA 비트(driver 옵션 값))
       → driver.probe(비공개 API 지점 탐지) → webloop 재보고 억제 → sleep 조각 + 핸들러 설치 → 폐기 → 버퍼 연결 → setStdin → ntf ready(ReadyPayload) → 감시 타이머 시작
       → driver.run(ntf writeOutput(BANNER) → req readLine('>>> '))   (RD-004는 readLine 대신 시험용 스크립트를 runLine으로 실행)
       옵션 검증·핸들러 합성 실패 → console.error만 남기고 부팅을 시작하지 않는다(RPC가 아직 없어 loadFailed를 보낼 수 없다)
-      로드·interrupt API 확인·콘솔 생성·probe 실패 → ntf loadFailed(String(error))만 보내고 돌아온다(worker는 살아 있다)
+      로드·interrupt API 확인·plugin prepare·콘솔 생성·probe 실패 → ntf loadFailed(String(error))만 보내고 돌아온다(worker는 살아 있다)
+        (plugin 실패는 접두 plugin "<name>": 가 붙은 Error라 페이로드가 Error: plugin "<name>": <원인> 이다. 실패한 plugin 뒤의 plugin·createConsole은 불리지 않는다)
 main : ready → (versionMismatch·degraded면 console.warn 1회) → driver.onReady → onStatus('ready') → readLine 핸들러: 꼬리 + '>>> ' 합성 → readline.read()
        loadFailed → writeError('pyodide 로드 실패: ' + message) + onStatus('load-failed')
 

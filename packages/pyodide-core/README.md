@@ -19,7 +19,7 @@ import { runDriver, runWorker } from "@cp949/runo-pyodide-core/worker";
 runWorker({ driver: runDriver });
 ```
 
-`core/worker`는 정적 import한다(모듈이 평가될 때 init 프레임 수신기가 걸려, `runWorker`를 늦게 불러도 버퍼의 프레임으로 부팅한다). `runWorker({ driver, plugins })`의 `plugins`(`WorkerPlugin { name, prepare({ pyodide }) }`)는 `loadPyodide` 뒤·콘솔 생성 앞에서 배열 순서로 준비된다. 실패는 `load-failed`(문구 `Error: plugin "<name>": <원인>`)다. 예: `@cp949/runo-pyodide-dom-bridge`(coincident로 `runo.browser`를 노출, dom-bridge `./worker`가 worker 파일의 첫 정적 import).
+`core/worker`는 top-level await가 있는 모듈의 import보다 앞선 정적 import로 둔다(dom-bridge를 쓰면 dom-bridge `./worker` 다음). 모듈이 평가될 때 init 프레임 수신기가 걸리므로, 이 순서를 지키면 `runWorker` 호출 시점(파일 안의 `await` 뒤 등)은 자유다(늦게 불러도 버퍼의 프레임으로 부팅한다). top-level await 모듈을 먼저 import하면 Vite 번들에서 수신기 등록이 그 `await` 뒤로 밀려 그 사이 온 init 프레임을 잃을 수 있다(번들 순서는 확인, 유실은 브라우저 미실측, `docs/design/01-protocols.md` 4절). `runWorker({ driver, plugins })`의 `plugins`(`WorkerPlugin { name, prepare({ pyodide }) }`)는 `loadPyodide` 뒤·콘솔 생성 앞에서 배열 순서로 준비된다. 실패는 `load-failed`(문구 `Error: plugin "<name>": <원인>`)다. 예: `@cp949/runo-pyodide-dom-bridge`(coincident로 `runo.browser`를 노출, dom-bridge `./worker`가 worker 파일의 첫 정적 import).
 
 ```ts
 import { createRunner, RunRejectedError } from "@cp949/runo-pyodide-core";
