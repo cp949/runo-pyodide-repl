@@ -28,7 +28,7 @@
   환경에서는 `e2e/run.mjs`가 "이미 죽었다"로 조용히 오판할 수 있다(`pending-traps/01.md` 계열,
   아래 함정 절 참고).
 
-## 명령 표(32항목, `apps/demo/package.json`)
+## 명령 표(33항목, `apps/demo/package.json`)
 
 | 이름                     | 실행                                                                                                                                                                                                                                                             |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -64,10 +64,25 @@
 | `e2e:input-burst-matrix` | `node e2e/measure/input-burst-matrix.mjs`                                                                                                                                                                                                                        |
 | `e2e:sleep-await`        | `node e2e/measure/sleep-await-check.mjs`                                                                                                                                                                                                                         |
 | `e2e:keys-after-enter`   | `node e2e/measure/keys-after-enter-probe.mjs`                                                                                                                                                                                                                    |
+| `e2e:cpu-throttle`       | `node e2e/measure/cpu-throttle-probe.mjs`(기록용 — CPU 감속 rate 1/2/4/8에서 메인·worker 소요를 재고 감속 적용 여부를 표로 남긴다. 판정 상한 없음, baseline·measure 세트 미등록)                                                                                 |
 
 개별 스크립트는 `node <파일> [url] [...]` 형태로도 직접 돌릴 수 있다(`url` 기본값
 `http://localhost:5173`). `ONLY=<이름 접두어,…>` 환경변수로 일부 확인만 골라 돌릴 수 있고, 측정
 스크립트는 `N=<정수>`로 반복 횟수를 줄일 수 있다(예: `N=2 pnpm --filter demo e2e:sleep-await`).
+
+## 환경변수(`lib.mjs`, 느린 장비 재현)
+
+- `E2E_CPU_THROTTLE`(기본 `1`): 1보다 크면 CDP `Emulation.setCPUThrottlingRate`로 CPU를 그 배율만큼 감속한다.
+  `waitPrompt()`가 처음 성공한 시점에 1회 적용하므로 부팅 구간은 감속되지 않는다. 기본값에서는 CDP 세션을 만들지 않는다.
+- `E2E_TIME_SCALE`(기본 `1`): 응답성 상한(`docs/design/09-testing.md` 9.7 2항)에 곱할 배율. 핸들의 `timeScale`로
+  읽는다. e2e 전용이며 L0 vitest 상수에는 적용되지 않는다.
+
+두 값은 결과 JSON `notes`(`E2E_CPU_THROTTLE`·`E2E_TIME_SCALE`)에 기본값이어도 항상 기록되고, 기본값이 아니면 실행 시작
+시 콘솔에 경고 한 줄이 나온다. 잘못된 값(숫자가 아니거나 `E2E_CPU_THROTTLE` < 1)은 던진다.
+
+페이지 시계 도구: `markText(pattern, { exclude, startOnKey })`·`markStart()`·`readMark({ timeoutMs })`가 화면 행 출현
+시각을 페이지 `performance.now()`로 잰다. 시작 기준은 `markText` 호출 시각(기본)·`startOnKey`(예: Enter·Ctrl+C
+`keydown` 시각)·`markStart()` 중 하나다(`lib.mjs` JSDoc 참고).
 
 ## node 통계(수동 실행)
 

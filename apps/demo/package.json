@@ -41,7 +41,8 @@
     "e2e:burst-matrix": "node e2e/measure/burst-matrix.mjs",
     "e2e:input-burst-matrix": "node e2e/measure/input-burst-matrix.mjs",
     "e2e:sleep-await": "node e2e/measure/sleep-await-check.mjs",
-    "e2e:keys-after-enter": "node e2e/measure/keys-after-enter-probe.mjs"
+    "e2e:keys-after-enter": "node e2e/measure/keys-after-enter-probe.mjs",
+    "e2e:cpu-throttle": "node e2e/measure/cpu-throttle-probe.mjs"
   },
   "dependencies": {
     "@cp949/runo-pyodide-core": "workspace:*",

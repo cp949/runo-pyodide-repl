@@ -43,10 +43,42 @@ function resultFileName(label) {
   return count === 1 ? `${key}.json` : `${key}-${count}.json`;
 }
 
-/** 브라우저를 띄워 url을 연다. 반환한 객체의 헬퍼가 화면·입력·콘솔 기록·페이지 내부 시계를 다룬다. */
+/**
+ * 환경변수 `name`을 `min` 이상의 유한한 수로 읽는다(없거나 빈 문자열이면 기본값 1). 잘못된 값은 조용히 1로 되돌리지
+ * 않고 던진다 — 감속·배율을 켰다고 믿고 실행했는데 실제로는 꺼져 있는 상황을 막는다.
+ */
+function readEnvNumber(name, min) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return 1;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < min) {
+    throw new Error(`${name}=${JSON.stringify(raw)}는 ${min} 이상의 수가 아니다`);
+  }
+  return value;
+}
+
+/**
+ * 브라우저를 띄워 url을 연다. 반환한 객체의 헬퍼가 화면·입력·콘솔 기록·페이지 내부 시계를 다룬다.
+ *
+ * 환경변수(이슈 `.scratch/e2e-time-dependence/` 02·03, 판정 규칙은 `docs/design/09-testing.md` 9.7):
+ * - `E2E_CPU_THROTTLE`(기본 1): 1보다 크면 CDP `Emulation.setCPUThrottlingRate`로 CPU를 그 배율만큼 감속한다.
+ *   감속은 `waitPrompt()`가 **처음 성공한 시점에 1회** 적용한다(부팅 구간은 감속하지 않는다). 기본값(1)에서는 CDP 세션을
+ *   만들지 않아 기존 동작이 그대로다.
+ * - `E2E_TIME_SCALE`(기본 1): e2e 스크립트가 응답성 상한(9.7 2항)에 곱할 배율. 핸들의 `timeScale`로 노출한다. e2e 전용이며
+ *   L0(vitest) 상수에는 적용되지 않는다.
+ * 두 값은 결과 JSON `notes`에 기본값이어도 항상 기록되고, 기본값이 아니면 시작 시 콘솔 경고를 한 줄 낸다.
+ */
 export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
+  const cpuThrottle = readEnvNumber("E2E_CPU_THROTTLE", 1);
+  const timeScale = readEnvNumber("E2E_TIME_SCALE", Number.MIN_VALUE);
+  if (cpuThrottle !== 1 || timeScale !== 1) {
+    console.warn(`경고: E2E_CPU_THROTTLE=${cpuThrottle} E2E_TIME_SCALE=${timeScale} (기본 1이 아님, 결과 notes에 기록됨)`);
+  }
   const browser = await chromium.launch();
   const page = await browser.newPage(viewport ? { viewport } : undefined);
+  // CDP 세션은 감속이 켜졌을 때만 만든다. 첫 프롬프트 성공 시점(waitPrompt)에 감속을 1회 적용한다.
+  const cdp = cpuThrottle > 1 ? await page.context().newCDPSession(page) : null;
+  let throttleApplied = false;
   const logs = [];
   const pageErrors = [];
   const workers = { created: 0 };
@@ -160,6 +192,9 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
   /**
    * 마지막 텍스트 행이 `expected`(끝 공백 무시)이고 커서가 그 행에 있을 때까지 기다린다. 프롬프트 행이 보이면 읽기가
    * 시작된 것이다(TRP-005). 첫 프롬프트는 pyodide 로드가 수 초라 기본 30초.
+   *
+   * `E2E_CPU_THROTTLE`이 1보다 크면 이 함수가 **처음 성공한 시점에 1회** CPU 감속을 건다(부팅 뒤부터 감속하려는
+   * 것이다). 이후 호출은 감속을 다시 보내지 않는다. 프롬프트를 기다리지 않는 스크립트는 감속이 걸리지 않는다.
    */
   async function waitPrompt(expected = ">>>", timeoutMs = 30000) {
     await waitFor(
@@ -172,6 +207,10 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
       `프롬프트 ${JSON.stringify(expected)}`,
       timeoutMs,
     );
+    if (cdp && !throttleApplied) {
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpuThrottle });
+      throttleApplied = true;
+    }
   }
   /** 마지막 텍스트 행이 suffix로 끝나고 커서가 그 행에 있을 때까지 기다린다(꼬리가 길어 행 전체를 모를 때). */
   async function waitLastEndsWith(suffix, timeoutMs = 15000) {
@@ -339,6 +378,86 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
   }
 
   /**
+   * 페이지 시계(`performance.now()`) 마크: `pattern`을 포함하고 `exclude`는 포함하지 않는 행이 화면에 **처음** 나타난
+   * 시각을 페이지 안 `MutationObserver`로 기록한다. Node↔페이지 CDP 왕복(폴링 1회에 수 ms~수십 ms, 감속 시 더 커진다)이
+   * 측정값에 섞이지 않게 하려는 것이다(TRP-022). `armMeasurement()`/`readElapsed()`는 `>>>` 프롬프트 복귀만 감지하므로
+   * 다른 문구(예: `KeyboardInterrupt` 출현)를 잴 때 이 쌍을 쓴다.
+   *
+   * - `exclude`: 이 문자열을 포함한 행은 대상이 아니다. 제출한 소스 줄(`>>> print('X')`)이 대상 문자열을 그대로 담아
+   *   호출 즉시 참이 되는 함정(TRP-011)을 피하려고 입력 줄에만 있는 부분(예: `>>>`)을 준다.
+   * - 무장 시점에 화면에 이미 있는 행도 검사한다. 이전 출력이 남아 있으면 `exclude`나 `clear()`로 거른다.
+   * - 한 번에 하나만 무장한다. 다시 부르면 이전 마크와 시작 기준이 초기화된다.
+   * - 시작 기준(`startedAt`)은 세 가지 중 하나다.
+   *   1. 기본: 이 함수를 부른 페이지 시각.
+   *   2. `startOnKey: { key, ctrlKey = false }`: 무장 뒤 **처음** 눌린 그 키의 `keydown`(캡처 단계) 페이지 시각. 예: Enter를
+   *      누른 시각(`{ key: "Enter" }`)·Ctrl+C를 누른 시각(`{ key: "c", ctrlKey: true }`). 키 입력이 CDP를 거쳐 들어오는
+   *      지연이 시작에 섞이지 않는다. 이 옵션을 주면 키가 눌리기 전에는 `startedAt`이 `null`이고, 키 없이 마크가
+   *      찍히면 `readMark()`가 던진다.
+   *   3. `markStart()`: 호출 시각으로 다시 잡는다(키가 아닌 동작 기준일 때).
+   */
+  async function markText(pattern, { exclude, startOnKey } = {}) {
+    await page.evaluate(
+      ([pat, excl, keySpec]) => {
+        if (window.__markObserver) window.__markObserver.disconnect();
+        if (window.__markKeyListener) window.removeEventListener("keydown", window.__markKeyListener, true);
+        window.__markKeyListener = null;
+        const root = document.querySelector(".xterm-rows");
+        window.__mark = { markedAt: null, startedAt: keySpec ? null : performance.now() };
+        if (keySpec) {
+          window.__markKeyListener = (e) => {
+            if (e.key !== keySpec.key || e.ctrlKey !== keySpec.ctrlKey) return;
+            if (window.__mark.startedAt == null) window.__mark.startedAt = performance.now();
+          };
+          window.addEventListener("keydown", window.__markKeyListener, true);
+        }
+        const check = () => {
+          if (window.__mark.markedAt != null) return;
+          const hit = [...root.querySelectorAll(":scope > div")].some((el) => {
+            const t = (el.textContent ?? "").replace(/\u00a0/g, " ");
+            return t.includes(pat) && (excl == null || !t.includes(excl));
+          });
+          if (hit) window.__mark.markedAt = performance.now();
+        };
+        window.__markObserver = new MutationObserver(check);
+        window.__markObserver.observe(root, { childList: true, subtree: true, characterData: true });
+        check();
+      },
+      [pattern, exclude ?? null, startOnKey ? { key: startOnKey.key, ctrlKey: startOnKey.ctrlKey ?? false } : null],
+    );
+  }
+  /**
+   * `markText()`의 시작 기준을 지금(페이지 시각)으로 다시 잡는다. 반환값은 그 페이지 시각(ms). 키 입력 기준은
+   * `markText`의 `startOnKey`가 더 정확하다. 이 함수는 키가 아닌 동작(예: `page.evaluate`로 발행한 이벤트) 직전에 쓴다.
+   * `markText()` 뒤에 불러야 한다.
+   */
+  async function markStart() {
+    return page.evaluate(() => {
+      if (!window.__mark) throw new Error("markStart: markText()로 먼저 무장해야 한다");
+      window.__mark.startedAt = performance.now();
+      return window.__mark.startedAt;
+    });
+  }
+  /**
+   * 마크가 찍힐 때까지 기다려(`timeoutMs`는 정지 감지용이며 판정선이 아니다, 9.7 4항) `{ markedAt, startedAt, elapsedMs }`
+   * (모두 페이지 시계 ms, `elapsedMs = markedAt - startedAt`)를 돌려준다. 시간 초과면 던진다. `startOnKey`를 줬는데
+   * 키가 눌리지 않았으면 던진다. `markStart()`를 마크가 찍힌 뒤에 부르면 `elapsedMs`가 음수가 되므로 호출 순서를 지킨다.
+   */
+  async function readMark({ timeoutMs = 15000 } = {}) {
+    await waitFor(
+      async () => {
+        const at = await page.evaluate(() => (window.__mark ? window.__mark.markedAt : undefined));
+        if (at === undefined) throw new Error("readMark: markText()로 먼저 무장해야 한다");
+        return at != null;
+      },
+      "markText()가 기다리는 행이 나타남",
+      timeoutMs,
+    );
+    const m = await page.evaluate(() => ({ markedAt: window.__mark.markedAt, startedAt: window.__mark.startedAt }));
+    if (m.startedAt == null) throw new Error("readMark: startOnKey로 지정한 키가 눌리지 않은 채 행이 나타났다");
+    return { ...m, elapsedMs: m.markedAt - m.startedAt };
+  }
+
+  /**
    * 복합문 한 줄(`while True: pass`)을 제출해 실행을 시작한다. 3.14 REPL처럼 첫 Enter는 `... `를 내고
    * 빈 줄 Enter가 있어야 블록이 끝나 실행이 시작된다. 이 단계를 빼면 Ctrl+C가 활성 읽기(프롬프트)로 가
    * 벤더 경로에서 `... ^C`만 찍힌다.
@@ -426,7 +545,8 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
   };
 
   const checks = {};
-  const notes = {};
+  // 두 환경변수 값은 기본값(1)이어도 항상 남긴다. 값이 다른 실행의 결과를 섞어 비교하지 않으려는 것이다.
+  const notes = { E2E_CPU_THROTTLE: cpuThrottle, E2E_TIME_SCALE: timeScale };
   /** 확인 하나를 실행해 통과·실패와 사유를 기록한다(하나가 실패해도 뒤 확인을 계속한다). */
   async function step(name, fn) {
     // ONLY=W4,T1 처럼 이름이 그 접두어로 시작하는 확인만 실행한다(양성 대조에서 확인을 분리해 볼 때 쓴다). "초기"는 항상 실행한다.
@@ -539,6 +659,10 @@ export async function open(url, { viewport, before, waitUntil = "load" } = {}) {
     otherPageErrors,
     armMeasurement,
     readElapsed,
+    markText,
+    markStart,
+    readMark,
+    timeScale,
     finish,
   };
 }
