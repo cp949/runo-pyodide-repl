@@ -40,3 +40,6 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Vitest 리포터 출력
+.vitest/
