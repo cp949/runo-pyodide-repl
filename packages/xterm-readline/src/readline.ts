@@ -14,7 +14,7 @@ interface ActiveRead {
   historyEntry?: (line: string) => string;
 }
 
-/** write 콜백을 기다리는 읽기 하나. `cancelled`는 콜백 도착 전에 `cancelRead()`가 먼저 끝냈는지 표시한다. */
+/** write 콜백을 기다리는 읽기 하나. `cancelled`는 콜백 도착 전에 `cancelRead()`·`takeRead()`·`dispose()`가 먼저 끝냈는지 표시한다. */
 interface PendingRead {
   reject: (e: unknown) => void;
   cancelled: boolean;
@@ -223,16 +223,8 @@ export class Readline implements ITerminalAddon {
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
     this.term = undefined;
-    const rejects = [...this.pendingReads].map((p) => p.reject);
-    if (this.activeRead !== undefined) rejects.push(this.activeRead.reject);
-    this.pendingReads.clear();
-    this.activeRead = undefined;
-    // 기다리던 재그리기를 무효로 해 늦은 콜백이 해제된 터미널에 닿지 않게 한다(TRP-004).
-    this.redraw = undefined;
-    this.queued = [];
-    this.clearTypeAhead();
-    const error = new Error("readline disposed");
-    rejects.forEach((reject) => reject(error));
+    // 재그리기 무효화로 늦은 콜백이 해제된 터미널에 닿지 않게 한다(TRP-004).
+    this.endOpenReads(new Error("readline disposed"), "drop", "drop");
   }
 
   /**
@@ -241,22 +233,9 @@ export class Readline implements ITerminalAddon {
    * (개행·안내 줄 여부는 호출자가 결정한다). 열린 읽기가 없으면 아무것도 하지 않는다.
    */
   public cancelRead(): void {
-    // 리셋은 새 프로세스라 옛 맥락에서 쌓인 키를 다음 읽기에 넘기지 않는다.
-    this.clearTypeAhead();
-    // 취소 이전에 queued에 쌓인 키는 옛 맥락이라 폐기하고, 이후 도착하는 키는 activeRead가 없으므로 type-ahead로 가게 한다.
-    // 기다리던 재그리기는 무효가 되어 늦은 콜백이 그리지 않는다(다음 읽기의 재그리기도 건드리지 않는다).
-    this.redraw = undefined;
-    this.queued = [];
-    const pending = [...this.pendingReads];
-    this.pendingReads.clear();
-    pending.forEach((p) => {
-      p.cancelled = true;
-    });
-    const active = this.activeRead;
-    this.activeRead = undefined;
-    const error = new ReadCancelledError();
-    pending.forEach((p) => p.reject(error));
-    active?.reject(error);
+    // 리셋은 새 프로세스라 옛 맥락에서 쌓인 키(type-ahead)를 다음 읽기에 넘기지 않는다. 취소 이전에 queued에 쌓인 키도
+    // 옛 맥락이라 폐기하고, 이후 도착하는 키는 activeRead가 없으므로 type-ahead로 간다.
+    this.endOpenReads(new ReadCancelledError(), "drop", "drop");
   }
 
   /**
@@ -293,23 +272,46 @@ export class Readline implements ITerminalAddon {
       }
     }
 
-    this.activeRead = undefined;
+    // 재그리기 중 쌓인 키는 지금부터 활성 읽기가 없으므로 type-ahead로 옮겨 순서를 보존한다.
+    this.endOpenReads(new ReadTakenError(), "toTypeAhead", "keep");
+    return taken;
+  }
+
+  /**
+   * 열린 읽기(활성 읽기 + write 콜백을 기다리는 읽기)를 모두 떼고 `error`로 reject한다. `cancelRead()`·`takeRead()`·
+   * `dispose()`의 공통 상태 정리다. 화면에는 쓰지 않는다.
+   *
+   * - write 콜백을 기다리는 읽기에 `cancelled`를 세워 늦은 콜백이 활성 읽기를 되살리지 않게 한다.
+   * - 기다리던 재그리기를 무효로 해 늦은 콜백이 그리지 않게 한다(다음 읽기의 재그리기는 건드리지 않는다).
+   * - `queued`(재그리기 중 쌓인 입력): `"drop"`은 버리고 `"toTypeAhead"`는 순서대로 type-ahead 뒤에 붙인다.
+   * - type-ahead(읽기 밖에서 쌓인 입력): `"drop"`은 비우고 `"keep"`은 둔다. `"drop"`은 `queued` 이동보다 먼저 한다.
+   *
+   * 상태를 모두 바꾼 뒤 reject한다. 순서는 write 콜백 대기 읽기가 먼저, 활성 읽기가 나중이다. 호출자는 활성 읽기에서
+   * 읽을 것(`takeRead()`의 버퍼·커서·`state.erase()`)을 이 호출 전에 끝낸다.
+   */
+  private endOpenReads(
+    error: Error,
+    queued: "drop" | "toTypeAhead",
+    typeAhead: "drop" | "keep",
+  ): void {
+    const pending = [...this.pendingReads];
+    const active = this.activeRead;
     this.pendingReads.clear();
     pending.forEach((p) => {
       p.cancelled = true;
     });
-    // 재그리기 중 쌓인 키는 지금부터 활성 읽기가 없으므로 type-ahead로 옮겨 순서를 보존한다.
-    const queued = this.queued;
-    this.queued = [];
+    this.activeRead = undefined;
     this.redraw = undefined;
-    for (const entry of queued) {
-      this.pushTypeAhead(entry);
+    const entries = this.queued;
+    this.queued = [];
+    if (typeAhead === "drop") this.clearTypeAhead();
+    if (queued === "toTypeAhead") {
+      for (const entry of entries) {
+        this.pushTypeAhead(entry);
+      }
     }
-
-    const error = new ReadTakenError();
     pending.forEach((p) => p.reject(error));
     active?.reject(error);
-    return taken;
   }
 
   /**
