@@ -7,3 +7,4 @@ export * from "./rewind-tail";
 export * from "./stdin-reader";
 export * from "./notice";
 export * from "./selection-copy";
+export * from "./surface";
