@@ -527,6 +527,55 @@ describe("printAboveRaw 재그리기 대기", () => {
     expect(term.vt.screen()).toBe("tick\n> abc");
   });
 
+  test("접두가 있는 재그리기 중 취소 가능한 Ctrl+C는 콜백 뒤 null로 끝나고 접두·입력·다음 출력이 겹치지 않는다", async () => {
+    const { term, readline } = setup();
+    const read = observe(readline.read("> ", { cancelable: true }));
+    term.type("abc");
+    term.asyncWrite = true;
+
+    void readline.printAboveRaw("out\n", "tick");
+    term.feed(CTRL_C);
+    await tick();
+    // 콜백 전: 키는 큐에 있고 읽기는 살아 있다.
+    expect(read().state).toBe("pending");
+    expect(readline.hasQueuedInput()).toBe(true);
+
+    term.flush();
+    await tick();
+
+    expect(read()).toEqual({ state: "resolved", value: null });
+    expect(term.vt.screen()).toBe("out\ntick> abc");
+    expect(term.vt.cursor()).toEqual([2, 0]);
+    term.asyncWrite = false;
+    readline.write("Traceback");
+    expect(term.vt.screen()).toBe("out\ntick> abc\nTraceback");
+  });
+
+  test("감긴 입력 첫 행 커서에서 접두가 있는 재그리기 중 취소 가능한 Ctrl+C는 입력 전체를 남기고 그 아래 행 머리로 간다", async () => {
+    const { term, readline } = setup();
+    const read = observe(readline.read("> ", { cancelable: true }));
+    // cols 20: "tick> " + 30자는 두 행으로 감긴다.
+    term.type("abcdefghijklmnopqrstuvwxyz0123");
+    term.feed("\x1b[H");
+    term.asyncWrite = true;
+
+    void readline.printAboveRaw("out\n", "tick");
+    term.feed(CTRL_C);
+    term.flush();
+    await tick();
+
+    expect(read()).toEqual({ state: "resolved", value: null });
+    expect(term.vt.screen()).toBe(
+      "out\ntick> abcdefghijklmn\nopqrstuvwxyz0123",
+    );
+    expect(term.vt.cursor()).toEqual([3, 0]);
+    term.asyncWrite = false;
+    readline.write("Traceback");
+    expect(term.vt.screen()).toBe(
+      "out\ntick> abcdefghijklmn\nopqrstuvwxyz0123\nTraceback",
+    );
+  });
+
   test("재그리기 대기 중 takeRead는 지우지 않고 텍스트·처음 커서를 돌려주며 늦은 콜백은 그리지 않는다", async () => {
     const { term, readline } = setup();
     void readline.read("> ").catch(() => {});

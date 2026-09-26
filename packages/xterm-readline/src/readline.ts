@@ -229,13 +229,55 @@ export class Readline implements ITerminalAddon {
 
   /**
    * 열린 읽기(활성 읽기 + write 콜백을 기다리는 읽기)를 `ReadCancelledError`로 끝낸다.
-   * `dispose()`와 달리 리스너·term·history·state는 건드리지 않고 화면에도 아무것도 쓰지 않는다
-   * (개행·안내 줄 여부는 호출자가 결정한다). 열린 읽기가 없으면 아무것도 하지 않는다.
+   * `dispose()`와 달리 리스너·term·history·state는 건드리지 않는다. 열린 읽기가 없으면 읽기 쪽은 아무것도 하지 않는다.
+   *
+   * `settle`을 주지 않으면(또는 `false`) 화면에 아무것도 쓰지 않고 `false`를 돌려준다(개행·안내 줄 여부는 호출자가
+   * 결정한다). `settle: true`면 읽기를 끝내기 전에 취소 시점 상태를 보고 화면을 정리한다.
+   *
+   * | 취소 시점 상태 | 쓰는 것 | 반환 |
+   * | --- | --- | --- |
+   * | 재그리기 대기 중 + 접두 있음(`printAboveRaw`) | 아직 그리지 않은 접두 + `"\x1b[0m\r\n"` | `true` |
+   * | 재그리기 대기 중 + 접두 없음(`printAbove` 또는 접두 `""`) | 없음(커서는 이미 출력 아래 행 머리) | `true` |
+   * | 그려진 활성 읽기 | 커서를 입력 끝으로 옮기고 강조 없이 다시 그린 뒤 `"\r\n"`(취소 가능한 Ctrl+C와 같은 바이트) | `true` |
+   * | write 콜백을 기다리는 읽기만 / 열린 읽기 없음 / `term` 없음(`dispose()` 뒤) | 없음 | `false` |
+   *
+   * 반환값은 "호출 뒤 커서가 입력·접두 아래 행 머리임을 Readline이 보장했는가"다. `false`면 행 머리 여부를 Readline이
+   * 모르므로(그리기 전 읽기는 화면에 이전 출력 꼬리가 있을 수 있다) 필요한 개행은 호출자가 정한다.
    */
-  public cancelRead(): void {
+  public cancelRead(options?: { settle?: boolean }): boolean {
+    // 상태 판정은 activeRead·redraw를 비우기 전이어야 한다.
+    const settled = options?.settle === true ? this.settleScreen() : false;
     // 리셋은 새 프로세스라 옛 맥락에서 쌓인 키(type-ahead)를 다음 읽기에 넘기지 않는다. 취소 이전에 queued에 쌓인 키도
     // 옛 맥락이라 폐기하고, 이후 도착하는 키는 activeRead가 없으므로 type-ahead로 간다.
     this.endOpenReads(new ReadCancelledError(), "drop", "drop");
+    return settled;
+  }
+
+  /**
+   * 열린 읽기를 끝내기 전 화면 정리(`cancelRead({ settle: true })`의 상태표). 커서를 입력·접두 아래 행 머리에 두었으면
+   * `true`, 정리할 수 없는 상태(그려진 활성 읽기 없음·`term` 없음)면 아무것도 쓰지 않고 `false`다. 읽기 상태는 바꾸지 않는다.
+   */
+  private settleScreen(): boolean {
+    if (this.term === undefined || this.activeRead === undefined) return false;
+    if (this.redrawing) {
+      // 입력줄은 지워졌고 커서는 출력 아래 행 머리다. 아직 그리지 않은 접두만 자기 행으로 남긴다.
+      const prefix = this.undrawnAbovePrefix();
+      if (prefix !== "") this.write(prefix + "\x1b[0m\r\n");
+      return true;
+    }
+    this.commitDrawnLine();
+    return true;
+  }
+
+  /**
+   * 그려진 활성 읽기의 입력줄을 화면에 확정한다: 감긴 입력의 마지막 행 끝으로 옮기고 커서 위치 강조를 벗겨 다시 그린 뒤
+   * 개행한다. 커서는 입력 아래 행 머리에 온다. `settleScreen()`(settle 취소)과 취소 가능한 Ctrl+C가 같이 쓴다. 읽기 상태는
+   * 바꾸지 않는다.
+   */
+  private commitDrawnLine(): void {
+    this.state.moveCursorToEnd();
+    this.state.refreshUnhighlighted();
+    this.term?.write("\r\n");
   }
 
   /**
@@ -483,8 +525,9 @@ export class Readline implements ITerminalAddon {
 
   /**
    * `abovePrefix()` 중 아직 화면에 그리지 않은 것. 재그리기(`printAboveRaw`)의 write 콜백을 기다리는 동안에만 접두가 있으면
-   * 접두를 돌려주고(입력줄이 접두째 지워진 상태), 그 밖에는 `""`다. `cancelRead()`는 화면에 쓰지 않으므로 콜백 전에 취소하면
-   * 이 접두가 사라진다 — 취소 직전에 이 값을 읽어 다시 쓰는 것은 호출자 몫이다. 재그리기가 끝난 뒤의 접두는 이미 프롬프트 행에
+   * 접두를 돌려주고(입력줄이 접두째 지워진 상태), 그 밖에는 `""`다. `settle` 없는 `cancelRead()`는 화면에 쓰지 않으므로 콜백 전에
+   * 취소하면 이 접두가 사라진다 — 그 경우 취소 직전에 이 값을 읽어 다시 쓰는 것은 호출자 몫이다(`cancelRead({ settle: true })`는
+   * 이 값을 스스로 다시 쓴다). 재그리기가 끝난 뒤의 접두는 이미 프롬프트 행에
    * 그려져 있으므로 이 값이 `""`이고, 다시 쓰면 중복된다.
    */
   public undrawnAbovePrefix(): string {
@@ -896,10 +939,8 @@ export class Readline implements ITerminalAddon {
         break;
       case InputType.CtrlC:
         if (this.activeRead.cancelable) {
-          // 취소: Enter와 같은 순서로 줄을 확정하되 ^C를 찍지 않고 history에도 넣지 않는다.
-          this.state.moveCursorToEnd();
-          this.state.refreshUnhighlighted();
-          this.term?.write("\r\n");
+          // 취소: settle 취소와 같은 줄 확정(Enter와 같은 순서)이되 ^C를 찍지 않고 history에도 넣지 않는다.
+          this.commitDrawnLine();
           // resolve 콜백이 동기로 다음 read()를 불러도 상태가 꼬이지 않게 먼저 비운다.
           const cancelled = this.activeRead;
           this.activeRead = undefined;
