@@ -1,4 +1,3 @@
-import { Readline } from "@cp949/runo-xterm-readline";
 import type { Terminal } from "@xterm/xterm";
 import {
   DEFAULT_PYODIDE_INDEX_URL,
@@ -14,7 +13,7 @@ import {
 } from "./run-source";
 import { startSession, type ReplSession } from "./session";
 import {
-  createSelectionCopy,
+  createTerminalSurface,
   writeNotice,
   type CopyResult,
 } from "@cp949/runo-pyodide-terminal/internal";
@@ -110,18 +109,14 @@ function normalizeIndexUrl(url: string): string {
 }
 
 export function createRepl(options: ReplOptions): ReplHandle {
-  // 선택 복사 정책은 `Readline` 생성 앞에 만든다 — 훅이 vendor보다 먼저 걸려도 안전하게(`!isolated`와도 무관, 확정 8).
-  const selectionCopy = createSelectionCopy(options.terminal, {
-    copyOnSelect: options.copyOnSelect !== false,
-    onCopy: options.onCopy ?? (() => {}),
-  });
+  // 선택 복사·`Readline` 조립과 정리는 surface가 소유한다(`!isolated`와도 무관, 확정 8).
   // history는 세션(마운트) 동안 메모리에만 둔다. 새로고침 뒤에는 비어 있어야 한다. 세션을 넘어 산다(리셋은 RD-010).
-  const readline = new Readline({
-    persist: false,
-    skipBlankHistory: true,
-    onKeyEvent: (event) => selectionCopy.onKeyEvent(event),
+  const surface = createTerminalSurface(options.terminal, {
+    copyOnSelect: options.copyOnSelect,
+    onCopy: options.onCopy,
+    readline: { persist: false, skipBlankHistory: true },
   });
-  options.terminal.loadAddon(readline);
+  const readline = surface.readline;
   const onStatus = options.onStatus ?? (() => {});
   const isolated = globalThis.crossOriginIsolated === true;
   const indexURL = normalizeIndexUrl(
@@ -173,8 +168,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
     });
     const spawnSession = () => {
       session = startSession({
-        readline,
-        terminal: options.terminal,
+        surface,
         createWorker: options.createWorker,
         indexURL,
         topLevelAwait,
@@ -262,10 +256,9 @@ export function createRepl(options: ReplOptions): ReplHandle {
         // 알림 핸들러가 dispose된 줄 편집기에 쓰지 않도록 RPC를 먼저 끊는다. `cancelRead()`가 추가로 앞서지만
         // 뒤이어 `readline.dispose()`가 돌아 관찰 가능한 차이는 없다.
         session?.terminate();
-        // mousedown/mouseup 리스너를 뗀다. readline보다 먼저 떼도 순서상 문제 없다(서로 독립).
-        selectionCopy.dispose();
-        // 벤더 dispose가 멱등이라 term.dispose()가 addon을 다시 dispose해도 안전하다.
-        readline.dispose();
+        // 선택 복사 리스너와 `Readline`을 뗀다(surface가 두 정리의 순서를 소유한다). 벤더 dispose가 멱등이라
+        // term.dispose()가 addon을 다시 dispose해도 안전하다.
+        surface.dispose();
       } finally {
         if (run !== undefined) endRun(run, "disposed");
       }
@@ -279,7 +272,7 @@ export function createRepl(options: ReplOptions): ReplHandle {
     },
     setCopyOnSelect(on) {
       if (disposed) return;
-      selectionCopy.setCopyOnSelect(on);
+      surface.setCopyOnSelect(on);
     },
     runSource(code) {
       if (typeof code !== "string") {

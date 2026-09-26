@@ -9,7 +9,7 @@
  * 화면 규칙: `run()` 시작 시 `clearOnRun`이면 화면을 지우고, 아니면 커서가 행 머리가 아닐 때 `\r\n` 한 번(RD-010 리셋 규칙과 같다).
  * 거부될 `run()`은 화면을 건드리지 않는다(실행 중 프로그램의 출력을 망치지 않는다).
  */
-import { Readline, ReadCancelledError } from "@cp949/runo-xterm-readline";
+import { ReadCancelledError } from "@cp949/runo-xterm-readline";
 import {
   createRunner,
   type InputProvider,
@@ -22,10 +22,8 @@ import {
 } from "@cp949/runo-pyodide-core";
 import type { Terminal } from "@xterm/xterm";
 import { writeNotice } from "./notice";
-import type { RewindTerminal } from "./rewind-tail";
-import { createInputReader } from "./stdin-reader";
-import { createSelectionCopy, type CopyResult } from "./selection-copy";
-import { createTerminalSinks } from "./sinks";
+import type { CopyResult } from "./selection-copy";
+import { createTerminalSurface } from "./surface";
 
 /** 비격리 페이지에서 세션을 시작하지 않는 이유를 알리는 안내. REPL의 `NOT_ISOLATED_WARNING`과 같은 문구다(ADR-0004). */
 const NOT_ISOLATED_NOTICE =
@@ -102,44 +100,21 @@ export function createTerminalRunnerWith(
   createCoreRunner: (options: RunnerOptions) => RunnerHandle,
 ): TerminalRunnerHandle {
   const terminal = options.terminal;
-  // 선택 복사 정책은 `Readline` 생성 앞에 만든다(REPL과 같은 순서) — 훅이 vendor보다 먼저 걸려도 안전하게.
-  const selectionCopy = createSelectionCopy(terminal, {
-    copyOnSelect: options.copyOnSelect !== false,
-    onCopy: options.onCopy ?? (() => {}),
-  });
   // 읽기 밖 입력은 버린다(typeAhead: false). history는 메모리에도 남기지 않는다(입력 읽기가 끝나면 되돌린다, `readInput`).
-  const readline = new Readline({
-    persist: false,
-    typeAhead: false,
-    onKeyEvent: (event) => selectionCopy.onKeyEvent(event),
+  const surface = createTerminalSurface(terminal, {
+    copyOnSelect: options.copyOnSelect,
+    onCopy: options.onCopy,
+    readline: { persist: false, typeAhead: false },
   });
-  terminal.loadAddon(readline);
-  const sinks = createTerminalSinks(readline);
+  const readline = surface.readline;
+  // sinks·`inputReader`가 쓰는 터미널 뷰의 게이트는 `disposed = true`와 같은 지점에서 `io.close()`로 닫는다(TRP-004).
+  const io = surface.openIo();
+  const { sinks, inputReader } = io;
 
   let disposed = false;
   let runner: RunnerHandle | undefined;
   /** 열려 있는 xterm 입력 읽기 수(기본 provider만 올린다). */
   let openReads = 0;
-
-  // xterm의 write 콜백은 `terminal.dispose()` 뒤에도 돈다(TRP-004). `rewindTail`이 flush 콜백에서 해제된 터미널의 buffer를
-  // 읽지 않도록, dispose 뒤에는 콜백을 전달하지 않는 뷰를 리더에 준다.
-  const liveTerminal: RewindTerminal = {
-    get cols() {
-      return terminal.cols;
-    },
-    get buffer() {
-      return terminal.buffer;
-    },
-    write: (text, callback) =>
-      terminal.write(
-        text,
-        callback &&
-          (() => {
-            if (!disposed) callback();
-          }),
-      ),
-  };
-  const inputReader = createInputReader(readline, liveTerminal, sinks);
 
   /** 기본 입력 공급자: 직전 출력의 꼬리를 프롬프트로 xterm에서 한 줄 읽는다(`prompt` 인자는 자체 꼬리를 쓰므로 무시한다). */
   const readInput: InputProvider = async (_prompt, signal) => {
@@ -231,8 +206,8 @@ export function createTerminalRunnerWith(
   } catch (error) {
     // 옵션 오류 등으로 core가 던졌다. 붙인 줄 편집기·선택 복사를 남기지 않는다.
     disposed = true;
-    selectionCopy.dispose();
-    readline.dispose();
+    io.close();
+    surface.dispose();
     throw error;
   }
   const core = runner;
@@ -248,17 +223,17 @@ export function createTerminalRunnerWith(
     dispose() {
       if (disposed) return;
       disposed = true;
+      io.close();
       // runner를 먼저 끝낸다: 열린 읽기의 signal이 abort돼 `cancelRead()`가 돈 뒤에 줄 편집기를 뗀다.
       core.dispose();
-      selectionCopy.dispose();
-      readline.dispose();
+      surface.dispose();
     },
     get status() {
       return core.status;
     },
     setCopyOnSelect(on) {
       if (disposed) return;
-      selectionCopy.setCopyOnSelect(on);
+      surface.setCopyOnSelect(on);
     },
   };
 }

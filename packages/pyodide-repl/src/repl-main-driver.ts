@@ -6,7 +6,6 @@
  */
 import { ReadCancelledError } from "@cp949/runo-xterm-readline";
 import type { Readline } from "@cp949/runo-xterm-readline";
-import type { Terminal } from "@xterm/xterm";
 import type {
   InterruptSender,
   MainDriver,
@@ -24,19 +23,15 @@ import { createBlockHistory } from "./terminal/block-history";
 import { mergeReadOptions } from "./terminal/read-options";
 import { createReadGuard } from "./terminal/read-guard";
 import { createReplReader } from "./terminal/repl-reader";
-import {
-  createInputReader,
-  createTerminalSinks,
-  type RewindTerminal,
-} from "@cp949/runo-pyodide-terminal/internal";
+import type { SurfaceIo } from "@cp949/runo-pyodide-terminal/internal";
 import { createTabReader } from "./terminal/tab-reader";
 import type { SourceCompletion } from "./worker/complete-source";
 
 export interface ReplMainDriverOptions {
   /** 핸들 소유. 세션을 넘어 산다(history 유지). */
   readline: Readline;
-  /** 호출자가 소유하는 xterm `Terminal`. */
-  terminal: Terminal;
+  /** 이 세션의 화면 입출력(`surface.openIo()`). `terminate` 훅이 `close()`한다. */
+  io: SurfaceIo;
   /** 핸들 소유. `readLine`·`readInput` 도착과 Tab 취소가 부른다. */
   interruptSender: InterruptSender;
   /** 초기화 프레임 `driver` 필드로 실린다. */
@@ -69,31 +64,9 @@ export interface ReplMainDriver {
 export function createReplMainDriver(
   options: ReplMainDriverOptions,
 ): ReplMainDriver {
-  const { readline, terminal, interruptSender, topLevelAwait, complete } =
-    options;
-
-  // 종료(`terminate` 훅) 뒤 참. core의 `ended`와 같은 시점에 선다(core가 먼저 세우고 훅을 부른다).
-  let ended = false;
-  // sink 세트는 세션마다 새로 만든다. 새 세션이 이전 꼬리를 물려받지 않게(05-output.md 4.1).
-  const sinks = createTerminalSinks(readline);
-  // xterm의 write 콜백은 `term.dispose()` 뒤에도 돈다(TRP-004). `rewindTail`이 flush 콜백에서 해제된 터미널의
-  // buffer를 읽지 않도록, 세션이 끝난 뒤에는 콜백을 전달하지 않는 뷰를 리더에 준다.
-  const liveTerminal: RewindTerminal = {
-    get cols() {
-      return terminal.cols;
-    },
-    get buffer() {
-      return terminal.buffer;
-    },
-    write: (text, callback) =>
-      terminal.write(
-        text,
-        callback &&
-          (() => {
-            if (!ended) callback();
-          }),
-      ),
-  };
+  const { readline, io, interruptSender, topLevelAwait, complete } = options;
+  // `io.terminal`은 세션이 끝난(`io.close()`) 뒤 write 콜백을 전달하지 않는 뷰다(TRP-004). `sinks`는 세션마다 새것이다.
+  const { sinks } = io;
   // 세션 소유: lastUsedIndentation은 이 세션 동안 유지되고, reset()이 새 세션(새 객체)을 만들면 4칸으로
   // 돌아간다(08-session.md 8.1, 확정 3).
   const autoIndent = createAutoIndent(readline);
@@ -110,14 +83,14 @@ export function createReplMainDriver(
   // `runSource` 조율(RD-022a): 열린 읽기를 가져가고 복원하며 결말을 슬롯에 알린다.
   const bridge = createSourceBridge({
     readline,
-    terminal: liveTerminal,
+    terminal: io.terminal,
     sinks,
     tabRequesting: () => tabReader.requesting,
     link: options.source,
   });
   const replReader = createReplReader(
     readline,
-    liveTerminal,
+    io.terminal,
     sinks,
     (pending) =>
       // `runSource`가 가져간 줄의 복원이 자동 들여쓰기 프리필보다 우선한다.
@@ -130,8 +103,8 @@ export function createReplMainDriver(
       ),
     (read, tail) => bridge.readOpened(read, tail),
   );
-  // stdin 리더도 같은 뷰를 받는다: `rewindTail`의 flush 콜백이 해제된 터미널의 buffer를 읽지 않게(TRP-004).
-  const inputReader = createInputReader(readline, liveTerminal, sinks);
+  // stdin 리더는 같은 `io`의 뷰·sinks를 쓴다(surface가 묶는다).
+  const { inputReader } = io;
   // 프롬프트를 기다리는 동안 worker의 배경 콜백이 `input()`을 부르면 stdin 읽기가 REPL 읽기를 교체해 REPL 읽기가
   // 고아가 된다. stdin 읽기를 활성 REPL 읽기가 끝난 뒤로 미룬다(04-stdin-input.md 3.2).
   const guard = createReadGuard({
@@ -249,7 +222,8 @@ export function createReplMainDriver(
       sinks.writeError(`pyodide 로드 실패: ${message}`);
     },
     terminate: () => {
-      ended = true;
+      // core가 `ended`를 먼저 세우고 이 훅을 부른다. 같은 지점에서 게이트를 닫는다.
+      io.close();
       // REPL 읽기가 열려 있으면 입력을 기다리던 블록이다 — 버린다. 실행 중·`exit()`로 끝난 블록은
       // `reading`이 거짓이라 남는다(확정 5). `reading`은 REPL 읽기 전용(`readInput`은 별도).
       if (reading) blockHistory.discard();

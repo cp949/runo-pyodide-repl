@@ -5,8 +5,7 @@
  * 공통 부분(worker·프레임·RPC·`readInput`·게이트·종료)은 core 세션(`startCoreSession`)이, REPL 화면 상호작용은 main driver
  * (`repl-main-driver.ts`)가 맡고 이 모듈은 둘을 조립해 이전과 같은 `ReplSession`을 낸다.
  */
-import type { Readline } from "@cp949/runo-xterm-readline";
-import type { Terminal } from "@xterm/xterm";
+import type { TerminalSurface } from "@cp949/runo-pyodide-terminal/internal";
 import type { ReplStatus } from "./index";
 import {
   createInterruptBuffer,
@@ -20,10 +19,8 @@ import type { SourcePrompt } from "./terminal/source-bridge";
 import type { SourceCompletion } from "./worker/complete-source";
 
 export interface StartSessionOptions {
-  /** 핸들 소유. 세션을 넘어 산다(history 유지). */
-  readline: Readline;
-  /** 호출자가 소유하는 xterm `Terminal`. */
-  terminal: Terminal;
+  /** 핸들 소유. 세션을 넘어 산다(`readline`·history 유지). 세션마다 `surface.openIo()`로 입출력을 새로 연다. */
+  surface: TerminalSurface;
   /** 세션마다 불린다. */
   createWorker: () => Worker;
   /** 끝 `/`가 붙은 pyodide CDN 위치. */
@@ -66,8 +63,7 @@ export interface ReplSession {
 
 export function startSession(options: StartSessionOptions): ReplSession {
   const {
-    readline,
-    terminal,
+    surface,
     createWorker,
     indexURL,
     topLevelAwait,
@@ -84,8 +80,9 @@ export function startSession(options: StartSessionOptions): ReplSession {
   // main driver의 `complete`가 core 세션의 `call`을 참조한다. 실제 Tab을 누를 때(세션이 시작된 뒤)만 불리므로 늦게 채워도 된다.
   const ref: { core?: CoreSession } = {};
   const repl = createReplMainDriver({
-    readline,
-    terminal,
+    readline: surface.readline,
+    // sink 세트·터미널 뷰·stdin 리더는 세션마다 새로 연다. 새 세션이 이전 꼬리를 물려받지 않게(05-output.md 4.1).
+    io: surface.openIo(),
     interruptSender,
     topLevelAwait,
     source,
