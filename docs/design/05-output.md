@@ -6,7 +6,7 @@
 
 ## 4.1 sink 4종(`createTerminalSinks(readline)`)
 
-sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`(REPL main driver가 세션마다 만든다)가 소유한다. `write`·`writeErrorRaw`는 core 세션이 `write`·`writeErrorRaw` 알림을 `{ stream: "stdout" | "stderr", text }`로 넘기는 `output` 콜백을 REPL main driver가 연결한 것이고(`stdout` → `write`, `stderr` → `writeErrorRaw`), `writeOutput`·`writeError`는 core가 아니라 REPL main driver의 RPC 핸들러가 부른다(`01-protocols.md` 1.2, `00-architecture.md` 4.1 core export). 꼬리 추적기 `createOutputTail`(`output-tail`)은 터미널에 의존하지 않는 순수 모듈이라 core `terminal/output-tail.ts`에 있고 `sinks.ts`가 import한다.
+sink 4종은 terminal 패키지 `packages/pyodide-terminal/src/sinks.ts`가 소유한다(surface `openIo()`가 세션마다 새로 만든다. `createRepl`은 세션마다, `createTerminalRunner`는 runner당 한 번 연다). `write`·`writeErrorRaw`는 core 세션이 `write`·`writeErrorRaw` 알림을 `{ stream: "stdout" | "stderr", text }`로 넘기는 `output` 콜백을 REPL main driver가 연결한 것이고(`stdout` → `write`, `stderr` → `writeErrorRaw`), `writeOutput`·`writeError`는 core가 아니라 REPL main driver의 RPC 핸들러가 부른다(`01-protocols.md` 1.2, `00-architecture.md` 4.1 core export). 꼬리 추적기 `createOutputTail`(`output-tail`)은 터미널에 의존하지 않는 순수 모듈이라 core `terminal/output-tail.ts`에 있고 `sinks.ts`가 import한다.
 
 | sink            | 구현                          | 개행        | 색                 | 용도                                                                  |
 | --------------- | ----------------------------- | ----------- | ------------------ | --------------------------------------------------------------------- |

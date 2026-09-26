@@ -36,7 +36,7 @@ RD-020(core 추출)은 완료된 RD 17건의 코드를 옮기므로 전체 기�
 
 RD-022가 실행 driver와 `pyodide-terminal`을 만들며 위 결정을 다음과 같이 구체화했다. 패키지 분리 자체는 바뀌지 않았다.
 
-- **repl → terminal 의존**: xterm 결합 공통 부품 5종(`sinks`·`rewind-tail`·`stdin-reader`·`notice`·`selection-copy`)을 repl에서 terminal로 옮기고 서브패스 `@cp949/runo-pyodide-terminal/internal`로 낸다. repl이 이것을 쓴다(terminal → repl 의존은 없다, 시험이 강제). `./internal`은 repl 전용이고 두 패키지가 lockstep으로 함께 바뀌며 안정성을 보장하지 않는다. 기각한 대안: 부품을 repl에 두고 terminal이 repl에 의존(실행창이 REPL 코드를 끌어온다), 별도 공유 패키지(부품 5종이 작고 두 소비자뿐이라 패키지 수만 늘어난다), 부품 복제(두 벌이 어긋난다).
+- **repl → terminal 의존**: xterm 결합 공통 부품 6종(`sinks`·`rewind-tail`·`stdin-reader`·`notice`·`selection-copy`·`surface`; 앞 5종은 repl에서 옮겼고 `surface`는 이후 terminal에 새로 추가했다)을 terminal의 서브패스 `@cp949/runo-pyodide-terminal/internal`로 낸다. repl이 이것을 쓴다(terminal → repl 의존은 없다, 시험이 강제). `./internal`은 repl 전용이고 두 패키지가 lockstep으로 함께 바뀌며 안정성을 보장하지 않는다. 기각한 대안: 부품을 repl에 두고 terminal이 repl에 의존(실행창이 REPL 코드를 끌어온다), 별도 공유 패키지(부품 6종이 작고 두 소비자뿐이라 패키지 수만 늘어난다), 부품 복제(두 벌이 어긋난다).
 - **runner는 core에 둔다**: UI 비의존 `createRunner`(상태 8종·`run`·`stop`·`InputProvider`)가 core에 있고 terminal의 `createTerminalRunner`가 그것을 xterm에 붙인다. canvas 같은 xterm 없는 소비자가 core만으로 실행할 수 있다. 위 표의 core "실행 driver, main 세션" 항목과 같다.
 - **`InputProvider` 생략의 의미**: provider를 생략하거나 `null`을 돌려주면 읽기 취소(메일박스 cancel)이고 `input()`은 `KeyboardInterrupt`(결과 `interrupted`)다. `EOFError`가 아니다 — 메일박스 프로토콜에 EOF 상태가 없고 REPL과 공유하는 계층이라 이 RD에서 바꾸지 않았다(사용자 확정 2026-09-24). EOF가 필요하면 프로토콜 확장 항목이 필요하다.
 - **interrupt buffer는 worker마다 새로 만든다**: 옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채기 때문이다. runner가 먼저 이렇게 했고 REPL도 같은 규칙으로 고쳤다(`docs/design/14-runner.md` 14.3.5).

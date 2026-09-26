@@ -17,7 +17,7 @@ xterm의 `write`는 파싱을 타이머로 미루고 `term.dispose()`는 대기 
 ## 탐지/회피
 
 - 회피: 콜백 시작부에서 해제 여부를 보고 되돌아간다. `Readline.dispose()`는 `term`을 비우고(콜백의 `term === undefined` 가드가 작동한다) 대기 중인 읽기(콜백 대기 중인 것 포함)를 reject한다. 새 콜백 소비자도 같은 가드를 둔다.
-- 회피(꼬리 정리): `rewindTail`의 flush 콜백은 해제 여부를 알 수 없다. 수명을 아는 `createRepl`이 리더에 dispose 뒤에는 write 콜백을 전달하지 않는 터미널 뷰를 준다. `rewindTail`·`createReplReader` 시그니처는 바꾸지 않는다. `stdin-reader`(`packages/pyodide-terminal/src/stdin-reader.ts`) 같은 새 소비자도 같은 뷰를 받아야 한다.
-- 탐지(단위): 가짜 터미널이 `dispose()` 뒤에도 콜백을 돌리고 그때의 `buffer` 읽기를 `disposedBufferReads`로 센다. `createRepl`의 "`dispose` 직후 `terminal.dispose()`" 시험이 이 값이 0인지 본다. 꼬리 정리 경로는 비동기 모드에서 100자 꼬리를 쓰는 "폭을 넘는 꼬리를 정리하려고 flush를 기다리는 중에 dispose해도 …" 시험이 본다(터미널 뷰의 해제 가드를 지우면 이 시험 하나가 `disposedBufferReads` 3으로 실패한다).
+- 회피(꼬리 정리): `rewindTail`의 flush 콜백은 해제 여부를 알 수 없다. terminal 패키지 surface(`packages/pyodide-terminal/src/surface.ts`)의 `openIo()`가 `close()` 뒤에는 write 콜백을 전달하지 않는 터미널 뷰(`io.terminal`)를 돌려주고, `createRepl`(세션 `terminate` 훅)과 `createTerminalRunner`(`dispose()`)가 수명이 끝나는 지점에서 `io.close()`를 부른다. `rewindTail`·`createReplReader` 시그니처는 바꾸지 않는다. `stdin-reader`(`packages/pyodide-terminal/src/stdin-reader.ts`) 같은 새 소비자도 같은 뷰를 받아야 한다.
+- 탐지(단위): surface 시험(`surface.test.ts`)과 소비자 시험이 가짜 터미널의 `disposedBufferReads`를 본다. 가짜 터미널이 `dispose()` 뒤에도 콜백을 돌리고 그때의 `buffer` 읽기를 `disposedBufferReads`로 센다. `createRepl`의 "`dispose` 직후 `terminal.dispose()`" 시험이 이 값이 0인지 본다. 꼬리 정리 경로는 비동기 모드에서 100자 꼬리를 쓰는 "폭을 넘는 꼬리를 정리하려고 flush를 기다리는 중에 dispose해도 …" 시험이 본다(터미널 뷰의 해제 가드를 지우면 이 시험 하나가 `disposedBufferReads` 3으로 실패한다).
 - 탐지(브라우저): dev(StrictMode)에서 콘솔 warning이 0건인지 확인한다. 벤더 `dispose()`의 `term` 해제를 지우면 이 확인이 실패한다(양성 대조).
 - 재현: 실제 `@xterm/xterm` 6.0.0을 jsdom에서 `open()` 없이 만들어 `write("", cb)` 직후 `dispose()`하고 콜백에서 `term.buffer`를 읽으면 경고가 난다.

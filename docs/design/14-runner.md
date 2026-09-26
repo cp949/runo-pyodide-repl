@@ -185,9 +185,10 @@ type InputProvider = (
 
 ### 14.5.1 구성
 
-- 선택 복사(`createSelectionCopy`)를 `Readline`보다 먼저 만들고(REPL과 같은 순서), `Readline`은 `{ persist: false, typeAhead: false, onKeyEvent: selectionCopy.onKeyEvent }`로 만들어 `terminal.loadAddon`한다. `typeAhead: false`는 벤더 옵션이다(`06-editing.md` 6.1).
+- 화면 조립은 terminal `./internal`의 surface(`createTerminalSurface(terminal, { copyOnSelect, onCopy, readline })`, `src/surface.ts`)가 소유한다(REPL과 같은 module). surface가 선택 복사(`createSelectionCopy`)를 `Readline`보다 먼저 만들고 `Readline`의 `onKeyEvent`를 선택 복사에 묶은 뒤 `terminal.loadAddon`한다. 실행창은 정책만 넘긴다: `readline: { persist: false, typeAhead: false }`. `typeAhead: false`는 벤더 옵션이다(`06-editing.md` 6.1).
+- 세션 입출력은 `surface.openIo()`가 준다: `{ terminal, sinks, inputReader, close }`. 실행창은 runner당 한 번 열고 `dispose()`의 `disposed = true` 다음 줄(`core.dispose()` 앞)에서 `io.close()`를 부른다. `io.terminal`은 `close()` 뒤에 write 콜백을 전달하지 않는 터미널 뷰다(TRP-004, 14.5.5).
 - 출력: `onOutput`의 stdout은 `sinks.write`(개행 강제 없음), stderr는 `sinks.writeErrorRaw`(조각마다 빨강)로 그린다. 로드 실패는 빨강 한 줄 `pyodide 로드 실패: <message>`(REPL과 같은 문구), 비격리는 노란 안내(14.5.6).
-- 기본 입력 provider는 `stdin-reader`(`createInputReader`)다: 직전 출력의 꼬리를 프롬프트로 그 자리에 다시 그려 한 줄을 읽는다(`04-stdin-input.md` 3.3, 자체 sinks 꼬리를 쓰고 core가 넘긴 `prompt`는 무시한다). 프롬프트는 REPL `>>> `가 아니라 직전 출력의 꼬리다(`input("이름: ")`이면 `이름: `).
+- 기본 입력 provider는 `stdin-reader`의 입력 리더(`io.inputReader`, surface가 `createInputReader`로 만든다)다: 직전 출력의 꼬리를 프롬프트로 그 자리에 다시 그려 한 줄을 읽는다(`04-stdin-input.md` 3.3, 자체 sinks 꼬리를 쓰고 core가 넘긴 `prompt`는 무시한다). 프롬프트는 REPL `>>> `가 아니라 직전 출력의 꼬리다(`input("이름: ")`이면 `이름: `).
 
 ### 14.5.2 키 정책
 
@@ -222,7 +223,7 @@ type InputProvider = (
 
 ### 14.5.5 `dispose()`
 
-runner를 먼저 끝낸다(열린 읽기의 `signal`이 abort돼 `cancelRead()`가 돈다). 이어서 선택 복사·줄 편집기를 뗀다. `Terminal`은 dispose하지 않는다. 두 번 불러도 안전하다. 리더에는 dispose 뒤 write 콜백을 전달하지 않는 터미널 뷰를 준다(xterm은 `term.dispose()` 뒤에도 write 콜백을 돌린다, `docs/traps/TRP-004`).
+`disposed = true` 다음에 `io.close()`로 터미널 뷰의 게이트를 닫고, runner를 끝낸다(열린 읽기의 `signal`이 abort돼 `cancelRead()`가 돈다). 이어서 `surface.dispose()`가 선택 복사·줄 편집기를 뗀다(surface가 소유하는 순서는 이 둘뿐이고 서로 독립이다). runner를 먼저 끝내 화면을 나중에 떼는 순서(TRP-064)는 소비자가 소유한다. `Terminal`은 dispose하지 않는다. 두 번 불러도 안전하다. 리더에는 dispose 뒤 write 콜백을 전달하지 않는 터미널 뷰(`io.terminal`)를 준다(xterm은 `term.dispose()` 뒤에도 write 콜백을 돌린다, `docs/traps/TRP-004`).
 
 ### 14.5.6 비격리
 

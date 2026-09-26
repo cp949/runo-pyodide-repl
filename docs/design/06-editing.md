@@ -128,7 +128,7 @@ lastUsedIndentation)`을 계산하고 `editInsert("\n" + indentation)` 한 번�
   Shift+Enter·붙여넣기(둘 다 `editInsert` → `editing = true`)로만 생긴다 — `getLine()`에 개행이 있으면(여러
   줄 버퍼) 삼키지 않고 벤더 줄 이동에 맡긴다. ↓는 읽기 시작 시 `history.cursor === -1`이라 따로 막지 않는다.
 - `skipBlankHistory`(RD-013 완료)와 합성한다: `Readline` 생성자 옵션 `ReadlineOptions.skipBlankHistory`가
-  벤더 안에서 처리한다(6.1) — 코어는 `new Readline({ persist: false, skipBlankHistory: true })`로 켠다.
+  벤더 안에서 처리한다(6.1) — `createRepl`이 surface에 `readline: { persist: false, skipBlankHistory: true }`를 넘기고 surface(`createTerminalSurface`)가 `new Readline`을 만든다.
   블록 히스토리는 이 옵션이 이미 거른 뒤의 Enter 제출(`historyEntry` 호출)만 본다.
 - `... `에서 Enter 1회로 제출된 여러 줄(붙여넣기·Shift+Enter)은 제출 텍스트 전체를 블록에 잇는다
   (`(pendingBlock + '\n' + 제출텍스트).trimEnd()`). 붙여넣은 텍스트가 블록을 끝내고 top-level 문장까지
@@ -187,7 +187,7 @@ autoIndent.readOptions(pending))`로 합성한다(blockHistory 먼저 — ↑ �
   `copy failed`를 1초 표시한다(`00-architecture.md` 4.1). 실패는 조용히 무시하지 않는다 — 사용자가 복사됐다고
   오해하는 것을 막는다.
 
-기전(terminal 패키지 `packages/pyodide-terminal/src/selection-copy.ts`, `createRepl`이 핸들 수명으로 만든다 — 세션이 아니다):
+기전(terminal 패키지 `packages/pyodide-terminal/src/selection-copy.ts`, `createRepl`이 surface(`surface.ts`, 핸들 수명)를 통해 만든다 — 세션이 아니다):
 
 - 키 가로채기는 **벤더 공개 훅** `ReadlineOptions.onKeyEvent?: (event: KeyboardEvent) => boolean`이다.
   `Readline.handleKeyEvent`(xterm `attachCustomKeyEventHandler`에 등록된 벤더 핸들러)가 자기 처리(Shift+Enter)
@@ -213,7 +213,7 @@ autoIndent.readOptions(pending))`로 합성한다(blockHistory 먼저 — ↑ �
   `setCopyOnSelect(on)`·`dispose()`를 노출한다. `writeText`는 시험용 주입(기본 `navigator.clipboard.writeText`).
   판정은 순수 함수(`decideKey({ ctrlKey, altKey, metaKey, key, type }, hasSelection) → "copy" | "pass"`)로 분리해
   node 시험한다. `dispose()`가 리스너 둘을 떼고 이후 `onKeyEvent`는 항상 `false`다. `createRepl.dispose()`
-  순서: `session.endSession()` → `session.terminate()` → **`selectionCopy.dispose()`** → `readline.dispose()`.
+  순서: `session.endSession()` → `session.terminate()` → **`surface.dispose()`**(선택 복사 → `readline`, 서로 독립이고 surface가 순서를 소유한다).
   `reset()`은 건드리지 않는다(핸들 수명).
 - Ctrl+L(화면 지우기)과 세션 리셋은 별개 기능으로 유지한다. Ctrl+D(빈 줄 EOF)는 구현하지 않았다.
 

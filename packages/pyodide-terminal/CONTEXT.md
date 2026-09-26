@@ -1,6 +1,6 @@
 # pyodide-terminal
 
-xterm 실행창(`createTerminalRunner`)과 repl이 공유하는 xterm 결합 부품 5종. core 위에 얹히고 coincident에 의존하지 않는다. private이고 공개 API로 확정하지 않은 내부 계약이다(RD-022). 코드·문서·시험 이름에 쓰는 용어를 정의한다. main·worker·세션·읽기·인터럽트·꼬리의 일반 용어는 `packages/pyodide-repl/CONTEXT.md`, driver·core 세션·`InputProvider`는 `packages/pyodide-core/CONTEXT.md`를 따르고, 여기서는 terminal이 도입한 용어만 정의한다. 규칙 본문은 `docs/design/14-runner.md`.
+xterm 실행창(`createTerminalRunner`)과 repl이 공유하는 xterm 결합 부품 6종. core 위에 얹히고 coincident에 의존하지 않는다. private이고 공개 API로 확정하지 않은 내부 계약이다(RD-022). 코드·문서·시험 이름에 쓰는 용어를 정의한다. main·worker·세션·읽기·인터럽트·꼬리의 일반 용어는 `packages/pyodide-repl/CONTEXT.md`, driver·core 세션·`InputProvider`는 `packages/pyodide-core/CONTEXT.md`를 따르고, 여기서는 terminal이 도입한 용어만 정의한다. 규칙 본문은 `docs/design/14-runner.md`.
 
 ## Language
 
@@ -34,7 +34,7 @@ _Avoid_: 사전 검증
 ### 공통 부품
 
 **`./internal`**:
-`@cp949/runo-pyodide-terminal/internal` 서브패스. `sinks`·`rewind-tail`·`stdin-reader`·`notice`·`selection-copy`를 `export *`로 낸다. repl 전용이고 두 패키지가 lockstep으로 바뀌며 안정성을 보장하지 않는다. 앱 코드는 `.` 진입점만 쓴다.
+`@cp949/runo-pyodide-terminal/internal` 서브패스. `sinks`·`rewind-tail`·`stdin-reader`·`notice`·`selection-copy`·`surface`를 `export *`로 낸다. repl 전용이고 두 패키지가 lockstep으로 바뀌며 안정성을 보장하지 않는다. 앱 코드는 `.` 진입점만 쓴다.
 _Avoid_: 공개 API, 유틸
 
 **sink**:
@@ -44,4 +44,12 @@ main이 터미널에 쓰는 함수 4종(`writeOutput`·`writeError`·`write`·`w
 직전 출력의 꼬리를 프롬프트로 그 자리에 다시 그려(`rewindTail` 뒤) 한 줄을 읽는 부품. `read(cancelable, signal?)`. `signal`은 꼬리 정리(flush) 대기 뒤 abort 여부를 다시 확인하는 데만 쓴다. REPL 읽기(`repl-reader`, `>>> ` 합성)와 다르다.
 
 **선택 복사(`createSelectionCopy`)**:
-드래그 선택 시 자동 복사와 선택 중 Ctrl+C 복사(Shift 무관)를 처리하는 정책 객체. `Readline`보다 먼저 만든다(`06-editing.md` 6.6).
+드래그 선택 시 자동 복사와 선택 중 Ctrl+C 복사(Shift 무관)를 처리하는 정책 객체. `Readline`보다 먼저 만든다(`06-editing.md` 6.6). 이 순서는 surface가 소유하므로 소비자가 직접 만들지 않는다.
+
+**surface**:
+`createTerminalSurface(terminal, options)`가 만드는 xterm 화면 조립·수명 객체(`src/surface.ts`). 선택 복사 → `Readline` → `loadAddon` 순으로 조립하고 `Readline`의 `onKeyEvent`를 선택 복사에 묶는다. `dispose()`는 선택 복사 → `Readline` 순으로 정리하며 열린 `io`는 닫지 않는다. 수명은 두 겹이다: 위젯 수명(`createTerminalRunner`·`createRepl`과 같다: `readline`·`setCopyOnSelect`·`dispose`)과 세션 수명(`openIo()`). 소비자는 정책만 넘긴다(`Readline` 옵션 `persist`·`typeAhead`·`skipBlankHistory`, `io.close()`·`dispose()`를 부르는 시점).
+_Avoid_: 위젯, 화면 매니저
+
+**io**:
+`surface.openIo()`가 호출마다 새로 만드는 세션 수명 입출력 `{ terminal, sinks, inputReader, close }`. `terminal`은 `close()` 뒤 write 콜백을 전달하지 않는 뷰이고(xterm write 콜백은 `term.dispose()` 뒤에도 돈다, TRP-004) `sinks`의 꼬리와 `inputReader`는 `io`마다 따로다. `close()`는 멱등이고 다른 `io`에 영향을 주지 않는다. 실행창은 runner당 한 번, repl은 세션마다 연다.
+_Avoid_: 세션(세션은 core 세션 = worker 한 개), 스트림
