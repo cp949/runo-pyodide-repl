@@ -100,7 +100,7 @@ export function createTerminalRunnerWith(
   createCoreRunner: (options: RunnerOptions) => RunnerHandle,
 ): TerminalRunnerHandle {
   const terminal = options.terminal;
-  // 읽기 밖 입력은 버린다(typeAhead: false). history는 메모리에도 남기지 않는다(입력 읽기가 끝나면 되돌린다, `readInput`).
+  // 읽기 밖 입력은 버린다(typeAhead: false). history는 메모리에도 남기지 않는다(`readInput`이 `history: false`로 읽는다).
   const surface = createTerminalSurface(terminal, {
     copyOnSelect: options.copyOnSelect,
     onCopy: options.onCopy,
@@ -119,9 +119,6 @@ export function createTerminalRunnerWith(
   /** 기본 입력 공급자: 직전 출력의 꼬리를 프롬프트로 xterm에서 한 줄 읽는다(`prompt` 인자는 자체 꼬리를 쓰므로 무시한다). */
   const readInput: InputProvider = async (_prompt, signal) => {
     if (signal.aborted) return null;
-    // 읽기 줄은 history에 남기지 않는다. 벤더는 Enter마다 append하므로 읽기 앞 상태로 되돌린다(`historyEntry`는 항목을 건너뛰지 못한다).
-    const history = readline.getHistory();
-    const historyBase = history.entries.slice();
     // 읽는 도중 abort(Ctrl+C·`stop()`·`reset()`·크래시): 열린 읽기를 끝내 다음 Enter가 죽은 읽기에 들어가지 않게 한다.
     // 화면 정리(접두 재출력·감긴 입력 아래 행 머리)는 벤더 `settle`이 한다(`06-editing.md`). 읽기가 그려지기 전이면(`false`)
     // 꼬리 뒤에 개행한다. dispose 중에는 화면에 쓰지 않는다.
@@ -132,7 +129,8 @@ export function createTerminalRunnerWith(
     signal.addEventListener("abort", onAbort, { once: true });
     openReads += 1;
     try {
-      return await inputReader.read(true, signal);
+      // 읽기 줄은 history에 남기지 않는다(벤더 `ReadOptions.history: false`).
+      return await inputReader.read(true, signal, { history: false });
     } catch (error) {
       // `cancelRead()`로 끝난 읽기는 오류가 아니라 읽기 취소(null)다.
       if (error instanceof ReadCancelledError || disposed) return null;
@@ -140,7 +138,6 @@ export function createTerminalRunnerWith(
     } finally {
       signal.removeEventListener("abort", onAbort);
       openReads -= 1;
-      history.restore(historyBase);
     }
   };
 

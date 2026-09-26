@@ -12,6 +12,8 @@ interface ActiveRead {
   cancelable: boolean;
   onKey?: (input: Input) => boolean;
   historyEntry?: (line: string) => string;
+  /** `false`면 이 읽기의 Enter 제출을 history에 넣지 않는다(`ReadOptions.history`). */
+  history: boolean;
 }
 
 /** write 콜백을 기다리는 읽기 하나. `cancelled`는 콜백 도착 전에 `cancelRead()`·`takeRead()`·`dispose()`가 먼저 끝냈는지 표시한다. */
@@ -105,9 +107,14 @@ export interface ReadOptions {
   /**
    * Enter로 제출된 줄을 history에 넣기 직전에 부른다. 돌려준 문자열이 기록된다.
    * `skipBlankHistory`가 거른 공백뿐인 제출에는 부르지 않는다. 취소(`cancelable` Ctrl+C)에도
-   * 부르지 않는다.
+   * 부르지 않는다. `history: false`인 읽기에서도 부르지 않는다.
    */
   historyEntry?: (line: string) => string;
+  /**
+   * `false`면 이 읽기에서 Enter로 제출된 줄을 history에 넣지 않는다(`historyEntry`도 부르지 않는다). history 탐색 커서는
+   * `skipBlankHistory`가 거른 공백 제출처럼 처음으로 되돌린다. 읽는 동안 ↑·↓ 탐색은 그대로 된다. 생략하면 기록한다(원본 동작).
+   */
+  history?: false;
 }
 
 /**
@@ -763,6 +770,7 @@ export class Readline implements ITerminalAddon {
           cancelable,
           onKey: options.onKey,
           historyEntry: options.historyEntry,
+          history: options.history !== false,
         };
         this.replayTypeAhead();
       });
@@ -924,7 +932,10 @@ export class Readline implements ITerminalAddon {
           // before committing so the line frozen in scrollback is plain.
           this.state.refreshUnhighlighted();
           this.term?.write("\r\n");
-          if (this.skipBlankHistory && this.state.buffer().trim() === "") {
+          if (
+            this.activeRead?.history === false ||
+            (this.skipBlankHistory && this.state.buffer().trim() === "")
+          ) {
             this.history.resetCursor();
           } else {
             const line = this.state.buffer();

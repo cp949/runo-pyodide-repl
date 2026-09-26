@@ -19,8 +19,14 @@ export interface InputReader {
    * `signal`이 주어지고 꼬리 정리(flush 대기)가 끝난 시점에 이미 abort됐으면 읽기를 시작하지 않고 `null`을 돌려준다
    * (실행창의 `InputProvider`가 그 사이에 abort되면 죽은 읽기가 남지 않게 한다). 읽는 도중의 abort는 호출자가
    * `Readline.cancelRead()`로 끝낸다.
+   * `options.history`가 `false`면 제출한 줄을 history에 넣지 않는다(벤더 `ReadOptions.history`, 실행창 `input()`). 생략하면
+   * 벤더 기본대로 기록한다(repl `input()`).
    */
-  read(cancelable: boolean, signal?: AbortSignal): Promise<string | null>;
+  read(
+    cancelable: boolean,
+    signal?: AbortSignal,
+    options?: { history?: false },
+  ): Promise<string | null>;
 }
 
 /**
@@ -34,14 +40,20 @@ export function createInputReader(
   sinks: Pick<TerminalSinks, "tail" | "resetTail">,
 ): InputReader {
   return {
-    async read(cancelable, signal) {
+    async read(cancelable, signal, options) {
       await rewindTail(term, sinks.tail());
       // flush를 기다리는 사이에 abort됐으면 읽기를 열지 않는다(열면 아무도 끝내지 않는 읽기가 남는다).
       if (signal?.aborted) return null;
       // flush를 기다리는 사이에 온 출력을 반영하려고 꼬리를 다시 읽는다.
       const tail = sinks.tail();
       sinks.resetTail();
-      return readline.read(tail, { cancelable });
+      // history 키는 `false`일 때만 넣는다(생략 호출의 벤더 옵션은 전과 같다).
+      return readline.read(
+        tail,
+        options?.history === false
+          ? { cancelable, history: false }
+          : { cancelable },
+      );
     },
   };
 }

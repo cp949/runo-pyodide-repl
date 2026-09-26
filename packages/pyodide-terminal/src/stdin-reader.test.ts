@@ -137,6 +137,36 @@ describe.each([
     expect(lastOptions()).toEqual({ cancelable: false });
   });
 
+  test("호출 옵션 `history: false`를 벤더 읽기 옵션으로 넘기고, 생략하면 history 키를 넣지 않는다", async () => {
+    const { fake, reader, startRead, lastOptions } = setup();
+    const first = reader.read(true, undefined, { history: false });
+    fake.flush();
+    await tick();
+    fake.flush();
+    expect(lastOptions()).toEqual({ cancelable: true, history: false });
+    fake.type("abc\r");
+    await expect(first).resolves.toBe("abc");
+
+    await startRead();
+    expect(lastOptions()).toStrictEqual({ cancelable: true });
+  });
+
+  test("`history: false`로 읽은 줄은 history에 남지 않고, 옵션 없이 읽은 줄은 남는다", async () => {
+    const { fake, readline, reader, startRead } = setup();
+    const first = reader.read(true, undefined, { history: false });
+    fake.flush();
+    await tick();
+    fake.flush();
+    fake.type("abc\r");
+    await expect(first).resolves.toBe("abc");
+    expect(readline.getHistory().entries).toEqual([]);
+
+    const { line } = await startRead();
+    fake.type("def\r");
+    await expect(line).resolves.toBe("def");
+    expect(readline.getHistory().entries).toEqual(["def"]);
+  });
+
   test("cancelable 읽기 중 Ctrl+C는 `^C` 없이 `null`을 돌려준다", async () => {
     const { fake, sinks, startRead } = setup();
     sinks.write("x: ");
