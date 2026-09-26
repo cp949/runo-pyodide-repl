@@ -19,6 +19,7 @@ import { Readline } from "@cp949/runo-xterm-readline";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createRepl,
+  type CopyResult,
   DEFAULT_PYODIDE_INDEX_URL,
   NOT_ISOLATED_WARNING,
   RESET_NOTICE,
@@ -2145,5 +2146,46 @@ describe("선택 복사 배선(RD-017 DELTA-03)", () => {
     element.ownerDocument.dispatchEvent(new MouseEvent("mouseup"));
 
     expect(writeText).not.toHaveBeenCalled();
+  });
+
+  /** 드래그(mousedown → 선택 → mouseup)를 흉내 낸다. 자동 복사는 `mouseup`에서 걸린다. */
+  function drag(session: Session, selected: string) {
+    session.fake.select(selected);
+    const element = session.fake.term.element as HTMLElement;
+    element.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+    element.ownerDocument.dispatchEvent(new MouseEvent("mouseup"));
+  }
+
+  test("copyOnSelect 옵션은 createRepl에서 선택 복사 정책까지 전달된다(기본은 켜짐, false는 끔)", () => {
+    const enabled = startSession({}, { withElement: true });
+    drag(enabled, "dragged");
+    // 기본값(옵션 생략)이면 드래그 뒤 자동 복사한다. 이 대조가 있어야 아래 false의 무복사가 옵션 전달을 뜻한다.
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith("dragged");
+
+    const disabled = startSession(
+      { copyOnSelect: false },
+      { withElement: true },
+    );
+    drag(disabled, "dragged");
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  test("onCopy 옵션은 createRepl에서 선택 복사 결과(성공 chars·실패 error)를 받는다", async () => {
+    const results: CopyResult[] = [];
+    const session = startSession(
+      { onCopy: (result) => results.push(result) },
+      { withElement: true },
+    );
+
+    drag(session, "한글abc");
+    await vi.waitFor(() => expect(results).toHaveLength(1));
+    expect(results[0]).toEqual({ ok: true, chars: 5 });
+
+    const failure = new Error("클립보드 거부");
+    writeText.mockRejectedValueOnce(failure);
+    drag(session, "x");
+    await vi.waitFor(() => expect(results).toHaveLength(2));
+    expect(results[1]).toEqual({ ok: false, error: failure });
   });
 });
