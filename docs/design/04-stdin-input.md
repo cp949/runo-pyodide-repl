@@ -82,7 +82,7 @@
 - REPL 경로(`terminal/repl-reader.ts`의 `createReplReader(readline, term, sinks)` → `read(prompt, cancelable): Promise<string | null>`, 세션마다 하나)의 순서: `rewindTail` → 꼬리
   재조회(flush를 기다리는 사이 온 출력을 반영) → `resetTail` → `readline.read(꼬리 + "\x1b[0m" + 프롬프트, { cancelable })`. 꼬리가 없으면
   프롬프트 그대로 읽는다. 꼬리의 열린 색이 프롬프트로 새지 않도록 둘 사이에 SGR 리셋을 넣는다.
-- stdin 경로(`packages/pyodide-terminal/src/stdin-reader.ts`의 `createInputReader(readline, term, sinks)` → `read(cancelable): Promise<string | null>`, 세션마다 하나)는 꼬리 그대로가
+- stdin 경로(`packages/pyodide-terminal/src/stdin-reader.ts`의 `createInputReader(readline, term, sinks)` → `read(cancelable, signal?, options?: { history?: false }): Promise<string | null>`, 세션마다 하나)는 꼬리 그대로가
   프롬프트의 전부다(sink·꼬리 규칙은 `05-output.md`, 프롬프트 문자열은 `02-console-core.md` 5.2 참고). 순서는 `rewindTail` → 꼬리
   재조회 → `resetTail` → `readline.read(꼬리, { cancelable })`이고 **SGR 리셋을 붙이지 않는다**: 프롬프트의 열린 색은 tty처럼 입력에 이어진다(색이 닫힌
   프롬프트의 입력은 기본색). 꼬리가 없으면 프롬프트 없이 읽는다. 둘을 한 함수로 일반화하지 않았다(합성과 SGR 리셋이 다르다).

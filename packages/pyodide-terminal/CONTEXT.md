@@ -22,7 +22,7 @@ _Avoid_: 무시된 키, 유실 키(의도된 동작이다)
 읽기 밖 Ctrl+C(벤더 `setCtrlCHandler`)를 runner 상태로 가르는 규칙. 선택이 있으면 복사, `running`이면 `^C` + `interrupt()`, `waiting-input`이면 읽기 취소, 그 밖은 무동작. 읽기 중 Ctrl+C는 벤더가 `cancelable` 읽기를 `null`로 끝낸다.
 
 **abort 정리**:
-기본 입력 provider가 `signal` abort에서 하는 일. `readline.cancelRead()`로 열린 읽기를 끝내고 입력줄 뒤에 `\r\n`을 쓴다(`dispose()` 중에는 쓰지 않는다). 안 하면 다음 Enter가 죽은 읽기로 들어간다.
+기본 입력 provider가 `signal` abort에서 하는 일. `readline.cancelRead({ settle: !disposed })`로 열린 읽기를 끝내고 벤더가 화면을 정리하게 한다(아직 그리지 않은 배경 출력 접두는 자기 행으로, 그려진 입력은 감긴 입력의 끝 아래 행 머리로). settle이 `false`(읽기가 그려지기 전)면 provider가 `\r\n`을 쓴다. `dispose()` 중에는 화면에 쓰지 않는다. 안 하면 다음 Enter가 죽은 읽기로 들어가고, 커서가 감긴 입력 중간이면 트레이스백이 입력 위에 겹친다(`14-runner.md` 14.5.3).
 
 **커서 줄바꿈**:
 `run()` 시작 시 커서가 행 머리가 아니면(`cursorX !== 0`) `\r\n`을 한 번 쓰는 규칙. `clearOnRun`이면 대신 화면을 지운다. 거부될 `run()`은 화면을 건드리지 않는다.
@@ -41,7 +41,7 @@ _Avoid_: 공개 API, 유틸
 main이 터미널에 쓰는 함수 4종(`writeOutput`·`writeError`·`write`·`writeErrorRaw`)과 꼬리 추적(`tail`·`resetTail`), 열린 읽기의 접두를 꼬리로 옮기는 `moveAbovePrefixToTail`(REPL read-guard 전용). 실행창은 stdout을 `write`, stderr를 `writeErrorRaw`로 그린다. 열린 읽기 중에는 4종 모두 벤더 `printAboveRaw`로 입력줄 위에 쓰고 꼬리를 건드리지 않는다(`splitAboveRead`). 정의는 `05-output.md`(열린 읽기는 4.4).
 
 **입력 리더(`createInputReader`)**:
-직전 출력의 꼬리를 프롬프트로 그 자리에 다시 그려(`rewindTail` 뒤) 한 줄을 읽는 부품. `read(cancelable, signal?)`. `signal`은 꼬리 정리(flush) 대기 뒤 abort 여부를 다시 확인하는 데만 쓴다. REPL 읽기(`repl-reader`, `>>> ` 합성)와 다르다.
+직전 출력의 꼬리를 프롬프트로 그 자리에 다시 그려(`rewindTail` 뒤) 한 줄을 읽는 부품. `read(cancelable, signal?, options?: { history?: false })`. `signal`은 꼬리 정리(flush) 대기 뒤 abort 여부를 다시 확인하는 데만 쓴다. `options.history === false`일 때만 벤더 `read()` 옵션에 `history: false`를 넣는다(실행창 `readInput`만 넘긴다. REPL `input()`은 생략해 기록한다). REPL 읽기(`repl-reader`, `>>> ` 합성)와 다르다.
 
 **선택 복사(`createSelectionCopy`)**:
 드래그 선택 시 자동 복사와 선택 중 Ctrl+C 복사(Shift 무관)를 처리하는 정책 객체. `Readline`보다 먼저 만든다(`06-editing.md` 6.6). 이 순서는 surface가 소유하므로 소비자가 직접 만들지 않는다.

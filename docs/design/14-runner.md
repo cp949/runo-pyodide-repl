@@ -195,7 +195,7 @@ type InputProvider = (
 - 입력은 `input()` 읽기가 열린 동안에만 받는다(한 줄 편집: 커서 이동·Backspace·Ctrl+U 등 벤더 동작, Enter로 제출). 읽기가 없는 구간(실행 중, 로딩 중, 결과 뒤 `ready`)에 들어온 문자·붙여넣기·IME 조합 결과·Shift+Enter는 버린다. 쌓았다가 다음 읽기에서 재생하지 않는다(REPL의 type-ahead `06-editing.md` 6.7과 반대, 편차 52).
 - 차단 기준은 "`input()` 대기 중인가"가 아니라 벤더의 `activeRead === undefined`다. `input()` 프롬프트를 그리는 `read()`도 write 콜백이 오기 전(수 ms)에는 활성 읽기가 아니라서 그 사이 친 키도 버려진다. 브라우저 자동화는 프롬프트가 화면에 그려진 뒤(입력줄이 보인 뒤)에 입력한다(`apps/demo/e2e/checks/runner-check.mjs`의 `waitPrompt`). REPL 하니스의 `typeWhenReading()`·`clear()`는 실행창에서 쓸 수 없다(첫 글자가 버려져 에코 대기가 시간 초과, `clear()`는 프롬프트 재그리기를 기다린다).
 - 붙여넣기·IME 덩어리 안의 Ctrl+C(다중 토큰)는 읽기가 없으면 핸들러 없이 버려진다. 단독 `\x03`(Ctrl+C)·단독 Ctrl+L만 읽기 밖에서도 즉시 처리한다(`isImmediateKey`).
-- history는 남기지 않는다. 벤더는 Enter마다 history에 append하고 건너뛰는 옵션이 없어(`persist: false`는 localStorage 저장만 끈다) 읽기 앞 `getHistory().entries.slice()`를 잡고 읽기 뒤(정상·취소·예외) `history.restore(snapshot)`로 되돌린다(`docs/traps/TRP-046`).
+- history는 남기지 않는다. 기본 provider가 입력 리더를 `inputReader.read(true, signal, { history: false })`로 부르고 리더가 벤더 `read()`에 `ReadOptions.history: false`를 넘겨 Enter 제출을 history에 넣지 않는다(`06-editing.md` 6.1). `persist: false`는 localStorage 저장만 끄므로 이것만으로는 막지 못한다(`docs/traps/TRP-046`). 2026-09-26 전에는 벤더에 건너뛰는 옵션이 없어 읽기 앞 `getHistory().entries.slice()`를 잡고 읽기 뒤(정상·취소·예외) `history.restore(snapshot)`로 되돌렸다. 차이: 옛 `restore`는 취소로 끝난 읽기에서도 탐색 커서를 처음으로 되돌렸고 새 경로는 Enter에서만 되돌린다 — 실행창 history는 항상 비어 있어(`persist: false`, 유일한 append 경로였던 Enter가 생략되고 `readline`을 밖에 내보내지 않는다) ↑가 커서를 옮기지 못하므로 관찰 가능한 차이는 없다(코드 읽기 근거).
 
 ### 14.5.3 Ctrl+C
 
@@ -209,7 +209,7 @@ type InputProvider = (
 
 `running` 중 Ctrl+C는 벤더 `setCtrlCHandler`(읽기 밖 Ctrl+C에만 불린다)가 처리하고 상태는 core `status`를 그 시점에 읽는다.
 
-읽기가 열린 채 `signal`이 abort되면(`stop()`·`reset()`·크래시·`interrupt()`) 기본 provider가 `readline.cancelRead()`로 열린 읽기를 끝내고(화면·history는 건드리지 않는다, `06-editing.md` 6.1; 배경 출력 재그리기 콜백 전이라 아직 그리지 않은 접두가 있으면 `readline.undrawnAbovePrefix()`를 그 앞에서 벤더 `write`로 남긴다, `05-output.md` 4.4) 입력줄 뒤에 `\r\n`을 쓴다(`dispose()` 중에는 화면에 쓰지 않는다). 그래야 이어질 `KeyboardInterrupt` 트레이스백이 입력줄에 붙지 않고, 다음 Enter가 죽은 읽기로 들어가지 않는다. 사유는 provider가 구분하지 못하므로 `reset()`·크래시 뒤에도 줄바꿈이 남고 다음 `run()`은 커서가 행 머리라 줄바꿈을 더하지 않는다.
+읽기가 열린 채 `signal`이 abort되면(`stop()`·`reset()`·크래시·`interrupt()`) 기본 provider가 `readline.cancelRead({ settle: !disposed })`로 열린 읽기를 끝낸다(history는 건드리지 않는다). settle이 화면을 정리한다(`06-editing.md` 6.1 상태표): 배경 출력 재그리기 콜백 전이라 아직 그리지 않은 접두가 있으면 접두를 자기 행으로 남기고(`05-output.md` 4.4), 그려진 읽기면 커서를 감긴 입력의 끝으로 옮겨 다시 그린 뒤 `\r\n`을 쓴다. settle이 `false`(읽기가 아직 그려지기 전)면 provider가 `sinks.write("\r\n")`을 쓴다. `dispose()` 중에는 settle하지 않고 화면에 쓰지 않는다. 그래야 이어질 `KeyboardInterrupt` 트레이스백이 입력줄에 붙거나 감긴 입력 위에 겹치지 않고(커서가 입력 중간 행에 있어도 입력 아래 행에서 시작한다), 다음 Enter가 죽은 읽기로 들어가지 않는다. RD-026까지는 provider가 `undrawnAbovePrefix()`를 취소 앞에서 벤더 `write`로 남기고 취소 뒤 `\r\n`을 직접 썼다 — 커서가 감긴 입력 중간이면 트레이스백이 입력 둘째 행에 겹쳤다. 사유는 provider가 구분하지 못하므로 `reset()`·크래시 뒤에도 줄바꿈이 남고 다음 `run()`은 커서가 행 머리라 줄바꿈을 더하지 않는다.
 
 ### 14.5.4 `run()` 시작 화면 규칙
 
@@ -223,7 +223,7 @@ type InputProvider = (
 
 ### 14.5.5 `dispose()`
 
-`disposed = true` 다음에 `io.close()`로 터미널 뷰의 게이트를 닫고, runner를 끝낸다(열린 읽기의 `signal`이 abort돼 `cancelRead()`가 돈다). 이어서 `surface.dispose()`가 선택 복사·줄 편집기를 뗀다(surface가 소유하는 순서는 이 둘뿐이고 서로 독립이다). runner를 먼저 끝내 화면을 나중에 떼는 순서(TRP-064)는 소비자가 소유한다. `Terminal`은 dispose하지 않는다. 두 번 불러도 안전하다. 리더에는 dispose 뒤 write 콜백을 전달하지 않는 터미널 뷰(`io.terminal`)를 준다(xterm은 `term.dispose()` 뒤에도 write 콜백을 돌린다, `docs/traps/TRP-004`).
+`disposed = true` 다음에 `io.close()`로 터미널 뷰의 게이트를 닫고, runner를 끝낸다(열린 읽기의 `signal`이 abort돼 settle 없는 `cancelRead()`가 돈다 — `disposed`가 이미 참이다). 이어서 `surface.dispose()`가 선택 복사·줄 편집기를 뗀다(surface가 소유하는 순서는 이 둘뿐이고 서로 독립이다). runner를 먼저 끝내 화면을 나중에 떼는 순서(TRP-064)는 소비자가 소유한다. `Terminal`은 dispose하지 않는다. 두 번 불러도 안전하다. 리더에는 dispose 뒤 write 콜백을 전달하지 않는 터미널 뷰(`io.terminal`)를 준다(xterm은 `term.dispose()` 뒤에도 write 콜백을 돌린다, `docs/traps/TRP-004`).
 
 ### 14.5.6 비격리
 

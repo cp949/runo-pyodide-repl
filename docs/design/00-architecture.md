@@ -82,10 +82,10 @@ main은 `readInput` 알림을 받으면 read-guard(활성 REPL 읽기 뒤로 미
 
 - 리셋(`ReplHandle.reset()`, RD-010)은 worker 교체다. 화면·history는 유지된다. 자동 들여쓰기 단위
   (`lastUsedIndentation`)는 세션 소유(`createAutoIndent`, RD-013 완료)라 별도 초기화 단계가 없다 — 새
-  세션을 만드는 자리에서 저절로 4칸으로 돌아간다. 순서: 벤더 `readline.cancelRead()`로 옛 세션의 열린
-  읽기를 화면·history를 건드리지 않고
-  끝낸다 → 인터럽트 송신기 취소 → RPC dispose → 이전 worker `terminate()`
-  → 커서가 행 머리가 아니면 개행 → 청록 안내 줄 → 새 worker + 새 초기화 프레임(`08-session.md` 8.1).
+  세션을 만드는 자리에서 저절로 4칸으로 돌아간다. 순서: 벤더 `readline.cancelRead({ settle: true })`로 옛 세션의 열린
+  읽기를 history를 건드리지 않고 끝내며 입력줄·아직 그리지 않은 접두를 화면에 확정한다
+  → 인터럽트 송신기 취소 → RPC dispose → 이전 worker `terminate()`
+  → settle이 행 머리를 보장하지 못했고(`false`) 커서가 행 머리가 아니면 개행 → 청록 안내 줄 → 새 worker + 새 초기화 프레임(`08-session.md` 8.1).
   interrupt buffer·송신기·메일박스·sink 세트는 worker마다 **새로** 만든다(REPL `startSession`·실행 driver `createRunner` 공통).
   옛 worker가 `terminate()` 뒤에도 Chromium에서 최대 약 2초 살아 같은 buffer의 눌림을 가로채기 때문이다(`14-runner.md` 14.3.5).
   옛 buffer에 남은 SIGINT는 새 worker가 보지 못하므로 리셋이 `SIGNAL`을 지우는 단계는 없다.

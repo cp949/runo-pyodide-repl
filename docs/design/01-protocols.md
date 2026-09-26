@@ -225,9 +225,10 @@ worker: run("exit()") → {exit:true} → ntf sessionTerminated → 루프 종�
 main : 안내 표시. 복구는 reset()
 
 (S7) 세션 리셋(RD-010, `08-session.md` 8.1)
-main : reset() 호출 → readline.cancelRead()(옛 활성 읽기를 ReadCancelledError로, 화면·history 불변)
+main : reset() 호출 → readline.cancelRead({ settle: true })(옛 활성 읽기를 ReadCancelledError로, history 불변,
+         화면은 입력·접두 아래 행 머리로 정리) → session.terminate()(훅: blockHistory.discard·tabReader.readEnded·cancelRead() 무동작)
        → session.endSession()(alive=false, interruptSender.cancel()) → rpc.dispose() → worker.terminate()
-       → (cursorX!==0이면 개행) → writeNotice(RESET_NOTICE, "info")
+       → (settle이 false이고 cursorX!==0이면 개행) → writeNotice(RESET_NOTICE, "info")
        → onStatus('loading') → 새 worker로 (S1)을 다시 탄다(새 interruptBuffer·송신기, 새 채널·메일박스·프레임)
 worker: (새 worker) init 수신부터 (S1)과 동일
 

@@ -105,14 +105,17 @@ REPL `input()` 읽기, 실행창 `input()` 읽기. `printAbove`·`printAboveRaw`
   - Enter·Ctrl+C 취소: 접두는 그 행(`tick>>> pri`)과 함께 화면에 남고 다음 읽기의 꼬리는 비어 있다(다음 프롬프트는 `>>> `, `tick>>> `
     중복 없음).
   - `takeRead()`(REPL `runSource`): 벤더가 접두째 지우므로 브리지가 `abovePrefix()`를 먼저 읽어 다시 쓴다(`02-console-core.md` 5.6.3).
-  - `cancelRead()`: 벤더는 화면을 건드리지 않는다(행이 그대로 남는다, `06-editing.md` 6.1). 배경 출력 재그리기 콜백 전(입력줄이 접두째
-    지워지고 아직 다시 그려지지 않은 창)에 오면 그 재그리기가 무효가 되어 입력줄도 아직 그리지 않은 접두도 화면에 없다(jsdom 재현:
-    `> abc` → `printAboveRaw("", "tick")` 콜백 전 `cancelRead()` → 화면 `""`). 그래서 재그리기 대기 중 접두는 `cancelRead()` **호출자가**
-    `Readline.undrawnAbovePrefix()`(재그리기 대기 중일 때만 접두를 돌려준다)로 읽어 취소 앞에 `prefix + "\x1b[0m"`으로 쓴다: `reset()`은
-    거기에 `\r\n`을 붙여 접두를 자기 행으로 확정하고, 실행창 abort는 뒤이은 기존 `\r\n`에 잇는다(열린 읽기가 남아 있는 취소 앞이라
-    `sinks.write`가 아니라 벤더 `write`로 직접 쓴다 — `sinks.write`는 `printAboveRaw` 경로로 가 다시 재그리기를 건다). 재그리기가 끝난
-    뒤 취소에는 접두가 이미 프롬프트 행에 그려져 있으므로 `undrawnAbovePrefix()`가 `""`라 다시 쓰지 않는다(`abovePrefix()`를 쓰면
-    `tick>>> pritick`으로 중복된다). `dispose()`·terminate(`repl-main-driver`)의 `cancelRead()`는 화면에 쓰지 않는 경로라 복원하지 않는다.
+  - `cancelRead()`: settle 없이 부르면 벤더는 화면을 건드리지 않는다(행이 그대로 남는다, `06-editing.md` 6.1). 배경 출력 재그리기 콜백
+    전(입력줄이 접두째 지워지고 아직 다시 그려지지 않은 창)에 오면 그 재그리기가 무효가 되어 입력줄도 아직 그리지 않은 접두도 화면에 없다
+    (jsdom 재현: `> abc` → `printAboveRaw("", "tick")` 콜백 전 `cancelRead()` → 화면 `""`). 그래서 화면에 남겨야 하는 취소(REPL
+    `reset()`·실행창 abort)는 `cancelRead({ settle: true })`를 부른다: 벤더가 재그리기 대기 중이면 아직 그리지 않은 접두를
+    `prefix + "\x1b[0m\r\n"`으로 자기 행에 확정하고(private `undrawnAbovePrefix()` — 재그리기 대기 중일 때만 접두), 그려진 읽기면 입력 끝
+    아래 행 머리로 옮긴다(`06-editing.md` 6.1 상태표). 재그리기가 끝난 뒤 취소에는 접두가 이미 프롬프트 행에 그려져 있으므로 다시 쓰지
+    않는다(`abovePrefix()`를 쓰면 `tick>>> pritick`으로 중복된다). `dispose()`·terminate(`repl-main-driver`)의 `cancelRead()`는 settle
+    없는 경로라 복원하지 않는다(REPL 리셋은 훅보다 먼저 settle 취소를 부르므로 훅의 호출은 무동작이다). RD-026에서는 호출자가
+    `undrawnAbovePrefix()`(당시 공개)를 취소 앞에서 읽어 `prefix + "\x1b[0m"`을 벤더 `write`로 썼다: `reset()`은 `\r\n`을 붙였고 실행창
+    abort는 뒤이은 기존 `\r\n`에 이었다(`sinks.write`는 `printAboveRaw` 경로로 가 다시 재그리기를 걸어 쓸 수 없었다). 2026-09-26 이
+    호출자 규칙을 벤더 settle로 옮겼다.
   - 미뤄진 stdin 읽기: 활성 REPL 읽기 중 배경 `input("bg> ")`의 `bg> `는 REPL 줄의 접두가 되므로, read-guard가 stdin 읽기를 미루는
     순간 그 접두를 꼬리로 옮겨 stdin 읽기의 프롬프트로 쓴다(`TerminalSinks.moveAbovePrefixToTail()`, `04-stdin-input.md` 3.2·3.3).
 - **Tab 후보 목록**: 접두가 있는 채 `printAbove`가 불리면 옛 입력행(`tick>>> pri`)이 목록 위에 남으므로 새 입력행은 접두 없이 그린다.

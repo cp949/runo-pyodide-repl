@@ -17,20 +17,27 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 별도 초기화 단계가 없다 — 4번이 새 세션을 만들 때 `startSession()`이 만드는 REPL main driver가 `createAutoIndent
 (readline)`을 다시 불러 새 객체(4칸)가 되기 때문이다:
 
-1. `session.terminate()` — 옛 세션을 끝낸다. core 세션(`terminate()`)의 순서는 `ended=true` → REPL main driver의
+1. `readline.cancelRead({ settle: true })` → `session.terminate()` — 열린 읽기를 끝내며 화면을 정리하고 옛 세션을 끝낸다. settle
+   호출은 `session.terminate()` **앞, 같은 동기 블록**이어야 한다: 훅 안 `cancelRead()`가 먼저 돌면 settle할 읽기가 남지 않아 조용히
+   `false`가 된다(`06-editing.md` 6.1). 훅의 블록 history 폐기 조건 `reading`은 read promise가 마이크로태스크에서 settle될 때 내려가므로
+   같은 동기 블록의 훅에서는 아직 참이고, Tab 대기열 정리도 그대로 된다(시험: `index.test.ts` "리셋은 입력을 기다리던 블록을 history에서
+   버린다"·"리셋(terminate()) 중 큐에 남은 Tab이 터미널에 쓰지 않는다(DELTA-04a)", 순서는 "reset은 cancelRead → rpc dispose(port.close) →
+   …"가 첫 호출 인자 `{ settle: true }`로 고정). core 세션(`terminate()`)의 순서는 `ended=true` → REPL main driver의
    `terminate` 훅 → `endSession()`(`alive=false`, `interruptSender.cancel()`) → worker `error` 리스너 제거 →
    `rpc.dispose()` → `worker.terminate()`다(`rpc.dispose()`가 `worker.terminate()`보다 앞이어야 한다). 훅의 순서는
    (REPL 읽기가 열려 있으면 `blockHistory.discard()`로 대기 중 블록 history를 첫 줄까지 버린다 →, RD-014 완료·
    `06-editing.md` 6.4) `tabReader.readEnded(null)`(`ended=true`·큐 비움을 동기로 확정 — 뒤이은 `rpc.dispose()`의
    `complete` 요청 reject가 취소된 세션의 버퍼·커서로 큐를 다시 처리하는 것을 막는다, RD-015 DELTA-04a) →
-   `readline.cancelRead()`(열린 읽기를 `ReadCancelledError`로 끝낸다. 화면·history·리스너·`term`은 건드리지
-   않는다, `06-editing.md` 6.1)다. 배경 출력 재그리기 콜백 전이라 아직 그리지 않은 접두가 있으면(`readline.undrawnAbovePrefix()`)
-   `cancelRead()` 앞에서 `접두 + "\x1b[0m\r\n"`을 써 자기 행으로 남긴다(`05-output.md` 4.4).
-2. 커서 행 처리: `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다
-   (TRP-006). 개행 여부는 **코어**가 결정한다 — 벤더 `cancelRead()`는 화면에 아무것도 그리지 않는다.
-   단 1에서 접두를 썼으면 이 검사를 건너뛴다: 접두 끝이 `\r\n`이라 이미 행 머리인데, `buffer.active`는 해석이 끝난
-   바이트까지만 반영하고 재그리기 콜백 전이라는 것은 앞선 `state.erase()`조차 해석 전이라는 뜻이라 `cursorX`가
-   옛 입력줄 끝(0이 아님)으로 읽혀 빈 행이 하나 더 난다(RD-026 사후 리뷰).
+   `readline.cancelRead()`(settle 없음 — 화면·history·리스너·`term`은 건드리지 않는다, `06-editing.md` 6.1)다. REPL 리셋에서는 앞의
+   settle 취소가 이미 읽기를 끝냈으므로 이 호출은 무동작이다(type-ahead·`queued`도 이미 비었다). settle은 취소 시점 상태에 따라 화면을
+   정리한다(`06-editing.md` 6.1 상태표): 배경 출력 재그리기 콜백 전이라 아직 그리지 않은 접두가 있으면 `접두 + "\x1b[0m\r\n"`을 써 자기
+   행으로 남기고(`05-output.md` 4.4), 그려진 읽기면 커서를 감긴 입력의 끝으로 옮겨 다시 그린 뒤 `\r\n`을 쓴다. RD-026까지는 이 접두
+   재출력을 `reset()`이 `undrawnAbovePrefix()`로 직접 했고 커서가 감긴 입력 중간이면 뒤 안내 줄이 입력 둘째 행을 덮었다.
+2. 커서 행 처리: settle이 `false`(열린 읽기 없음·write 콜백 전 읽기 — 행 머리 여부를 벤더가 모른다)이고
+   `terminal.buffer.active.cursorX !== 0`이면 `readline.write("\r\n")`을 먼저 쓴다(TRP-006). 이 대체 개행 여부는 **코어**가 결정한다.
+   settle이 `true`면 벤더가 행 머리를 보장했으므로 이 검사를 건너뛴다: `buffer.active`는 해석이 끝난 바이트까지만 반영하고 재그리기
+   콜백 전이라는 것은 앞선 `state.erase()`조차 해석 전이라는 뜻이라 `cursorX`가 옛 입력줄 끝(0이 아님)으로 읽혀 빈 행이 하나 더 난다
+   (RD-026 사후 리뷰 — 당시에는 "1에서 접두를 썼으면 건너뛴다"였다).
 3. `writeNotice(readline, RESET_NOTICE, "info")` — 청록 안내 줄
    `[세션 리셋됨 — 이전 변수/import가 모두 초기화되었습니다]`. 세션 밖 출력 경로(TRAP-12의 유일한 예외,
    `05-output.md` 4.1).
@@ -48,7 +55,7 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 거부하고 복구는 다시 `reset()`이다. 소비자가 `onCrash` 안에서 동기로 `reset()`을 부르면 생성이 계속 실패할 때 재귀한다 —
 데모(`ReplView`)는 `onCrash`에서 메시지만 저장하고 재시작은 버튼으로 한다. `crashed` 콜백 안에서 `reset()`을 부르면
 그 리셋의 `loading`이 먼저 나가고 실패한 생성의 `onCrash`는 그 뒤에 온다(runner와 같다, `14-runner.md` "상태 콜백 재진입"). 세션이 없는 채로
-다음 `reset()`이 오면 1번 대신 `readline.cancelRead()`만 불러 `crashed` 동안 쌓인 type-ahead 키를 버린다. worker를 만든 뒤
+다음 `reset()`이 오면 1번의 `session.terminate()` 없이 `readline.cancelRead({ settle: true })`만 불러 `crashed` 동안 쌓인 type-ahead 키를 버린다(열린 읽기가 없어 화면에는 쓰지 않고 `false` — 2번 대체 개행 규칙을 탄다). worker를 만든 뒤
 프레임 전송이 던지면 core 세션(`startCoreSession`)이 그 worker의 `error` 리스너를 떼고 `rpc.dispose()`·`worker.terminate()`로
 정리한 뒤 던진다(남은 worker의 뒤늦은 `error`가 다음 세션을 `crashed`로 바꾸지 않게) — REPL은 이것도 같은 `crashed` 경로로 받는다.
 화면에는 이미 `RESET_NOTICE`가 찍혀 있다(4번이 5번보다 앞이다). 이 계약은 이슈 08(2026-09-24)에서 바꿨다.
@@ -68,8 +75,8 @@ core `session/core-session.ts`)이 worker·`MessageChannel`·메일박스·초�
 소유한다.
 
 화면·history는 유지된다: `Readline`이 핸들 소유라 벤더 `History`(`persist: false`, 메모리만)가 세션을
-넘어 산다. 리셋 시 미제출 입력·대기 읽기·쌓인 type-ahead 키(`06-editing.md` 6.7)는 버린다(history 미기록, 화면에는 남긴다) — `cancelRead()`가
-벤더 읽기를 화면·history를 건드리지 않고 끝내기 때문이다.
+넘어 산다. 리셋 시 미제출 입력·대기 읽기·쌓인 type-ahead 키(`06-editing.md` 6.7)는 버린다(history 미기록, 화면에는 남긴다) — `cancelRead({ settle: true })`가
+벤더 읽기를 history를 건드리지 않고 끝내며 입력줄을 화면에 확정하기 때문이다.
 
 옛 세션의 열린 읽기: `cancelRead()`로 `ReadCancelledError`가 되면 REPL main driver의 `readLine` 핸들러와 core 세션의
 `readInput` 처리(판정은 driver의 `isReadCancelled`)가 응답 없이 조용히 끝낸다(영영 안 풀리는 Promise를 돌려줘 RPC가 응답을 보내지 않는다) — 옛
