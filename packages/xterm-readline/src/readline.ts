@@ -525,12 +525,11 @@ export class Readline implements ITerminalAddon {
 
   /**
    * `abovePrefix()` 중 아직 화면에 그리지 않은 것. 재그리기(`printAboveRaw`)의 write 콜백을 기다리는 동안에만 접두가 있으면
-   * 접두를 돌려주고(입력줄이 접두째 지워진 상태), 그 밖에는 `""`다. `settle` 없는 `cancelRead()`는 화면에 쓰지 않으므로 콜백 전에
-   * 취소하면 이 접두가 사라진다 — 그 경우 취소 직전에 이 값을 읽어 다시 쓰는 것은 호출자 몫이다(`cancelRead({ settle: true })`는
-   * 이 값을 스스로 다시 쓴다). 재그리기가 끝난 뒤의 접두는 이미 프롬프트 행에
-   * 그려져 있으므로 이 값이 `""`이고, 다시 쓰면 중복된다.
+   * 접두를 돌려주고(입력줄이 접두째 지워진 상태), 그 밖에는 `""`다. `cancelRead({ settle: true })`(`settleScreen()`)가 취소 전에
+   * 이 값을 자기 행으로 다시 쓴다. 재그리기가 끝난 뒤의 접두는 이미 프롬프트 행에 그려져 있으므로 이 값이 `""`이고, 다시 쓰면
+   * 중복된다. `settle` 없는 `cancelRead()`는 화면에 쓰지 않으므로 콜백 전에 취소하면 이 접두가 사라진다.
    */
-  public undrawnAbovePrefix(): string {
+  private undrawnAbovePrefix(): string {
     return this.redrawing ? this.abovePrefix() : "";
   }
 

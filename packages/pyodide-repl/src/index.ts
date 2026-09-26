@@ -189,21 +189,20 @@ export function createRepl(options: ReplOptions): ReplHandle {
       const run = slot.waiting ? undefined : slot.take();
       // `finally`: 정리 중 무엇이 던져도 슬롯에서 뗀 실행은 끝낸다. 옛 worker는 이미 교체됐으므로 `restarted`다.
       try {
-        // 옛 세션의 열린 읽기를 cancelRead()로 끝내고 자원을 정리한다: cancelRead → endSession(송신기 취소) →
-        // rpc.dispose() → worker.terminate()(session.terminate()). 앞 리셋의 worker 생성이 실패해 세션이 없으면 쌓인 type-ahead만
-        // 버린다(`cancelRead()`, 08-session.md 8.1).
-        // 재그리기 콜백 전이면 아직 그리지 않은 배경 출력 접두가 `cancelRead()`(화면 미기록)와 함께 사라진다. 먼저 자기 행으로 남기고
-        // 개행을 붙인다(안내 줄이 같은 행에 붙지 않게).
-        const undrawn = readline.undrawnAbovePrefix();
-        if (undrawn !== "") readline.write(undrawn + "\x1b[0m\r\n");
+        // 열린 읽기를 끝내고 화면을 정리한다: 아직 그리지 않은 접두를 자기 행으로 남기거나 감긴 입력의 끝 아래 행 머리로
+        // 커서를 옮긴다(벤더 settle, 06-editing.md). `session.terminate()` 앞, 같은 동기 블록이어야 한다 — 훅 안
+        // `cancelRead()`가 먼저 돌면 settle할 읽기가 남지 않는다. 훅의 `reading`(블록 history 폐기)·Tab 정리는 read
+        // promise가 마이크로태스크에서 settle되므로 이 블록 안에서는 영향이 없다. 세션이 없어도(앞 리셋의 worker 생성 실패)
+        // 이 호출이 쌓인 type-ahead를 버린다(08-session.md 8.1).
+        const settled = readline.cancelRead({ settle: true });
+        // 옛 세션 자원 정리: 훅(블록 history·tabReader·`cancelRead()`, 여기서는 무동작) → endSession → rpc.dispose() →
+        // worker.terminate().
         if (session !== undefined) session.terminate();
-        else readline.cancelRead();
         // 새 worker 생성이 실패해도 끝난 옛 세션을 가리키지 않게 한다(runner `restart()`와 같다).
         session = undefined;
-        // 커서가 행 머리가 아니면 개행 뒤에, 행 머리면 바로 안내 줄을 그린다(TRP-006). 접두를 썼으면 그 끝이 `\r\n`이라
-        // 이미 행 머리다 — `buffer.active`는 해석이 끝난 바이트까지만 반영하는데 재그리기 콜백 전이라는 것은 앞선
-        // `state.erase()`조차 아직 해석되지 않았다는 뜻이라, 여기서 읽는 `cursorX`는 옛 입력줄 끝(0이 아님)일 수 있다.
-        if (undrawn === "" && options.terminal.buffer.active.cursorX !== 0)
+        // 읽기가 없었거나 그려지기 전이면 커서가 행 머리가 아닐 수 있다(TRP-006). settle이 행 머리를 보장했으면 `cursorX`를
+        // 읽지 않는다(재그리기 콜백 전 `buffer.active`는 옛 입력줄 끝을 가리킬 수 있다).
+        if (!settled && options.terminal.buffer.active.cursorX !== 0)
           readline.write("\r\n");
         writeNotice(readline, RESET_NOTICE, "info");
         try {

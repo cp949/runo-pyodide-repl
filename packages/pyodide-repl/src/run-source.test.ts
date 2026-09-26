@@ -1418,6 +1418,56 @@ describe("재그리기 대기 중 reset()의 접두 복원(이슈 13)", () => {
   });
 });
 
+// 커서가 감긴 입력 중간에 있을 때 reset()하면 커서 행 기준 개행만으로는 안내 줄이 입력의 다음 행을 덮는다.
+// 벤더 `cancelRead({ settle: true })`가 커서를 입력 끝으로 옮기고 개행한 뒤에 안내 줄을 쓴다.
+describe("감긴 입력 중간 커서에서 reset()", () => {
+  const THIRTY = "abcdefghijklmnopqrstuvwxyz0123";
+  const HOME = "\x1b[H";
+
+  /** 열 20 화면의 `>>> ` 읽기에 30자를 쳐 두 행으로 감긴 입력을 만든다. */
+  const openWrappedPrompt = async () => {
+    const session = startSession({ asyncWrite: true, cols: 20 });
+    await openPrompt(session, THIRTY);
+    await session.pump();
+    expect(session.vt.lines()).toEqual([
+      ">>> abcdefghijklmnop",
+      "qrstuvwxyz0123",
+    ]);
+    return session;
+  };
+
+  test("커서가 첫 행에 있어도 입력 두 행이 온전히 남고 안내 줄은 그 아래 행에 나온다", async () => {
+    const session = await openWrappedPrompt();
+    session.fake.type(HOME);
+    await session.pump();
+    expect(session.vt.cursor()[0]).toBe(0);
+
+    session.handle.reset();
+    await session.pump();
+
+    const lines = session.vt.lines();
+    expect(lines.slice(0, 2)).toEqual([
+      ">>> abcdefghijklmnop",
+      "qrstuvwxyz0123",
+    ]);
+    expect(lines[2]).toContain("세션 리셋됨");
+  });
+
+  test("대조: 커서가 입력 끝이면 입력 두 행 아래에 안내 줄이 나온다", async () => {
+    const session = await openWrappedPrompt();
+
+    session.handle.reset();
+    await session.pump();
+
+    const lines = session.vt.lines();
+    expect(lines.slice(0, 2)).toEqual([
+      ">>> abcdefghijklmnop",
+      "qrstuvwxyz0123",
+    ]);
+    expect(lines[2]).toContain("세션 리셋됨");
+  });
+});
+
 describe("열린 읽기 위 배경 출력(write 콜백 순서 경계)", () => {
   test("재그리기 콜백 전에 runSource하면 아직 그리지 않은 접두 tick을 행으로 남기고 출력 뒤 >>> pri를 복원한다", async () => {
     const session = startSession({ asyncWrite: true });

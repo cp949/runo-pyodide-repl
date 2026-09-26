@@ -1137,38 +1137,43 @@ describe("hasQueuedInput(결함 16)", () => {
   });
 });
 
-describe("undrawnAbovePrefix(이슈 13)", () => {
-  test("재그리기 콜백을 기다리는 동안은 아직 그리지 않은 접두를 돌려주고 콜백 뒤에는 빈 문자열이다", () => {
+// 이슈 13: 재그리기 콜백 전에 취소하면 아직 그리지 않은 접두가 사라질 수 있다. 미그림 접두 판정은 private이라
+// `cancelRead({ settle: true })`의 공개 동작(쓰는 바이트·화면)으로 본다. 콜백 전 접두 재출력은 `cancel-settle.test.ts`가 맡는다.
+describe("아직 그리지 않은 접두와 settle 취소(이슈 13)", () => {
+  test("콜백 전에는 접두가 화면에 없고, 콜백 뒤 settle 취소는 이미 그린 접두를 다시 쓰지 않는다", () => {
     const { term, readline } = setup();
-    void readline.read("> ");
+    void readline.read("> ").catch(() => {});
     term.type("abc");
     term.asyncWrite = true;
     void readline.printAboveRaw("", "tick");
-
-    expect(readline.undrawnAbovePrefix()).toBe("tick");
     expect(term.vt.screen()).not.toContain("tick");
 
     term.flush();
-    // 접두는 프롬프트 행에 그려졌다. 다시 쓰면 중복이므로 미그림 접두는 비어 있다(`abovePrefix()`는 그대로).
+    // 접두는 프롬프트 행에 그려졌다(`abovePrefix()`는 그대로). 취소가 접두를 자기 행으로 다시 쓰면 중복된다.
     expect(term.vt.screen()).toContain("tick> abc");
     expect(readline.abovePrefix()).toBe("tick");
-    expect(readline.undrawnAbovePrefix()).toBe("");
+
+    expect(readline.cancelRead({ settle: true })).toBe(true);
+    readline.write("Traceback");
+    expect(term.vt.screen()).toBe("tick> abc\nTraceback");
   });
 
-  test("접두 없는 재그리기 대기·열린 읽기 없음·재그리기 밖에서는 빈 문자열이다", () => {
+  test("접두 없는 재그리기 대기·열린 읽기 없음에서 settle 취소는 아무것도 쓰지 않는다", () => {
     const { term, readline } = setup();
-    expect(readline.undrawnAbovePrefix()).toBe("");
+    const idle = term.bytes();
+    expect(readline.cancelRead({ settle: true })).toBe(false);
+    expect(term.bytes()).toBe(idle);
 
-    void readline.read("> ");
+    void readline.read("> ").catch(() => {});
     term.type("abc");
-    expect(readline.undrawnAbovePrefix()).toBe("");
-
     term.asyncWrite = true;
     void readline.printAboveRaw("t\n", "");
-    expect(readline.undrawnAbovePrefix()).toBe("");
+    const waiting = term.bytes();
+    expect(readline.cancelRead({ settle: true })).toBe(true);
+    expect(term.bytes()).toBe(waiting);
   });
 
-  test("재그리기 대기 중 cancelRead()는 화면에 쓰지 않고 이후 미그림 접두도 비어 있다", () => {
+  test("재그리기 대기 중 cancelRead()는 화면에 쓰지 않고 이후 settle 취소도 접두를 쓰지 않는다", () => {
     const { term, readline } = setup();
     void readline.read("> ").catch(() => {});
     term.type("abc");
@@ -1180,6 +1185,7 @@ describe("undrawnAbovePrefix(이슈 13)", () => {
     term.flush();
 
     expect(term.bytes()).toBe(before);
-    expect(readline.undrawnAbovePrefix()).toBe("");
+    expect(readline.cancelRead({ settle: true })).toBe(false);
+    expect(term.bytes()).toBe(before);
   });
 });

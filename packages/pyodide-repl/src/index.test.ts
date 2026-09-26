@@ -1626,7 +1626,10 @@ describe("reset()(RD-010)", () => {
       ack: 0,
       seq: 0,
     });
-    expect(cancelReadSpy).toHaveBeenCalledTimes(1);
+    // reset()의 settle 호출이 먼저, core 세션 terminate 훅의 호출(열린 읽기가 이미 끝나 무동작)이 뒤다.
+    expect(cancelReadSpy).toHaveBeenCalledTimes(2);
+    expect(cancelReadSpy.mock.calls[0]).toEqual([{ settle: true }]);
+    expect(cancelReadSpy.mock.calls[1]).toEqual([]);
     expect(closeSpy).toHaveBeenCalledTimes(1);
     expect(must(cancelReadSpy.mock.invocationCallOrder[0])).toBeLessThan(
       must(closeSpy.mock.invocationCallOrder[0]),

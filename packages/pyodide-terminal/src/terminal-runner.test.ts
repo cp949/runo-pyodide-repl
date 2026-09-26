@@ -637,7 +637,10 @@ describe("입력 읽기의 signal abort", () => {
     controller.abort();
 
     await expect(result).resolves.toBeNull();
-    expect(fake.written.slice(before)).toEqual(["\r\n"]);
+    // 벤더 settle은 입력줄을 강조 없이 다시 그린 뒤 개행한다(재그리기 조각은 단언하지 않는다).
+    const after = fake.written.slice(before);
+    expect(after.filter((text) => text === "\r\n")).toHaveLength(1);
+    expect(after.at(-1)).toBe("\r\n");
   });
 
   // 이슈 13: 재그리기 콜백 전 abort하면 벤더가 화면에 아무것도 쓰지 않아 아직 그리지 않은 접두가 사라진다. 호출자가 복원한다.
@@ -691,6 +694,97 @@ describe("입력 읽기의 signal abort", () => {
 
       expect(vt.lines()).toEqual(["tickx: ab", "Traceback"]);
       core.finishRun();
+    });
+  });
+
+  // 커서가 감긴 입력의 중간 행에 있을 때 abort하면 뒤 출력이 입력 마지막 행 위에 겹치던 결함(readline-read-end DELTA-03).
+  describe("abort 뒤 출력 위치: 벤더 settle·그리기 전 대체 개행", () => {
+    const THIRTY = "abcdefghijklmnopqrstuvwxyz0123";
+    const HOME = "\x1b[H";
+
+    /** 열 20 화면에서 `x: ` 읽기에 30자를 쳐 두 행으로 감긴 입력을 만든다. */
+    const openWrappedInput = async () => {
+      const fake = createFakeTerminal({ asyncWrite: true, cols: 20, rows: 10 });
+      const vt = new VtScreen(20, 10);
+      attachVtScreen(fake, vt);
+      const context = setup({ fake });
+      void context.handle.run("code");
+      context.core.output({ stream: "stdout", text: "x: " });
+      const request = context.core.requestInput("x: ");
+      for (let round = 0; round < 3; round += 1) {
+        await tick();
+        fake.flush();
+      }
+      fake.type(THIRTY);
+      fake.flush();
+      expect(vt.lines()).toEqual(["x: abcdefghijklmnopq", "rstuvwxyz0123"]);
+      return { ...context, vt, request };
+    };
+
+    /** stop으로 읽기를 끊고 트레이스백 한 줄을 낸 뒤 화면을 배출한다. */
+    const stopAndPrintTraceback = async (
+      context: Awaited<ReturnType<typeof openWrappedInput>>,
+    ) => {
+      await context.handle.stop();
+      await expect(context.request.result).resolves.toBeNull();
+      context.core.output({ stream: "stderr", text: "Traceback\n" });
+      for (let round = 0; round < 3; round += 1) {
+        context.fake.flush();
+        await tick();
+      }
+    };
+
+    test("커서가 첫 행에 있어도 입력 두 행이 온전히 남고 트레이스백은 그 아래 행에 쓰인다", async () => {
+      const context = await openWrappedInput();
+      context.fake.type(HOME);
+      context.fake.flush();
+      expect(context.vt.cursor()[0]).toBe(0);
+
+      await stopAndPrintTraceback(context);
+
+      expect(context.vt.lines()).toEqual([
+        "x: abcdefghijklmnopq",
+        "rstuvwxyz0123",
+        "Traceback",
+      ]);
+      context.core.finishRun();
+    });
+
+    test("읽기가 그려지기 전(write 콜백 대기) abort면 꼬리 뒤에 개행해 트레이스백이 꼬리 행에 붙지 않는다", async () => {
+      const fake = createFakeTerminal({ asyncWrite: true });
+      const vt = new VtScreen(80, 24);
+      attachVtScreen(fake, vt);
+      const { core, handle } = setup({ fake });
+      void handle.run("code");
+      core.output({ stream: "stdout", text: "x: " });
+      const request = core.requestInput("x: ");
+      // 짧은 꼬리는 flush를 기다리지 않으므로 몇 틱 뒤 읽기는 write 콜백만 기다린다(배출하지 않는다).
+      await tick();
+      await tick();
+
+      await handle.stop();
+      await expect(request.result).resolves.toBeNull();
+      core.output({ stream: "stderr", text: "Traceback\n" });
+      for (let round = 0; round < 3; round += 1) {
+        fake.flush();
+        await tick();
+      }
+
+      expect(vt.lines()).toEqual(["x:", "Traceback"]);
+      core.finishRun();
+    });
+
+    test("대조: 커서가 입력 끝이면 입력 두 행 아래에 트레이스백이 쓰인다", async () => {
+      const context = await openWrappedInput();
+
+      await stopAndPrintTraceback(context);
+
+      expect(context.vt.lines()).toEqual([
+        "x: abcdefghijklmnopq",
+        "rstuvwxyz0123",
+        "Traceback",
+      ]);
+      context.core.finishRun();
     });
   });
 
